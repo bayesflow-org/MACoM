@@ -1,0 +1,26 @@
+[project]
+name = "CogFormer"
+version = "0.1.0"
+description = "Learn All Your Models Once"
+authors = [
+    { name = "Jerry M. Huang", email = "aca.jerryh@gmail.com" },
+    { name = "Lukas Schumacher", email = "lu.schumacher@unibas.ch" },
+    { name = "Niek Stevenson", email = "niek.stevenson@gmail.com" },
+    { name = "Stefan T. Radev", email = "stefanradev93@gmail.com" }
+]
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "bayesflow>=2.0.8",
+    "jupyter>=1.1.1",
+    "notebook>=7.4.1",
+    "torch>=2.10.0",
+    "numba>=0.64.0"
+]
+
+#[project.optional-dependencies]
+#dev = [
+#    "jupyterlab>=4.4.1",
+#    "pre-commit>=4.2.0",
+#    "ruff>=0.11.7",
+#]
