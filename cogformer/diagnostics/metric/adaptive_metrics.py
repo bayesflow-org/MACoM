@@ -2,7 +2,7 @@ import numpy as np
 import pandas as pd
 from scipy.stats import binom
 
-from bayesgpt.simulators.context_manager import ContextManager
+from cogformer.simulator.context_manager import ContextManager
 
 
 # ---------------------------------------------------------------------------

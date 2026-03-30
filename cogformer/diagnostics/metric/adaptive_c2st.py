@@ -3,7 +3,7 @@ import pandas as pd
 from sklearn.model_selection import StratifiedKFold
 from sklearn.neural_network import MLPClassifier
 
-from bayesgpt.simulators.context_manager import ContextManager
+from cogformer.simulator.context_manager import ContextManager
 
 
 def compute_c2st_accuracy(

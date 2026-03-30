@@ -1,7 +1,7 @@
 import numpy as np
 from numba import njit, prange
 
-from cogformer.simulators import Model
+from cogformer.simulator import Model
 from cogformer.utils.simulator_utils import as_1d
 
 @njit

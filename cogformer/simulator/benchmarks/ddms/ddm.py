@@ -4,7 +4,7 @@ from scipy.stats import halfnorm
 
 from .ddm_priors import ddm_priors
 
-from cogformer.simulators import Model
+from cogformer.simulator import Model
 
 
 @njit
