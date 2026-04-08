@@ -4,8 +4,8 @@ import torch.nn.functional as F
 
 from tqdm.auto import tqdm
 
-from networks.transformers.encoder import Encoder
-from networks.transformers.decoder import Decoder
+from cogformer.networks.transformers.encoder import Encoder
+from cogformer.networks.transformers.decoder import Decoder
 
 
 class CogFormer(nn.Module):

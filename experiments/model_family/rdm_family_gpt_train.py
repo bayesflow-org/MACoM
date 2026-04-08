@@ -12,12 +12,12 @@ import numpy as np
 import matplotlib.pyplot as plt
 np.set_printoptions(suppress=True)
 
-from cogformer.simulators import ModelFamily
-from cogformer.simulators.benchmarks.rdms.rdm import RDM
-from cogformer.simulators.benchmarks.rdms.rdm_priors import rdm_priors
-from cogformer.simulators.benchmarks.rdms.rdm_link_fun import rdm_link_fun
-from cogformer.adapters import Adapter
-from cogformer.networks.transformers.gpt.cogformer import CogFormer
+from cogformer.simulator import ModelFamily
+from cogformer.simulator.benchmarks.rdms.rdm import RDM
+from cogformer.simulator.benchmarks.rdms.rdm_priors import rdm_priors
+from cogformer.simulator.benchmarks.rdms.rdm_link_fun import rdm_link_fun
+from cogformer.adapter import Adapter
+from cogformer.networks.transformers.cogformer import CogFormer
 from cogformer.diagnostics.plot.adaptive_recovery import adaptive_recovery
 from cogformer.diagnostics.plot.adaptive_posterior import adaptive_posterior
 from cogformer.diagnostics.plot.adaptive_coverage import adaptive_coverage

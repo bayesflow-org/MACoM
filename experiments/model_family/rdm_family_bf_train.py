@@ -4,10 +4,10 @@ os.environ["KERAS_BACKEND"] = "jax"
 import numpy as np
 import bayesflow as bf
 
-from cogformer.simulators.model_family import ModelFamily
-from cogformer.simulators.benchmarks.rdms.rdm import RDM
-from cogformer.simulators.benchmarks.rdms.rdm_priors import rdm_priors
-from cogformer.simulators.benchmarks.rdms.rdm_link_fun import rdm_link_fun
+from cogformer.simulator.model_family import ModelFamily
+from cogformer.simulator.benchmarks.rdms.rdm import RDM
+from cogformer.simulator.benchmarks.rdms.rdm_priors import rdm_priors
+from cogformer.simulator.benchmarks.rdms.rdm_link_fun import rdm_link_fun
 
 
 CASE_CONFIGS = {

@@ -36,9 +36,9 @@ import torch
 import matplotlib.pyplot as plt
 import seaborn as sns
 
-from cogformer.adapters import Adapter
-from cogformer.networks.transformers.gpt.cogformer import CogFormer
-from cogformer.simulators.context_manager import ContextManager
+from cogformer.adapter import Adapter
+from cogformer.networks.transformers.cogformer import CogFormer
+from cogformer.simulator.context_manager import ContextManager
 from cogformer.diagnostics.plot.adaptive_posterior import adaptive_posterior
 from cogformer.utils.plot_utils import cogformer_fm_colors, credible_interval
 

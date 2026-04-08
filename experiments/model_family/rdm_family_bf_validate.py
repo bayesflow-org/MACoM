@@ -10,10 +10,10 @@ import matplotlib.pyplot as plt
 
 from pathlib import Path
 
-from cogformer.simulators.model_family import ModelFamily
-from cogformer.simulators.benchmarks.rdms.rdm import RDM
-from cogformer.simulators.benchmarks.rdms.rdm_priors import rdm_priors
-from cogformer.simulators.benchmarks.rdms.rdm_link_fun import rdm_link_fun
+from cogformer.simulator.model_family import ModelFamily
+from cogformer.simulator.benchmarks.rdms.rdm import RDM
+from cogformer.simulator.benchmarks.rdms.rdm_priors import rdm_priors
+from cogformer.simulator.benchmarks.rdms.rdm_link_fun import rdm_link_fun
 from cogformer.diagnostics.plot.adaptive_recovery import adaptive_recovery
 from cogformer.diagnostics.plot.adaptive_coverage import adaptive_coverage
 from cogformer.diagnostics.plot.adaptive_ecdf import adaptive_ecdf

@@ -6,13 +6,13 @@ import numpy as np
 import torch
 import matplotlib.pyplot as plt
 
-from cogformer.simulators import ModelFamily
-from cogformer.simulators.benchmarks.cdms.cdm import CDM
-from cogformer.simulators.benchmarks.cdms.cdm_priors import cdm_priors
-from cogformer.simulators.benchmarks.cdms.cdm_link_fun import cdm_link_fun
-from cogformer.simulators.context_manager import ContextManager
-from cogformer.adapters import Adapter
-from cogformer.networks.transformers.gpt.cogformer import CogFormer
+from cogformer.simulator import ModelFamily
+from cogformer.simulator.benchmarks.cdms.cdm import CDM
+from cogformer.simulator.benchmarks.cdms.cdm_priors import cdm_priors
+from cogformer.simulator.benchmarks.cdms.cdm_link_fun import cdm_link_fun
+from cogformer.simulator.context_manager import ContextManager
+from cogformer.adapter import Adapter
+from cogformer.networks.transformers.cogformer import CogFormer
 from cogformer.diagnostics.plot.ensemble_metrics import ensemble_metrics
 
 

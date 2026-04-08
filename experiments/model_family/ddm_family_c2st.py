@@ -6,10 +6,10 @@ import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
 
-from bayesgpt.diagnostics.metric.adaptive_c2st import adaptive_c2st as compute_adaptive_c2st
-from bayesgpt.diagnostics.metric.adaptive_c2st import compute_joint_c2st
-from bayesgpt.diagnostics.plot.adaptive_c2st import adaptive_c2st as plot_adaptive_c2st
-from bayesgpt.utils.plot_utils import bayesgpt_fm_colors
+from cogformer.diagnostics.metric.adaptive_c2st import adaptive_c2st as compute_adaptive_c2st
+from cogformer.diagnostics.metric.adaptive_c2st import compute_joint_c2st
+# from cogformer.diagnostics.plot.adaptive_c2st import adaptive_c2st as plot_adaptive_c2st
+from cogformer.utils.plot_utils import cogformer_fm_colors
 
 
 CASES = ["intercept_only", "regressed", "fixed", "fixed_regressed", "interaction"]
@@ -69,16 +69,16 @@ def run_comparison(pred_a, pred_b, design_config, intrinsic_params, variable_nam
     )
     mean_accuracy = float(c2st_df["C2ST Accuracy"].mean())
 
-    fig = plot_adaptive_c2st(
-        pred_a=pred_a, pred_b=pred_b, design_config=design_config,
-        intrinsic_params=intrinsic_params, max_num_categories=max_num_categories,
-        parameter_mask=params_mask, variable_names=variable_names,
-        intercept_color=colors["intercept"], main_effect_color=colors["main_effect"],
-        interaction_color=colors["interaction"],
-        global_accuracy=mean_accuracy, joint_score=joint_score,
-    )
-    fig.savefig(outdir / f"{file_prefix}_c2st.pdf", bbox_inches="tight")
-    plt.close(fig)
+    # fig = plot_adaptive_c2st(
+    #     pred_a=pred_a, pred_b=pred_b, design_config=design_config,
+    #     intrinsic_params=intrinsic_params, max_num_categories=max_num_categories,
+    #     parameter_mask=params_mask, variable_names=variable_names,
+    #     intercept_color=colors["intercept"], main_effect_color=colors["main_effect"],
+    #     interaction_color=colors["interaction"],
+    #     global_accuracy=mean_accuracy, joint_score=joint_score,
+    # )
+    # fig.savefig(outdir / f"{file_prefix}_c2st.pdf", bbox_inches="tight")
+    # plt.close(fig)
 
     c2st_df.loc["_mean_accuracy_"] = {"C2ST Accuracy": mean_accuracy}
     c2st_df.loc["_joint_c2st_"] = {"C2ST Accuracy": joint_score}
@@ -90,11 +90,11 @@ def run_comparison(pred_a, pred_b, design_config, intrinsic_params, variable_nam
 
 def parse_args():
     p = argparse.ArgumentParser()
-    p.add_argument("--bf_data_dir", type=str, default="./bayesgpt/experiments/data")
-    p.add_argument("--gpt_pred_dir", type=str, default="./bayesgpt/experiments/data")
-    p.add_argument("--mc_pred_dir", type=str, default="./bayesgpt/experiments/data/model_class",
+    p.add_argument("--bf_data_dir", type=str, default="./cogformer/experiments/data")
+    p.add_argument("--gpt_pred_dir", type=str, default="./cogformer/experiments/data")
+    p.add_argument("--mc_pred_dir", type=str, default="./cogformer/experiments/data/model_class",
                    help="Directory with BayesGPT ModelClass pred files; if set, also runs Class vs Family C2ST")
-    p.add_argument("--outdir", type=str, default="./bayesgpt/experiments/figures/c2st/ddm/")
+    p.add_argument("--outdir", type=str, default="./cogformer/experiments/figures/c2st/ddm/")
     p.add_argument("--max_num_categories", type=int, default=2)
     return p.parse_args()
 
@@ -103,7 +103,7 @@ def main():
     args = parse_args()
     intrinsic_params = ["v", "a", "z", "tau", "s_v", "s_tau"]
     variable_names = [r"$v$", r"$a$", r"$z$", r"$\tau$", r"$s_v$", r"$s_\tau$"]
-    colors = bayesgpt_fm_colors()
+    colors = cogformer_fm_colors()
     benchmark = get_benchmark_design_configs()
     summary_rows = []
 
