@@ -7,9 +7,15 @@ import torch
 import matplotlib.pyplot as plt
 
 from cogformer.simulator import ModelFamily
-from cogformer.simulator.benchmarks import DDM
+from cogformer.simulator.benchmarks.ddms.ddm import DDM
 from cogformer.simulator.benchmarks.ddms.ddm_priors import ddm_priors
 from cogformer.simulator.benchmarks.ddms.ddm_link_fun import ddm_link_fun
+from cogformer.simulator.benchmarks.cdms.cdm import CDM
+from cogformer.simulator.benchmarks.cdms.cdm_priors import cdm_priors
+from cogformer.simulator.benchmarks.cdms.cdm_link_fun import cdm_link_fun
+from cogformer.simulator.benchmarks.rdms.rdm import RDM
+from cogformer.simulator.benchmarks.rdms.rdm_priors import rdm_priors
+from cogformer.simulator.benchmarks.rdms.rdm_link_fun import rdm_link_fun
 from cogformer.adapter import Adapter
 from cogformer.networks.transformers.cogformer import CogFormer
 from cogformer.simulator.context_manager import ContextManager
@@ -19,33 +25,81 @@ from cogformer.diagnostics.plot.ensemble_ecdf import ensemble_ecdf
 from cogformer.utils.plot_utils import cogformer_fm_colors
 
 
-def get_benchmark_design_configs():
-    free_params = ["v", "a", "z", "tau"]
-    fixed_params = ["s_v", "s_tau"]
-    intrinsic_params = free_params + fixed_params
-
-    return {
-        "intercept_only": {
-            "1": intrinsic_params, "u_1": [], "u_2": [], "u_1:u_2": [],
+MODELS = {
+    "ddm": {
+        "model_cls": DDM, "prior_fn": ddm_priors, "link_fn": ddm_link_fun,
+        "name": "DDM",
+        "intrinsic_params": ["v", "a", "z", "tau", "s_v", "s_tau"],
+        "variable_names": [r"$v$", r"$a$", r"$z$", r"$\tau$", r"$s_v$", r"$s_\tau$"],
+        "free_params": ["v", "a", "z", "tau"],
+        "fixed_params": ["s_v", "s_tau"],
+        "default_fixed_values": {"s_v": 0.0, "s_tau": 0.0},
+        "outdir": "./cogformer/experiments/figures/fm/ddm/ensemble/",
+        # DDM uses "Intercept" (short) while CDM/RDM use "Intercept Only"
+        "case_labels": {
+            "intercept_only": "Intercept",
+            "regressed": "Regressed",
+            "fixed": "Fixed",
+            "fixed_regressed": "Fixed Reg.",
+            "interaction": "Interaction",
         },
-        "regressed": {
-            "1": intrinsic_params,
-            "u_1": ["v", "a", "z"], "u_2": ["v", "a", "z"], "u_1:u_2": [],
+        "benchmark_configs": {
+            "intercept_only": {"1": ["v", "a", "z", "tau", "s_v", "s_tau"], "u_1": [], "u_2": [], "u_1:u_2": []},
+            "regressed": {"1": ["v", "a", "z", "tau", "s_v", "s_tau"], "u_1": ["v", "a", "z"], "u_2": ["v", "a", "z"], "u_1:u_2": []},
+            "fixed": {"1": ["v", "a", "z", "tau"], "u_1": [], "u_2": [], "u_1:u_2": []},
+            "fixed_regressed": {"1": ["v", "a", "z", "tau"], "u_1": ["v", "a", "z"], "u_2": ["v", "a", "z"], "u_1:u_2": []},
+            "interaction": {"1": ["v", "a", "z", "tau", "s_v", "s_tau"], "u_1": ["v", "a", "z", "tau", "s_v"], "u_2": ["v", "a", "z", "tau"], "u_1:u_2": ["v", "a", "z"]},
         },
-        "fixed": {
-            "1": free_params, "u_1": [], "u_2": [], "u_1:u_2": [],
+    },
+    "cdm": {
+        "model_cls": CDM, "prior_fn": cdm_priors, "link_fn": cdm_link_fun,
+        "name": "CDM",
+        "intrinsic_params": ["v", "v_theta", "a", "tau", "s_v", "s_tau"],
+        "variable_names": [r"$v$", r"$v_\theta$", r"$a$", r"$\tau$", r"$s_v$", r"$s_\tau$"],
+        "free_params": ["v", "v_theta", "a", "tau"],
+        "fixed_params": ["s_v", "s_tau"],
+        "default_fixed_values": {"s_v": 0.0, "s_tau": 0.0},
+        "outdir": "./cogformer/experiments/figures/fm/cdm/ensemble/",
+        "case_labels": {
+            "intercept_only": "Intercept Only",
+            "regressed": "Regressed",
+            "fixed": "Fixed Variability",
+            "fixed_regressed": "Fixed + Regressed",
+            "interaction": "With Interaction",
         },
-        "fixed_regressed": {
-            "1": free_params,
-            "u_1": ["v", "a", "z"], "u_2": ["v", "a", "z"], "u_1:u_2": [],
+        "benchmark_configs": {
+            "intercept_only": {"1": ["v", "v_theta", "a", "tau", "s_v", "s_tau"], "u_1": [], "u_2": [], "u_1:u_2": []},
+            "regressed": {"1": ["v", "v_theta", "a", "tau", "s_v", "s_tau"], "u_1": ["v", "a"], "u_2": ["v", "a"], "u_1:u_2": []},
+            "fixed": {"1": ["v", "v_theta", "a", "tau"], "u_1": [], "u_2": [], "u_1:u_2": []},
+            "fixed_regressed": {"1": ["v", "v_theta", "a", "tau"], "u_1": ["v", "a"], "u_2": ["v", "a"], "u_1:u_2": []},
+            "interaction": {"1": ["v", "v_theta", "a", "tau", "s_v", "s_tau"], "u_1": ["v", "v_theta", "a", "tau", "s_v"], "u_2": ["v", "v_theta", "a", "tau"], "u_1:u_2": ["v", "v_theta", "a"]},
         },
-        "interaction": {
-            "1": intrinsic_params,
-            "u_1": ["v", "a", "z", "tau", "s_v"],
-            "u_2": ["v", "a", "z", "tau"],
-            "u_1:u_2": ["v", "a", "z"],
+    },
+    "rdm": {
+        "model_cls": RDM, "prior_fn": rdm_priors, "link_fn": rdm_link_fun,
+        "name": "RDM",
+        "intrinsic_params": ["v", "v_diff", "a", "tau", "s_v", "s_tau"],
+        "variable_names": [r"$v$", r"$v_{\mathrm{diff}}$", r"$a$", r"$\tau$", r"$s_v$", r"$s_\tau$"],
+        "free_params": ["v", "v_diff", "a", "tau"],
+        "fixed_params": ["s_v", "s_tau"],
+        "default_fixed_values": {"s_v": 0.0, "s_tau": 0.0},
+        "outdir": "./cogformer/experiments/figures/fm/rdm/ensemble/",
+        "case_labels": {
+            "intercept_only": "Intercept Only",
+            "regressed": "Regressed",
+            "fixed": "Fixed Variability",
+            "fixed_regressed": "Fixed + Regressed",
+            "interaction": "With Interaction",
         },
-    }
+        "benchmark_configs": {
+            "intercept_only": {"1": ["v", "v_diff", "a", "tau", "s_v", "s_tau"], "u_1": [], "u_2": [], "u_1:u_2": []},
+            "regressed": {"1": ["v", "v_diff", "a", "tau", "s_v", "s_tau"], "u_1": ["v_diff", "a"], "u_2": ["v_diff", "a"], "u_1:u_2": []},
+            "fixed": {"1": ["v", "v_diff", "a", "tau"], "u_1": [], "u_2": [], "u_1:u_2": []},
+            "fixed_regressed": {"1": ["v", "v_diff", "a", "tau"], "u_1": ["v_diff", "a"], "u_2": ["v_diff", "a"], "u_1:u_2": []},
+            "interaction": {"1": ["v", "v_diff", "a", "tau", "s_v", "s_tau"], "u_1": ["v", "v_diff", "a", "tau", "s_v"], "u_2": ["v", "v_diff", "a", "tau"], "u_1:u_2": ["v", "v_diff", "a"]},
+        },
+    },
+}
 
 
 def infer_free_fixed_intrinsics(design_config, all_intrinsics, default_fixed_values):
@@ -63,8 +117,10 @@ def build_encoder_input_dim(max_num_regressors, max_num_categories, keep_interce
 
 def parse_args():
     p = argparse.ArgumentParser()
+    p.add_argument("--model", type=str, required=True, choices=list(MODELS.keys()))
     p.add_argument("--checkpoint", type=str, required=True)
-    p.add_argument("--outdir", type=str, default="./cogformer/experiments/figures/fm/ddm/ensemble/")
+    p.add_argument("--outdir", type=str, default=None,
+                   help="Output directory (defaults to model-specific path)")
     p.add_argument("--batch_size", type=int, default=200)
     p.add_argument("--num_obs", type=int, default=500)
     p.add_argument("--max_num_regressors", type=int, default=2)
@@ -75,7 +131,6 @@ def parse_args():
     p.add_argument("--num_samples", type=int, default=200)
     p.add_argument("--num_random_configs", type=int, default=8)
     p.add_argument("--benchmark_only", action="store_true", default=False)
-    # Architecture (must match checkpoint)
     p.add_argument("--encoder_num_layers", type=int, default=8)
     p.add_argument("--decoder_num_layers", type=int, default=8)
     p.add_argument("--encoder_num_heads", type=int, default=8)
@@ -95,11 +150,14 @@ def main():
     args = parse_args()
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-    intrinsic_params = ["v", "a", "z", "tau", "s_v", "s_tau"]
-    variable_names = [r"$v$", r"$a$", r"$z$", r"$\tau$", r"$s_v$", r"$s_\tau$"]
-    default_fixed_values = {"s_v": 0.0, "s_tau": 0.0}
-    free_params = ["v", "a", "z", "tau"]
-    fixed_params = ["s_v", "s_tau"]
+    model_cfg = MODELS[args.model]
+    model_name = args.model
+    intrinsic_params = model_cfg["intrinsic_params"]
+    variable_names = model_cfg["variable_names"]
+    free_params = model_cfg["free_params"]
+    fixed_params = model_cfg["fixed_params"]
+    default_fixed_values = model_cfg["default_fixed_values"]
+    link_fn = model_cfg["link_fn"]
     n_cols = len(intrinsic_params)
 
     model_family_config = {
@@ -111,7 +169,7 @@ def main():
     }
 
     model_family = ModelFamily(
-        model=DDM(), name="DDM", prior_fun=ddm_priors(),
+        model=model_cfg["model_cls"](), name=model_cfg["name"], prior_fun=model_cfg["prior_fn"](),
         mask_randomizer_kwargs={"free_intrinsics": intrinsic_params, "fixed_intrinsics": [], "fixed_values": {}},
     )
     adapter = Adapter()
@@ -141,36 +199,22 @@ def main():
     cogformer.load_state_dict(state)
     cogformer.eval()
 
-    outdir = Path(args.outdir)
+    outdir = Path(args.outdir) if args.outdir else Path(model_cfg["outdir"])
     outdir.mkdir(parents=True, exist_ok=True)
 
-    benchmark = get_benchmark_design_configs()
+    benchmark = model_cfg["benchmark_configs"]
+    case_labels = model_cfg["case_labels"]
 
-    case_labels = {
-        "intercept_only": "Intercept",
-        "regressed":       "Regressed",
-        "fixed":           "Fixed",
-        "fixed_regressed": "Fixed Reg.",
-        "interaction":     "Interaction",
-    }
-
-    # ── Benchmark ensemble (5 standard cases) ─────────────────────────────────
-    true_list, pred_list, masks, design_configs, labels = [], [], [], [], []
-
-    for cfg_name, design_config in benchmark.items():
-        logging.info(f"Sampling benchmark case: {cfg_name}")
+    def run_inference(design_config):
         free_intr, fixed_intr, fixed_vals = infer_free_fixed_intrinsics(
             design_config, intrinsic_params, default_fixed_values
         )
         samples = model_family.batch_sample(
             **model_family_config,
             mask_randomizer_kwargs={"free_intrinsics": free_intr, "fixed_intrinsics": fixed_intr, "fixed_values": fixed_vals},
-            min_num_regressors=0,
-            fixed_config=True,
-            batch_size=args.batch_size,
-            flatten_param_outputs=True,
-            design_config=design_config,
-            link_fun=ddm_link_fun(),
+            min_num_regressors=0, fixed_config=True,
+            batch_size=args.batch_size, flatten_param_outputs=True,
+            design_config=design_config, link_fun=link_fn(),
         )
         adapted = adapter.adapt(samples, intrinsic_params=model_family.intrinsic_params)
         for k, v in adapted.items():
@@ -190,7 +234,14 @@ def main():
 
         params_mask = adapted["param_masks"].detach().cpu().numpy()
         params_mask = params_mask.reshape((args.batch_size, n_rows, n_cols))[0]
+        return true_set, pred_set, params_mask
 
+    # ── Benchmark ensemble ─────────────────────────────────────────────────────
+    true_list, pred_list, masks, design_configs, labels = [], [], [], [], []
+
+    for cfg_name, design_config in benchmark.items():
+        logging.info(f"Sampling benchmark case: {cfg_name}")
+        true_set, pred_set, params_mask = run_inference(design_config)
         true_list.append(true_set)
         pred_list.append(pred_set)
         masks.append(params_mask)
@@ -206,10 +257,10 @@ def main():
             true_list=true_list, pred_list=pred_list,
             design_configs=design_configs, intrinsic_params=intrinsic_params,
             max_num_categories=args.max_num_categories,
-            parameter_masks=masks, variable_names=variable_names, labels=labels,
-            thumb_scale=2.0,
+            parameter_masks=masks, variable_names=variable_names,
+            labels=labels, thumb_scale=2.0,
         )
-        fig_path = outdir / f"ddm_ensemble_benchmark_{plot_name}.pdf"
+        fig_path = outdir / f"{model_name}_ensemble_benchmark_{plot_name}.pdf"
         fig.savefig(fig_path, bbox_inches="tight")
         plt.close(fig)
         logging.info(f"[saved] {fig_path}")
@@ -234,35 +285,7 @@ def main():
     random_true_list, random_pred_list, random_masks = [], [], []
 
     for rand_dc in random_design_configs:
-        free_intr_r, fixed_intr_r, fixed_vals_r = infer_free_fixed_intrinsics(
-            rand_dc, intrinsic_params, default_fixed_values
-        )
-        rand_samples = model_family.batch_sample(
-            **model_family_config,
-            mask_randomizer_kwargs={"free_intrinsics": free_intr_r, "fixed_intrinsics": fixed_intr_r, "fixed_values": fixed_vals_r},
-            min_num_regressors=0, fixed_config=True,
-            batch_size=args.batch_size, flatten_param_outputs=True,
-            design_config=rand_dc, link_fun=ddm_link_fun(),
-        )
-        rand_adapted = adapter.adapt(rand_samples, intrinsic_params=model_family.intrinsic_params)
-        for k, v in rand_adapted.items():
-            if torch.is_tensor(v):
-                rand_adapted[k] = v.to(device)
-
-        rand_true = rand_adapted["param_matrices"].detach().cpu().numpy()
-        n_rows_r = rand_true.shape[1] // n_cols
-        rand_true = rand_true.reshape(args.batch_size, n_rows_r, n_cols)
-
-        rand_pred = cogformer.sample(
-            rand_adapted["input_data"], rand_adapted["param_indices"],
-            rand_adapted["regressor_indices"], rand_adapted["param_masks"],
-            steps=args.num_sample_steps, num_samples=args.num_samples,
-        )
-        rand_pred = rand_pred.reshape(args.batch_size, args.num_samples, n_rows_r, n_cols)
-
-        rand_mask = rand_adapted["param_masks"].detach().cpu().numpy()
-        rand_mask = rand_mask.reshape((args.batch_size, n_rows_r, n_cols))[0]
-
+        rand_true, rand_pred, rand_mask = run_inference(rand_dc)
         random_true_list.append(rand_true)
         random_pred_list.append(rand_pred)
         random_masks.append(rand_mask)
@@ -279,7 +302,7 @@ def main():
             parameter_masks=random_masks, variable_names=variable_names,
             labels=random_labels, n_colors=args.num_random_configs,
         )
-        fig_path = outdir / f"ddm_ensemble_random_{plot_name}.pdf"
+        fig_path = outdir / f"{model_name}_ensemble_random_{plot_name}.pdf"
         fig.savefig(fig_path, bbox_inches="tight")
         plt.close(fig)
         logging.info(f"[saved] {fig_path}")

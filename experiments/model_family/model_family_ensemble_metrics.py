@@ -7,38 +7,74 @@ import torch
 import matplotlib.pyplot as plt
 
 from cogformer.simulator import ModelFamily
+from cogformer.simulator.benchmarks.ddms.ddm import DDM
+from cogformer.simulator.benchmarks.ddms.ddm_priors import ddm_priors
+from cogformer.simulator.benchmarks.ddms.ddm_link_fun import ddm_link_fun
 from cogformer.simulator.benchmarks.cdms.cdm import CDM
 from cogformer.simulator.benchmarks.cdms.cdm_priors import cdm_priors
 from cogformer.simulator.benchmarks.cdms.cdm_link_fun import cdm_link_fun
+from cogformer.simulator.benchmarks.rdms.rdm import RDM
+from cogformer.simulator.benchmarks.rdms.rdm_priors import rdm_priors
+from cogformer.simulator.benchmarks.rdms.rdm_link_fun import rdm_link_fun
 from cogformer.simulator.context_manager import ContextManager
 from cogformer.adapter import Adapter
 from cogformer.networks.transformers.cogformer import CogFormer
 from cogformer.diagnostics.plot.ensemble_metrics import ensemble_metrics
 
 
-def build_encoder_input_dim(max_num_regressors: int, max_num_categories: int, keep_intercept: bool) -> int:
-    max_total_regressors = max_num_regressors * (max_num_regressors + 1) // 2
-    return max_total_regressors * (max_num_categories - 1) + (3 if keep_intercept else 2)
+MODELS = {
+    "ddm": {
+        "model_cls": DDM, "prior_fn": ddm_priors, "link_fn": ddm_link_fun,
+        "name": "DDM",
+        "intrinsic_params": ["v", "a", "z", "tau", "s_v", "s_tau"],
+        "variable_names": [r"$v$", r"$a$", r"$z$", r"$\tau$", r"$s_v$", r"$s_\tau$"],
+        "free_params": ["v", "a", "z", "tau"],
+        "fixed_params": ["s_v", "s_tau"],
+        "default_fixed_values": {"s_v": 0.0, "s_tau": 0.0},
+        "outdir": "./cogformer/experiments/figures/fm/ddm/ensemble/",
+    },
+    "cdm": {
+        "model_cls": CDM, "prior_fn": cdm_priors, "link_fn": cdm_link_fun,
+        "name": "CDM",
+        "intrinsic_params": ["v", "v_theta", "a", "tau", "s_v", "s_tau"],
+        "variable_names": [r"$v$", r"$v_\theta$", r"$a$", r"$\tau$", r"$s_v$", r"$s_\tau$"],
+        "free_params": ["v", "v_theta", "a", "tau"],
+        "fixed_params": ["s_v", "s_tau"],
+        "default_fixed_values": {"s_v": 0.0, "s_tau": 0.0},
+        "outdir": "./cogformer/experiments/figures/fm/cdm/ensemble/",
+    },
+    "rdm": {
+        "model_cls": RDM, "prior_fn": rdm_priors, "link_fn": rdm_link_fun,
+        "name": "RDM",
+        "intrinsic_params": ["v", "v_diff", "a", "tau", "s_v", "s_tau"],
+        "variable_names": [r"$v$", r"$v_{\mathrm{diff}}$", r"$a$", r"$\tau$", r"$s_v$", r"$s_\tau$"],
+        "free_params": ["v", "v_diff", "a", "tau"],
+        "fixed_params": ["s_v", "s_tau"],
+        "default_fixed_values": {"s_v": 0.0, "s_tau": 0.0},
+        "outdir": "./cogformer/experiments/figures/fm/rdm/ensemble/",
+    },
+}
 
 
-def infer_free_fixed_intrinsics(
-    design_config: dict[str, list[str]],
-    all_intrinsics: list[str],
-    default_fixed_values: dict[str, float],
-):
-    used = set()
-    for _, plist in design_config.items():
-        used.update(plist)
+def infer_free_fixed_intrinsics(design_config, all_intrinsics, default_fixed_values):
+    used = {p for plist in design_config.values() for p in plist}
     free_intrinsics = [p for p in all_intrinsics if p in used]
     fixed_intrinsics = [p for p in all_intrinsics if p not in used]
     fixed_values = {p: default_fixed_values[p] for p in fixed_intrinsics if p in default_fixed_values}
     return free_intrinsics, fixed_intrinsics, fixed_values
 
 
+def build_encoder_input_dim(max_num_regressors, max_num_categories, keep_intercept):
+    max_total_regressors = max_num_regressors * (max_num_regressors + 1) // 2
+    return max_total_regressors * (max_num_categories - 1) + (3 if keep_intercept else 2)
+
+
 def parse_args():
     p = argparse.ArgumentParser()
+    p.add_argument("--model", type=str, required=True, choices=list(MODELS.keys()))
     p.add_argument("--checkpoint", type=str, required=True)
-    p.add_argument("--outdir", type=str, default="./cogformer/experiments/figures/fm/cdm/ensemble/")
+    p.add_argument("--outdir", type=str, default=None,
+                   help="Output directory (defaults to model-specific path)")
     p.add_argument("--n_configs", type=int, default=50)
     p.add_argument("--batch_size", type=int, default=200)
     p.add_argument("--num_obs", type=int, default=500)
@@ -67,9 +103,15 @@ def main():
     args = parse_args()
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-    intrinsic_params = ["v", "v_theta", "a", "tau", "s_v", "s_tau"]
-    variable_names = [r"$v$", r"$v_\theta$", r"$a$", r"$\tau$", r"$s_v$", r"$s_\tau$"]
-    default_fixed_values = {"s_v": 0.0, "s_tau": 0.0}
+    model_cfg = MODELS[args.model]
+    model_name = args.model
+    intrinsic_params = model_cfg["intrinsic_params"]
+    variable_names = model_cfg["variable_names"]
+    free_params = model_cfg["free_params"]
+    fixed_params = model_cfg["fixed_params"]
+    default_fixed_values = model_cfg["default_fixed_values"]
+    link_fn = model_cfg["link_fn"]
+    n_cols = len(intrinsic_params)
 
     model_family_config = {
         "max_num_regressors": args.max_num_regressors,
@@ -80,9 +122,9 @@ def main():
     }
 
     model_family = ModelFamily(
-        model=CDM(),
-        name="CDM",
-        prior_fun=cdm_priors(),
+        model=model_cfg["model_cls"](),
+        name=model_cfg["name"],
+        prior_fun=model_cfg["prior_fn"](),
         mask_randomizer_kwargs={
             "free_intrinsics": intrinsic_params,
             "fixed_intrinsics": [],
@@ -92,11 +134,8 @@ def main():
     adapter = Adapter()
 
     encoder_input_dim = build_encoder_input_dim(
-        max_num_regressors=args.max_num_regressors,
-        max_num_categories=args.max_num_categories,
-        keep_intercept=args.keep_intercept,
+        args.max_num_regressors, args.max_num_categories, args.keep_intercept
     )
-
     cogformer = CogFormer(
         encoder_input_dim=encoder_input_dim,
         encoder_num_layers=args.encoder_num_layers,
@@ -114,8 +153,7 @@ def main():
         pos_embedding_dim=args.pos_embedding_dim,
     ).to(device)
 
-    ckpt_path = Path(args.checkpoint)
-    state = torch.load(ckpt_path, map_location=device)
+    state = torch.load(Path(args.checkpoint), map_location=device)
     cogformer.load_state_dict(state)
     cogformer.eval()
 
@@ -124,25 +162,20 @@ def main():
         cm.build_random_design_config(
             intrinsic_params=intrinsic_params,
             num_regressors=args.max_num_regressors,
-            free_intrinsics=["v", "v_theta", "a", "tau"],
-            fixed_intrinsics=["s_v", "s_tau"],
+            free_intrinsics=free_params,
+            fixed_intrinsics=fixed_params,
             keep_intercept=args.keep_intercept,
             add_interaction=args.add_interaction,
         )
         for _ in range(args.n_configs)
     ]
 
-    n_cols = len(intrinsic_params)
-    true_list = []
-    pred_list = []
-    masks = []
+    true_list, pred_list, masks = [], [], []
 
     for i, dc in enumerate(design_configs):
         logging.info(f"Config {i + 1}/{args.n_configs}")
         free_intr, fixed_intr, fixed_vals = infer_free_fixed_intrinsics(
-            design_config=dc,
-            all_intrinsics=intrinsic_params,
-            default_fixed_values=default_fixed_values,
+            dc, intrinsic_params, default_fixed_values
         )
         samples = model_family.batch_sample(
             **model_family_config,
@@ -156,7 +189,7 @@ def main():
             batch_size=args.batch_size,
             flatten_param_outputs=True,
             design_config=dc,
-            link_fun=cdm_link_fun(),
+            link_fun=link_fn(),
         )
         adapted = adapter.adapt(samples, intrinsic_params=model_family.intrinsic_params)
         for k, v in adapted.items():
@@ -184,7 +217,7 @@ def main():
         pred_list.append(pred)
         masks.append(mask)
 
-    outdir = Path(args.outdir)
+    outdir = Path(args.outdir) if args.outdir else Path(model_cfg["outdir"])
     outdir.mkdir(parents=True, exist_ok=True)
 
     fig = ensemble_metrics(
@@ -196,7 +229,7 @@ def main():
         parameter_masks=masks,
         variable_names=variable_names,
     )
-    fig_path = outdir / "cdm_ensemble_metrics.pdf"
+    fig_path = outdir / f"{model_name}_ensemble_metrics.pdf"
     fig.savefig(fig_path, bbox_inches="tight")
     plt.close(fig)
     logging.info(f"[saved] {fig_path}")

@@ -13,9 +13,15 @@ import matplotlib.pyplot as plt
 np.set_printoptions(suppress=True)
 
 from cogformer.simulator import ModelFamily
-from cogformer.simulator.benchmarks import DDM
+from cogformer.simulator.benchmarks.ddms.ddm import DDM
 from cogformer.simulator.benchmarks.ddms.ddm_priors import ddm_priors
 from cogformer.simulator.benchmarks.ddms.ddm_link_fun import ddm_link_fun
+from cogformer.simulator.benchmarks.cdms.cdm import CDM
+from cogformer.simulator.benchmarks.cdms.cdm_priors import cdm_priors
+from cogformer.simulator.benchmarks.cdms.cdm_link_fun import cdm_link_fun
+from cogformer.simulator.benchmarks.rdms.rdm import RDM
+from cogformer.simulator.benchmarks.rdms.rdm_priors import rdm_priors
+from cogformer.simulator.benchmarks.rdms.rdm_link_fun import rdm_link_fun
 from cogformer.adapter import Adapter
 from cogformer.networks.transformers.cogformer import CogFormer
 from cogformer.diagnostics.plot.adaptive_recovery import adaptive_recovery
@@ -25,190 +31,224 @@ from cogformer.diagnostics.plot.adaptive_metrics import adaptive_metrics as plot
 from cogformer.utils.plot_utils import cogformer_fm_colors
 
 
+MODELS = {
+    "ddm": {
+        "model_cls": DDM,
+        "prior_fn": ddm_priors,
+        "link_fn": ddm_link_fun,
+        "name": "DDM",
+        "intrinsic_params": ["v", "a", "z", "tau", "s_v", "s_tau"],
+        "variable_names": [r"$v$", r"$a$", r"$z$", r"$\tau$", r"$s_v$", r"$s_\tau$"],
+        "free_params": ["v", "a", "z", "tau"],
+        "fixed_params": ["s_v", "s_tau"],
+        "default_fixed_values": {"s_v": 0.0, "s_tau": 0.0},
+        "val_epoch_interval": 250,
+        "wandb_project": "cogformer-fm-ddm",
+        "checkpoint_dir": "./cogformer/experiments/checkpoints/fm/ddm/",
+        "checkpoint_prefix": "cogformer_mixed_attn",
+        "fig_subdir": "fm/ddm",
+        "val_scenarios": [
+            ("interaction", {
+                "1": ["v", "a", "z", "tau", "s_v", "s_tau"],
+                "u_1": ["v", "a", "z", "tau", "s_v"],
+                "u_2": ["v", "a", "z", "tau"],
+                "u_1:u_2": ["v", "a", "z"],
+            }),
+            ("fixed", {
+                "1": ["v", "a", "z", "tau"],
+                "u_1": [], "u_2": [], "u_1:u_2": [],
+            }),
+        ],
+    },
+    "cdm": {
+        "model_cls": CDM,
+        "prior_fn": cdm_priors,
+        "link_fn": cdm_link_fun,
+        "name": "CDM",
+        "intrinsic_params": ["v", "v_theta", "a", "tau", "s_v", "s_tau"],
+        "variable_names": [r"$v$", r"$v_\theta$", r"$a$", r"$\tau$", r"$s_v$", r"$s_\tau$"],
+        "free_params": ["v", "v_theta", "a", "tau"],
+        "fixed_params": ["s_v", "s_tau"],
+        "default_fixed_values": {"s_v": 0.0, "s_tau": 0.0},
+        "val_epoch_interval": 1000,
+        "wandb_project": "cogformer-fm-cdm",
+        "checkpoint_dir": "./cogformer/experiments/checkpoints/fm/cdm/",
+        "checkpoint_prefix": "cogformer_cdm_mixed_attn",
+        "fig_subdir": "fm/cdm",
+        "val_scenarios": [
+            ("interaction", {
+                "1": ["v", "v_theta", "a", "tau", "s_v", "s_tau"],
+                "u_1": ["v", "v_theta", "a", "tau", "s_v"],
+                "u_2": ["v", "v_theta", "a", "tau"],
+                "u_1:u_2": ["v", "v_theta", "a"],
+            }),
+            ("fixed", {
+                "1": ["v", "v_theta", "a", "tau"],
+                "u_1": [], "u_2": [], "u_1:u_2": [],
+            }),
+        ],
+    },
+    "rdm": {
+        "model_cls": RDM,
+        "prior_fn": rdm_priors,
+        "link_fn": rdm_link_fun,
+        "name": "RDM",
+        "intrinsic_params": ["v", "v_diff", "a", "tau", "s_v", "s_tau"],
+        "variable_names": [r"$v$", r"$v_{\mathrm{diff}}$", r"$a$", r"$\tau$", r"$s_v$", r"$s_\tau$"],
+        "free_params": ["v", "v_diff", "a", "tau"],
+        "fixed_params": ["s_v", "s_tau"],
+        "default_fixed_values": {"s_v": 0.0, "s_tau": 0.0},
+        "val_epoch_interval": 1000,
+        "wandb_project": "cogformer-fm-rdm",
+        "checkpoint_dir": "./cogformer/experiments/checkpoints/fm/rdm/",
+        "checkpoint_prefix": "cogformer_rdm_mixed_attn",
+        "fig_subdir": "fm/rdm",
+        "val_scenarios": [
+            ("interaction", {
+                "1": ["v", "v_diff", "a", "tau", "s_v", "s_tau"],
+                "u_1": ["v", "v_diff", "a", "tau", "s_v"],
+                "u_2": ["v", "v_diff", "a", "tau"],
+                "u_1:u_2": ["v", "v_diff", "a"],
+            }),
+            ("fixed", {
+                "1": ["v", "v_diff", "a", "tau"],
+                "u_1": [], "u_2": [], "u_1:u_2": [],
+            }),
+        ],
+    },
+}
+
+
 class CogFormerTrainer:
     def __init__(
         self,
         gpt,
-        model=None,
-        prior_fun=None,
-        link_fun=None,
+        model_cfg,
         model_family=None,
         adapter=None,
         use_wandb=False,
     ):
-        super().__init__()
-        self.gpt=gpt
-        self.model=model
-        self.prior_fun=prior_fun
-        self.link_fun=link_fun
-        self.adapter=adapter
+        self.gpt = gpt
+        self.model_cfg = model_cfg
+        self.adapter = adapter
         self.use_wandb = use_wandb
         if model_family is not None:
             self.model_family = model_family
         else:
             self.model_family = ModelFamily(
-                name='DDM',
-                model=self.model,
-                prior_fun=self.prior_fun
+                name=model_cfg["name"],
+                model=model_cfg["model_cls"](),
+                prior_fun=model_cfg["prior_fn"](),
             )
-        self.debug = False
 
     def train(
         self,
         train_config,
         val_config,
         checkpoint_path="cogformer_fm.pt",
-        fig_path="fig.pdf"
+        fig_path="fig.pdf",
     ):
-        # Define global step
         global_step = 0
-
-        # Define optimizer, scheduler, and loss function from config
         optimizer = AdamW(self.gpt.parameters(), lr=train_config["learning_rate"])
         scheduler = CosineAnnealingLR(optimizer, T_max=train_config["epochs"])
+        val_interval = self.model_cfg["val_epoch_interval"]
 
-        # Training loop
         for epoch in range(train_config["epochs"]):
             pbar = tqdm(
                 total=train_config["steps_per_epoch"],
-                desc=f"Epoch {(epoch + 1)}/{train_config['epochs']}",
+                desc=f"Epoch {epoch + 1}/{train_config['epochs']}",
                 miniters=100,
             )
-            for step in range(train_config["steps_per_epoch"]):
-                # Compute metrics
+            for _ in range(train_config["steps_per_epoch"]):
                 loss, current_lr = self.train_step(
                     config=train_config,
                     optimizer=optimizer,
-                    scheduler=scheduler
+                    scheduler=scheduler,
                 )
-                # Log metrics
                 if self.use_wandb:
-                     wandb.log(
-                        {
-                            "train/loss": loss,
-                            "opt/lr": current_lr,
-                            "epoch": epoch + 1,
-                        },
+                    wandb.log(
+                        {"train/loss": loss, "opt/lr": current_lr, "epoch": epoch + 1},
                         step=global_step,
                     )
-                # Update internal steps
                 global_step += 1
                 pbar.set_postfix(loss=f"{loss:.4f}", lr=f"{current_lr:.2e}")
                 pbar.update(1)
 
-            if (epoch + 1) % 250 == 0:
+            if (epoch + 1) % val_interval == 0:
                 self.val_step(val_config, global_step, fig_path)
 
             scheduler.step()
             pbar.close()
 
-        checkpoint_dir = Path("./cogformer/experiments/checkpoints/fm/ddm/")
+        checkpoint_dir = Path(self.model_cfg["checkpoint_dir"])
         checkpoint_dir.mkdir(parents=True, exist_ok=True)
         torch.save(self.gpt.state_dict(), checkpoint_dir / checkpoint_path)
 
     def train_step(self, config, optimizer, scheduler):
-        """Training step"""
-
-        # Generate training samples
+        link_fn = self.model_cfg["link_fn"]
         train_samples = self.model_family.batch_sample(
             **config["model_family_config"],
-            prior_fun=self.prior_fun,
+            **config["train_sample_config"],
+            prior_fun=self.model_family.prior_fun,
             batch_size=config["batch_size"],
             flatten_param_outputs=True,
-            link_fun=ddm_link_fun()
+            link_fun=link_fn(),
         )
-
-        # Adapt for network
         adapted = self.adapter.adapt(
             train_samples,
-            intrinsic_params=self.model_family.intrinsic_params
+            intrinsic_params=self.model_family.intrinsic_params,
+            device=config["device"],
         )
-
-        # Optimizer
         optimizer.zero_grad()
-
-        # Train
         pred_velocity, target_velocity = self.gpt(
             adapted["param_matrices"][..., None],
-            adapted['input_data'],
-            adapted['param_indices'],
-            adapted['regressor_indices'],
-            adapted['param_masks'],
+            adapted["input_data"],
+            adapted["param_indices"],
+            adapted["regressor_indices"],
+            adapted["param_masks"],
         )
-
-        # Compute loss
-        L = self.gpt.compute_loss(pred_velocity, target_velocity, adapted['param_masks'])
+        L = self.gpt.compute_loss(pred_velocity, target_velocity, adapted["param_masks"])
         L.backward()
-
         if config["gradient_clip_norm"] is not None:
-            torch.nn.utils.clip_grad_norm_(
-                self.gpt.parameters(),
-                config["gradient_clip_norm"],
-            )
-
-        # Update loss and learning rate
+            torch.nn.utils.clip_grad_norm_(self.gpt.parameters(), config["gradient_clip_norm"])
         optimizer.step()
-        loss = L.detach().item()
-        current_lr = scheduler.get_last_lr()[0]
-
-        return loss, current_lr
+        return L.detach().item(), scheduler.get_last_lr()[0]
 
     def val_step(self, config, global_step, fig_path):
-        # Two validation scenarios
-        config_1 = {
-            "1": ["v", "a", "z", "tau", "s_v", "s_tau"],
-            "u_1": ["v", "a", "z", "tau", "s_v"],
-            "u_2": ["v", "a", "z", "tau"],
-            "u_1:u_2": ["v", "a", "z"],
-        }
-        config_2 = {
-            "1": ["v", "a", "z", "tau"],
-            "u_1": [],
-            "u_2": [],
-            "u_1:u_2": []
-        }
-
-        scenarios = [
-            ("interaction", config_1),
-            ("fixed", config_2),
-        ]
-
-        params = ["v", "a", "z", "tau", "s_v", "s_tau"]
-        param_names = [r"$v$", r"$a$", r"$z$", r"$\tau$", r"$s_v$", r"$s_\tau$"]
+        model_name = self.model_cfg["name"].lower()
+        params = self.model_cfg["intrinsic_params"]
+        param_names = self.model_cfg["variable_names"]
+        link_fn = self.model_cfg["link_fn"]
+        fig_subdir = self.model_cfg["fig_subdir"]
 
         colors = cogformer_fm_colors()
         max_num_categories = config["model_family_config"]["max_num_categories"]
+        base = Path(f"./cogformer/experiments/figures/{fig_subdir}")
 
-        recovery_dir = Path("./cogformer/experiments/figures/fm/recovery")
-        recovery_dir.mkdir(parents=True, exist_ok=True)
-        posterior_dir = Path("./cogformer/experiments/figures/fm/test_posterior")
-        posterior_dir.mkdir(parents=True, exist_ok=True)
-        coverage_dir = Path("./cogformer/experiments/figures/fm/coverage")
-        coverage_dir.mkdir(parents=True, exist_ok=True)
-        metrics_dir = Path("./cogformer/experiments/figures/fm/metrics")
-        metrics_dir.mkdir(parents=True, exist_ok=True)
+        recovery_dir = base / "recovery"
+        posterior_dir = base / "test_posterior"
+        coverage_dir = base / "coverage"
+        metrics_dir = base / "metrics"
+        for d in (recovery_dir, posterior_dir, coverage_dir, metrics_dir):
+            d.mkdir(parents=True, exist_ok=True)
 
         self.gpt.eval()
 
-        for tag, design_config in scenarios:
-            # Sample
+        for tag, design_config in self.model_cfg["val_scenarios"]:
             test_samples = self.model_family.batch_sample(
                 **config["model_family_config"],
                 **config["val_sample_config"],
                 batch_size=config["batch_size"],
                 flatten_param_outputs=True,
                 design_config=design_config,
-                link_fun=ddm_link_fun(),
+                link_fun=link_fn(),
             )
-
-            # Adapt
             adapted = self.adapter.adapt(
                 test_samples,
-                intrinsic_params=self.model_family.intrinsic_params
+                intrinsic_params=self.model_family.intrinsic_params,
+                device=config["device"],
             )
-
-            # Forward
-            pred_velocity, target_velocity = self.gpt(
+            self.gpt(
                 adapted["param_matrices"][..., None],
                 adapted["input_data"],
                 adapted["param_indices"],
@@ -223,22 +263,19 @@ class CogFormerTrainer:
             n_rows = true_set.shape[1] // n_cols
             true_set = true_set.reshape(config["batch_size"], n_rows, n_cols)
 
-            fm_sample_steps = config["fm_sample_steps"]
-            fm_num_samples = config["fm_num_samples"]
             pred_set = self.gpt.sample(
                 adapted["input_data"],
                 adapted["param_indices"],
                 adapted["regressor_indices"],
                 adapted["param_masks"],
-                steps=fm_sample_steps,
-                num_samples=fm_num_samples,
+                steps=config["fm_sample_steps"],
+                num_samples=config["fm_num_samples"],
             )
-            pred_set = pred_set.reshape(config["batch_size"], fm_num_samples, n_rows, n_cols)
-
-            # Mask for plotting (same as before: take first batch element)
+            pred_set = pred_set.reshape(
+                config["batch_size"], config["fm_num_samples"], n_rows, n_cols
+            )
             params_mask = params_mask.reshape((config["batch_size"], n_rows, n_cols))[0]
 
-            # Recovery plot
             recovery = adaptive_recovery(
                 true_set, pred_set,
                 design_config=design_config,
@@ -250,11 +287,9 @@ class CogFormerTrainer:
                 main_effect_color=colors["main_effect"],
                 interaction_color=colors["interaction"],
             )
-
             out_recovery = recovery_dir / Path(fig_path).with_stem(f"{Path(fig_path).stem}_{tag}")
             recovery.savefig(out_recovery, bbox_inches="tight")
 
-            # Posterior plot
             posterior = adaptive_posterior(
                 samples=pred_set[0],
                 design_config=design_config,
@@ -265,8 +300,7 @@ class CogFormerTrainer:
                 interaction_color=colors["interaction"],
                 unfold=False,
             )
-
-            out_posterior = posterior_dir / Path(f"ddm_benchmark_test_posterior_{tag}.pdf")
+            out_posterior = posterior_dir / f"{model_name}_benchmark_test_posterior_{tag}.pdf"
             posterior.savefig(out_posterior, bbox_inches="tight")
 
             coverage = adaptive_coverage(
@@ -278,10 +312,9 @@ class CogFormerTrainer:
                 max_num_categories=max_num_categories,
                 intercept_color=colors["intercept"],
                 main_effect_color=colors["main_effect"],
-                interaction_color=colors["interaction"]
+                interaction_color=colors["interaction"],
             )
-
-            out_coverage = coverage_dir / Path(f"ddm_benchmark_test_coverage_{tag}.pdf")
+            out_coverage = coverage_dir / f"{model_name}_benchmark_test_coverage_{tag}.pdf"
             coverage.savefig(out_coverage, bbox_inches="tight")
 
             metrics_fig = plot_adaptive_metrics(
@@ -296,7 +329,7 @@ class CogFormerTrainer:
                 main_effect_color=colors["main_effect"],
                 interaction_color=colors["interaction"],
             )
-            out_metrics = metrics_dir / Path(f"ddm_benchmark_test_metrics_{tag}.pdf")
+            out_metrics = metrics_dir / f"{model_name}_benchmark_test_metrics_{tag}.pdf"
             metrics_fig.savefig(out_metrics, bbox_inches="tight")
 
             if self.use_wandb:
@@ -316,79 +349,73 @@ class CogFormerTrainer:
 
         self.gpt.train()
 
-
     @staticmethod
     def finish():
         wandb.finish()
 
+
 def parse_args():
     parser = argparse.ArgumentParser()
-    # General
-    parser.add_argument("--debug", action="store_true", help="Debug mode")
-    parser.add_argument("--use_wandb", action="store_true", help="use wandb")
-
+    parser.add_argument("--model", type=str, required=True, choices=list(MODELS.keys()),
+                        help="Benchmark model to train (ddm, cdm, rdm)")
+    parser.add_argument("--debug", action="store_true")
+    parser.add_argument("--use_wandb", action="store_true")
     # Network dimensions
-    parser.add_argument("--encoder_num_layers", type=int, default=8, help="number of encoder layers")
-    parser.add_argument("--decoder_num_layers", type=int, default=8, help="number of decoder layers")
-    parser.add_argument("--encoder_num_heads", type=int, default=8, help="number of encoder heads")
-    parser.add_argument("--decoder_num_heads", type=int, default=8, help="number of decoder heads")
-    parser.add_argument("--projection_dim", type=int, default=256, help="dimension of projection dims")
-    parser.add_argument("--num_seeds", type=int, default=32, help="number of seeds")
-    parser.add_argument("--seed_dim", type=int, default=64, help="dimension of seeds")
-    parser.add_argument("--time_embedding_dim", type=int, default=32, help="dimension of sinusoidal time embedding")
-    parser.add_argument("--pos_embedding_dim", type=int, default=32, help="dimension of sinusoidal positional embedding")
-
+    parser.add_argument("--encoder_num_layers", type=int, default=8)
+    parser.add_argument("--decoder_num_layers", type=int, default=8)
+    parser.add_argument("--encoder_num_heads", type=int, default=8)
+    parser.add_argument("--decoder_num_heads", type=int, default=8)
+    parser.add_argument("--projection_dim", type=int, default=256)
+    parser.add_argument("--num_seeds", type=int, default=32)
+    parser.add_argument("--seed_dim", type=int, default=64)
+    parser.add_argument("--time_embedding_dim", type=int, default=32)
+    parser.add_argument("--pos_embedding_dim", type=int, default=32)
     # Hyperparameters
-    parser.add_argument("--lr", type=float, default=1e-4, help="learning rate")
-    parser.add_argument("--dropout", type=float, default=0.05, help="dropout rate")
-    parser.add_argument("--layer_dropout", type=float, default=0.05, help="layer dropout rate")
-
+    parser.add_argument("--lr", type=float, default=1e-4)
+    parser.add_argument("--dropout", type=float, default=0.05)
+    parser.add_argument("--layer_dropout", type=float, default=0.05)
     # Training
-    parser.add_argument("--num_obs", type=int, default=500, help="number of observations")
-    parser.add_argument("--min_num_obs", type=int, default=200, help="minimum number of observations")
-    parser.add_argument("--max_num_obs", type=int, default=500, help="maximum number of observations")
-    parser.add_argument("--train_batch_size", type=int, default=64, help="batch size")
-    parser.add_argument("--val_batch_size", type=int, default=200, help="validation batch size")
-    parser.add_argument("--epochs", type=int, default=5000, help="number of epochs")
-    parser.add_argument("--steps_per_epoch", type=int, default=100, help="number of steps per epoch")
-
-    # Inference (for FM only)
-    parser.add_argument("--fm_sample_steps", type=int, default=200, help="number of fm sample steps")
-    parser.add_argument("--fm_num_samples", type=int, default=200, help="number of fm samples")
+    parser.add_argument("--num_obs", type=int, default=500)
+    parser.add_argument("--min_num_obs", type=int, default=200)
+    parser.add_argument("--max_num_obs", type=int, default=500)
+    parser.add_argument("--train_batch_size", type=int, default=64)
+    parser.add_argument("--val_batch_size", type=int, default=200)
+    parser.add_argument("--epochs", type=int, default=5000)
+    parser.add_argument("--steps_per_epoch", type=int, default=100)
+    # Inference
+    parser.add_argument("--fm_sample_steps", type=int, default=200)
+    parser.add_argument("--fm_num_samples", type=int, default=200)
     return parser.parse_args()
+
 
 if __name__ == "__main__":
     args = parse_args()
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-    if torch.cuda.is_available():
-        device = torch.device("cuda")
-    else:
-        device = torch.device("cpu")
-
+    model_cfg = MODELS[args.model]
     use_wandb = args.use_wandb
 
     max_num_regressors = 2
     max_num_categories = 2
     keep_intercept = True
-    num_obs = args.num_obs
 
     model_family_config = {
         "max_num_regressors": max_num_regressors,
         "max_num_categories": max_num_categories,
         "keep_intercept": keep_intercept,
-        "add_interaction": True
+        "add_interaction": True,
     }
 
     train_params_kwargs = {
-        "free_intrinsics": ["v", "a", "z", "tau"],
-        "fixed_intrinsics": ["s_v", "s_tau"],
-        "fixed_values": {"s_v": 0.0, "s_tau": 0.0}
+        "free_intrinsics": model_cfg["free_params"],
+        "fixed_intrinsics": model_cfg["fixed_params"],
+        "fixed_values": model_cfg["default_fixed_values"],
     }
 
     val_params_kwargs = {
-        "free_intrinsics": ["v", "a", "z", "tau", "s_v", "s_tau"],
+        "free_intrinsics": model_cfg["intrinsic_params"],
         "fixed_intrinsics": [],
-        "fixed_values": {}
+        "fixed_values": {},
     }
 
     train_sample_config = {
@@ -403,11 +430,9 @@ if __name__ == "__main__":
         "mask_randomizer_kwargs": val_params_kwargs,
         "min_num_regressors": 2,
         "num_obs": args.num_obs,
-        "fixed_config": False
+        "fixed_config": False,
     }
 
-    # Automate input dim
-    # input_dim = regressors * (categories - 1) + intercept + sim_data_dim (RTs, choices --> 2)
     max_total_regressors = max_num_regressors * (max_num_regressors + 1) // 2
     encoder_input_dim = max_total_regressors * (max_num_categories - 1) + (3 if keep_intercept else 2)
 
@@ -428,17 +453,6 @@ if __name__ == "__main__":
         "batch_size": args.val_batch_size,
         "model_family_config": model_family_config,
         "val_sample_config": val_sample_config,
-        # "free_params": val_params_kwargs["free_intrinsics"],
-        # "fixed_params": val_params_kwargs["fixed_intrinsics"],
-        # "fixed_values": val_params_kwargs["fixed_values"],
-    }
-
-    wandb_config = {
-        "project_name": "cogformer-fm-ddm",
-        "run_name": None,
-        "tags": ["CogFormer", "ModelFamily", "Designer"],
-        "watch_log": "gradients",
-        "watch_freq": 200
     }
 
     cogformer_config = {
@@ -453,54 +467,44 @@ if __name__ == "__main__":
         "dropout": args.dropout,
         "layer_dropout": args.layer_dropout,
         "decoder_layer_design": "mixed_attention",
-        "decoder_layer_kwargs": {
-            "mab_first": True
-        },
+        "decoder_layer_kwargs": {"mab_first": True},
         "time_embedding_dim": args.time_embedding_dim,
         "pos_embedding_dim": args.pos_embedding_dim,
     }
 
     logging.info(
-        f"Training with "
-        f"{cogformer_config['decoder_layer_design']} over "
-        f"{train_config['epochs']} epochs, "
-        f"{train_config['steps_per_epoch']} steps per epoch, and "
-        f"{train_config['batch_size']} batches of dataset per step."
+        f"Training {args.model.upper()} with {cogformer_config['decoder_layer_design']} over "
+        f"{train_config['epochs']} epochs, {train_config['steps_per_epoch']} steps/epoch, "
+        f"batch size {train_config['batch_size']}."
     )
 
     if use_wandb:
-    # Initialize wandb
         wandb.init(
-            project=wandb_config["project_name"],
-            name=wandb_config["run_name"],
-            tags=wandb_config["tags"],
-            config={
-                **train_config,
-                **{"cogformer": cogformer_config},
-            },
+            project=model_cfg["wandb_project"],
+            tags=["CogFormer", args.model.upper(), "ModelFamily"],
+            config={**train_config, **{"cogformer": cogformer_config}},
         )
 
-    # Define model family, adapter, and network
     model_family = ModelFamily(
-        model=DDM(),
-        name="DDM",
-        prior_fun=ddm_priors(),
-        mask_randomizer_kwargs=train_params_kwargs
+        model=model_cfg["model_cls"](),
+        name=model_cfg["name"],
+        prior_fun=model_cfg["prior_fn"](),
+        mask_randomizer_kwargs=train_params_kwargs,
     )
     adapter = Adapter()
     cogformer = CogFormer(**cogformer_config).to(device).train()
 
-    # Pass to trainer
     trainer = CogFormerTrainer(
         model_family=model_family,
+        model_cfg=model_cfg,
         adapter=adapter,
         gpt=cogformer,
         use_wandb=use_wandb,
     )
 
-    # Define checkpoint path
+    ckpt_prefix = model_cfg["checkpoint_prefix"]
     checkpoint_path = (
-        f"cogformer_mixed_attn"
+        f"{ckpt_prefix}"
         f"_l{cogformer_config['decoder_num_layers']}"
         f"_h{cogformer_config['decoder_num_heads']}"
         f"_p{cogformer_config['proj_dim']}"
@@ -513,7 +517,7 @@ if __name__ == "__main__":
     )
 
     fig_path = (
-        f"cogformer_mixed_attn"
+        f"{ckpt_prefix}"
         f"_l{cogformer_config['decoder_num_layers']}"
         f"_h{cogformer_config['decoder_num_heads']}"
         f"_p{cogformer_config['proj_dim']}"
@@ -522,15 +526,13 @@ if __name__ == "__main__":
         f"_o{val_sample_config['num_obs']}"
         f"_b{train_config['batch_size']}"
         f"_e{train_config['epochs']}"
-        f"_t{train_config['steps_per_epoch']}"
-        f"_test.pdf"
+        f"_t{train_config['steps_per_epoch']}_test.pdf"
     )
 
-    # Train
     trainer.train(
         train_config=train_config,
         val_config=val_config,
         checkpoint_path=checkpoint_path,
-        fig_path=fig_path
+        fig_path=fig_path,
     )
     trainer.finish()
