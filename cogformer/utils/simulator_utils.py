@@ -1,26 +1,21 @@
 import numpy as np
-from scipy.stats import t as t_dist
 
 
-CONTAMINANT_TYPES = ("cauchy", "folded_t3", "folded_t5", "uniform")
-
-
-def apply_contamination(
+def contaminate(
     rts: np.ndarray,
     choices: np.ndarray,
     pi: float,
-    contaminant: str = "uniform",
     num_alternatives: int = 2,
     is_circular: bool = False,
 ) -> tuple[np.ndarray, np.ndarray]:
     """
-    Apply mixture contamination to simulated RT and choice data.
+    Apply uniform mixture contamination to simulated RT and choice data.
 
     Implements the mixture model from Radev et al. (2024):
         F^{pi,G} = (1 - pi) * F + pi * G
 
     With probability `pi`, each trial is replaced by a contaminated draw:
-      - RT  ~ G  (one of: folded-t1/Cauchy, folded-t3, folded-t5, Uniform(0, 20))
+      - RT     ~ Uniform(0, 20)
       - Choice ~ Uniform over alternatives  (or Uniform(-pi, pi) for circular models)
 
     Parameters
@@ -29,12 +24,6 @@ def apply_contamination(
     choices : np.ndarray, shape (n, 1)
     pi : float
         Contamination rate in [0, 1].  0.0 disables contamination entirely.
-    contaminant : str
-        Distribution for contaminated RTs:
-          "cauchy"    — |t_1|  (half-Cauchy / folded-t1, heaviest tails)
-          "folded_t3" — |t_3|
-          "folded_t5" — |t_5|
-          "uniform"   — Uniform(0, 20)
     num_alternatives : int
         Number of discrete choice options (DDM: 2, RDM: K). Ignored when
         ``is_circular=True``.
@@ -45,16 +34,10 @@ def apply_contamination(
     Returns
     -------
     rts, choices : np.ndarray
-        Copies with contaminated trials replaced in-place.
+        Copies with contaminated trials replaced.
     """
     if pi <= 0.0:
         return rts, choices
-
-    if contaminant not in CONTAMINANT_TYPES:
-        raise ValueError(
-            f"Unknown contaminant '{contaminant}'. "
-            f"Choose from {CONTAMINANT_TYPES}."
-        )
 
     n = rts.shape[0]
     mask = np.random.uniform(size=n) < pi
@@ -63,17 +46,8 @@ def apply_contamination(
 
     n_c = int(mask.sum())
 
-    # --- Contaminated RTs ---
-    if contaminant == "cauchy":
-        rt_c = np.abs(t_dist.rvs(df=1, size=n_c))
-    elif contaminant == "folded_t3":
-        rt_c = np.abs(t_dist.rvs(df=3, size=n_c))
-    elif contaminant == "folded_t5":
-        rt_c = np.abs(t_dist.rvs(df=5, size=n_c))
-    else:  # "uniform"
-        rt_c = np.random.uniform(0.0, 20.0, size=n_c)
+    rt_c = np.random.uniform(0.0, 20.0, size=n_c)
 
-    # --- Contaminated choices ---
     if is_circular:
         choice_c = np.random.uniform(-np.pi, np.pi, size=n_c)
     else:

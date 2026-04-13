@@ -1,5 +1,6 @@
 import numpy as np
 from typing import Callable
+from scipy.stats import invwishart
 
 from cogformer.utils.simulator_utils import shifted_softplus
 
@@ -347,10 +348,17 @@ class ContextManager:
         min_num_categories: int = 2,
         max_num_categories: int = 4,
         main_discrete_mask: np.ndarray = None,
+        nu: float | None = None,
     ) -> np.ndarray:
         """
         Build design matrix based on the respective configuration of free intrinsic parameters.
         The design matrix should have the shape of
+
+        Continuous regressors are drawn jointly from X ~ MVN(0, Sigma) where
+        Sigma ~ Inv-Wishart(nu, I_k) and k is the number of continuous regressors.
+        When nu is None it is sampled uniformly from [k+1, 4k+1] each call,
+        giving a random amount of multicollinearity. Columns are standardized to
+        unit variance so the marginal scale matches the old N(0,1) behaviour.
         """
         # Provide context
         context = context or {}
@@ -378,6 +386,24 @@ class ContextManager:
                 num_regressors=len(main_effect_keys),
                 discrete_prob=discrete_prob,
             )
+
+        # Pre-sample all continuous regressors jointly via MVN(0, Sigma),
+        # Sigma ~ Inv-Wishart(nu, I_k), to introduce random multicollinearity.
+        continuous_indices = [
+            j for j, key in enumerate(main_effect_keys)
+            if key not in context
+            and (len(main_discrete_mask) == 0 or main_discrete_mask[j] == 0)
+        ]
+        k = len(continuous_indices)
+        if k > 0:
+            nu_val = float(nu) if nu is not None else np.random.uniform(k + 1, 4 * k + 1)
+            Sigma = invwishart.rvs(df=nu_val, scale=np.eye(k))
+            Sigma = np.atleast_2d(Sigma).reshape(k, k)
+            X_mvn = np.random.multivariate_normal(np.zeros(k), Sigma, size=num_obs)
+            X_mvn /= X_mvn.std(axis=0).clip(1e-8)   # standardize to unit variance
+            continuous_col_map = {j: X_mvn[:, i].astype(np.float32) for i, j in enumerate(continuous_indices)}
+        else:
+            continuous_col_map = {}
 
         # Fill in the matrix
         col_idx = 0
@@ -412,10 +438,7 @@ class ContextManager:
                 num_categories = dummies.shape[1]
                 design_matrix[:, start:(start + num_categories)] = dummies
             else:
-                x = np.random.standard_normal(size=num_obs).astype(np.float32, copy=False)
-                # x = np.random.uniform(size=num_obs).astype(np.float32, copy=False)
-
-                design_matrix[:, start] = x
+                design_matrix[:, start] = continuous_col_map[j]
 
         # Interaction effect
         for key in interaction_keys:

@@ -3,7 +3,7 @@ from numba import njit, prange
 
 from cogformer.simulator import Model
 from cogformer.utils.simulator_utils import as_1d
-from cogformer.utils.simulator_utils import apply_contamination
+from cogformer.utils.simulator_utils import contaminate
 
 @njit
 def sample_rdm_trial(
@@ -88,19 +88,11 @@ class RDM(Model):
         - v_diff: added to accumulator specified by context['favored_idx']
     """
 
-    def __init__(
-        self,
-        dt: float = 1e-3,
-        max_steps: int = 1e4,
-        decay: float = 0.0,
-        pi: float = 0.0,
-        contaminant: str = "uniform",
-    ):
+    def __init__(self, dt: float = 1e-3, max_steps: int = 1e4, decay: float = 0.0, pi: float = 0.0):
         self.dt = dt
         self.max_steps = max_steps
         self.decay = decay  # Fixed decay parameter (0.0 = no collapsing bounds)
         self.pi = pi
-        self.contaminant = contaminant
 
     def prepare_params(
         self,
@@ -186,12 +178,7 @@ class RDM(Model):
         rts = results[:, 0][..., None]
         choices = results[:, 1][..., None]
         num_alternatives = int((context or {}).get("num_alternatives", 2))
-        rts, choices = apply_contamination(
-            rts, choices,
-            pi=self.pi,
-            contaminant=self.contaminant,
-            num_alternatives=num_alternatives,
-        )
+        rts, choices = contaminate(rts, choices, pi=self.pi, num_alternatives=num_alternatives)
         return {"rts": rts, "choices": choices}
 
     def sample(self):

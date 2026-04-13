@@ -5,7 +5,7 @@ from scipy.stats import halfnorm
 from .ddm_priors import ddm_priors
 
 from cogformer.simulator import Model
-from cogformer.utils.simulator_utils import apply_contamination
+from cogformer.utils.simulator_utils import contaminate
 
 
 @njit
@@ -79,28 +79,16 @@ def simulate_ddm(
 
 class DDM(Model):
 
-    def __init__(
-        self,
-        dt: float = 1e-3,
-        max_steps: int = 1e4,
-        pi: float = 0.0,
-        contaminant: str = "uniform",
-    ):
+    def __init__(self, dt: float = 1e-3, max_steps: int = 1e4, pi: float = 0.0):
         self.dt = dt
         self.max_steps = max_steps
         self.pi = pi
-        self.contaminant = contaminant
 
     def simulate(self, params: dict[str, np.ndarray], context=None):
         results = simulate_ddm(**params, sigma=1.0, dt=self.dt, max_steps=self.max_steps)
         rts = results[:, 0][..., None]
         choices = results[:, 1][..., None]
-        rts, choices = apply_contamination(
-            rts, choices,
-            pi=self.pi,
-            contaminant=self.contaminant,
-            num_alternatives=2,
-        )
+        rts, choices = contaminate(rts, choices, pi=self.pi, num_alternatives=2)
         return {"rts": rts, "choices": choices}
 
     def sample(self, batch_size: int | tuple, num_obs: int = 500, context=None):

@@ -56,6 +56,7 @@ class ModelFamily:
         debug: bool = False,
         fixed_config: bool = False,
         add_interaction: bool = False,
+        nu: float | None = None,
     ):
         if prior_fun is None:
             prior_fun = self.prior_fun
@@ -143,6 +144,7 @@ class ModelFamily:
             discrete_prob=discrete_prob,
             keep_intercept=keep_intercept,
             max_num_categories=max_num_categories,
+            nu=nu,
         )
 
         # Parameter matrix
@@ -226,6 +228,7 @@ class ModelFamily:
         flatten_param_outputs: bool = True,
         fixed_config: bool = False,
         add_interaction: bool = False,
+        nu: float | None = None,
     ) -> list[dict] | dict:
         if prior_fun is None:
             prior_fun = self.prior_fun
@@ -278,6 +281,7 @@ class ModelFamily:
                 fixed_config=fixed_config,
                 add_interaction=add_interaction,
                 link_fun=link_fun,
+                nu=nu,
             )
 
             sim_instance["num_obs"] = num_obs
