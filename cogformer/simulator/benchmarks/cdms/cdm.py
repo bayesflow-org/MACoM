@@ -3,6 +3,7 @@ from numba import njit, prange
 
 from cogformer.simulator import Model
 from cogformer.utils.simulator_utils import as_1d
+from cogformer.utils.simulator_utils import apply_contamination
 
 
 @njit
@@ -65,11 +66,20 @@ def simulate_cdm(
 
 class CDM(Model):
 
-    def __init__(self, dt: float = 1e-3, max_steps: int = 1e4, decay: float = 0.0):
+    def __init__(
+        self,
+        dt: float = 1e-3,
+        max_steps: int = 1e4,
+        decay: float = 0.0,
+        pi: float = 0.0,
+        contaminant: str = "uniform",
+    ):
         super().__init__()
         self.dt = dt
         self.max_steps = max_steps
         self.decay = decay
+        self.pi = pi
+        self.contaminant = contaminant
 
     def prepare_params(
             self,
@@ -124,4 +134,10 @@ class CDM(Model):
         results = simulate_cdm(**params, decay=self.decay, dt=self.dt, max_steps=self.max_steps)
         rts = results[:, 0][..., None]
         choices = results[:, 1][..., None]
+        rts, choices = apply_contamination(
+            rts, choices,
+            pi=self.pi,
+            contaminant=self.contaminant,
+            is_circular=True,
+        )
         return {"rts": rts, "choices": choices}
