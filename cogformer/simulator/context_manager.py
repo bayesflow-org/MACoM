@@ -348,17 +348,21 @@ class ContextManager:
         min_num_categories: int = 2,
         max_num_categories: int = 4,
         main_discrete_mask: np.ndarray = None,
-        nu: float | None = None,
+        collinearity_df: float | None = None,
+        category_concentration: float | None = None,
     ) -> np.ndarray:
         """
         Build design matrix based on the respective configuration of free intrinsic parameters.
-        The design matrix should have the shape of
 
-        Continuous regressors are drawn jointly from X ~ MVN(0, Sigma) where
-        Sigma ~ Inv-Wishart(nu, I_k) and k is the number of continuous regressors.
-        When nu is None it is sampled uniformly from [k+1, 4k+1] each call,
-        giving a random amount of multicollinearity. Columns are standardized to
-        unit variance so the marginal scale matches the old N(0,1) behaviour.
+        All non-context main effect regressors are drawn jointly from X ~ MVN(0, Sigma),
+        Sigma ~ Inv-Wishart(collinearity_df, I_k), giving a shared latent covariance structure across
+        both continuous and discrete regressors.
+
+        Conticollinearity_dfous columns are used directly (standardized to unit variance).
+        Discrete columns are discretized via Dirichlet-sampled quantile cuts:
+          p ~ Dirichlet(category_concentration * 1_k), then z is cut at quantiles implied by cumsum(p).
+          category_concentration=None samples category_concentration ~ Uniform(0.1, 2.0) each call, covering the range
+          from heavily skewed to near-uniform category distributions.
         """
         # Provide context
         context = context or {}
@@ -387,23 +391,24 @@ class ContextManager:
                 discrete_prob=discrete_prob,
             )
 
-        # Pre-sample all continuous regressors jointly via MVN(0, Sigma),
-        # Sigma ~ Inv-Wishart(nu, I_k), to introduce random multicollinearity.
-        continuous_indices = [
+        # Pre-sample ALL non-context main effect regressors jointly via MVN(0, Sigma),
+        # Sigma ~ Inv-Wishart(collinearity_df, I_k), so continuous and discrete regressors share
+        # the same latent covariance structure.  Conticollinearity_dfous columns are used directly;
+        # discrete columns are subsequently discretized via Dirichlet-sampled quantile cuts.
+        non_context_indices = [
             j for j, key in enumerate(main_effect_keys)
             if key not in context
-            and (len(main_discrete_mask) == 0 or main_discrete_mask[j] == 0)
         ]
-        k = len(continuous_indices)
+        k = len(non_context_indices)
         if k > 0:
-            nu_val = float(nu) if nu is not None else np.random.uniform(k + 1, 4 * k + 1)
-            Sigma = invwishart.rvs(df=nu_val, scale=np.eye(k))
+            collinearity_df_val = float(collinearity_df) if collinearity_df is not None else np.random.uniform(k + 1, 4 * k + 1)
+            Sigma = invwishart.rvs(df=collinearity_df_val, scale=np.eye(k))
             Sigma = np.atleast_2d(Sigma).reshape(k, k)
             X_mvn = np.random.multivariate_normal(np.zeros(k), Sigma, size=num_obs)
             X_mvn /= X_mvn.std(axis=0).clip(1e-8)   # standardize to unit variance
-            continuous_col_map = {j: X_mvn[:, i].astype(np.float32) for i, j in enumerate(continuous_indices)}
+            mvn_col_map = {j: X_mvn[:, i].astype(np.float32) for i, j in enumerate(non_context_indices)}
         else:
-            continuous_col_map = {}
+            mvn_col_map = {}
 
         # Fill in the matrix
         col_idx = 0
@@ -427,18 +432,11 @@ class ContextManager:
                 continue
 
             if main_discrete_mask[j] == 1:
-                # Sample dummies
-                dummies = self.sample_dummies(
-                    num_obs=num_obs,
-                    min_num_categories=min_num_categories,
-                    max_num_categories=max_num_categories
-                )
-
-                # Infer num_categories and increment the column index
-                num_categories = dummies.shape[1]
-                design_matrix[:, start:(start + num_categories)] = dummies
+                num_categories = np.random.randint(min_num_categories, max_num_categories + 1)
+                dummies = self._discretize_column(mvn_col_map[j], num_categories, category_concentration)
+                design_matrix[:, start:(start + dummies.shape[1])] = dummies
             else:
-                design_matrix[:, start] = continuous_col_map[j]
+                design_matrix[:, start] = mvn_col_map[j]
 
         # Interaction effect
         for key in interaction_keys:
@@ -605,6 +603,32 @@ class ContextManager:
 
         return parameter_matrix
 
+
+    def _discretize_column(
+        self,
+        z: np.ndarray,
+        k: int,
+        category_concentration: float | None = None,
+    ) -> np.ndarray:
+        """
+        Discretize a latent continuous column z into k dummy-coded categories.
+
+        Category probabilities are sampled from Dirichlet(category_concentration * 1_k), then used
+        as quantile boundaries on z.  category_concentration controls skewness:
+          category_concentration << 1  → one category dominates (heavy imbalance)
+          category_concentration = 1   → uniform over the simplex (random imbalance)
+          category_concentration >> 1  → nearly equal-sized categories
+        When category_concentration is None it is sampled from Uniform(0.1, 2.0).
+
+        Returns an (n, k-1) float32 array of dummy variables (reference category dropped).
+        """
+        category_concentration_val = float(category_concentration) if category_concentration is not None else np.random.uniform(0.1, 2.0)
+        p = np.random.dirichlet(category_concentration_val * np.ones(k))
+        cuts = np.cumsum(p)[:-1]          # k-1 quantile boundaries in (0, 1)
+        boundaries = np.quantile(z, cuts)
+        bin_ids = np.digitize(z, boundaries)   # values in {0, ..., k-1}
+        one_hot = (bin_ids[:, None] == np.arange(k)[None, :]).astype(np.float32)
+        return one_hot[:, 1:]             # drop reference category
 
     def sample_dummies(
         self,
