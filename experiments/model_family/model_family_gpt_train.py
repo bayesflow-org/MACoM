@@ -434,7 +434,7 @@ if __name__ == "__main__":
     }
 
     max_total_regressors = max_num_regressors * (max_num_regressors + 1) // 2
-    encoder_input_dim = max_total_regressors * (max_num_categories - 1) + (3 if keep_intercept else 2)
+    encoder_input_dim = max_total_regressors * (max_num_categories - 1) + (4 if keep_intercept else 3)
 
     train_config = {
         "epochs": args.epochs,

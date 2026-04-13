@@ -173,7 +173,12 @@ class RDM(Model):
         """Build default context (2 alternatives, no favored_idx needed)."""
         return {"num_alternatives": 2}
 
-    def simulate(self, params: dict[str, np.ndarray], context=None):
+    @staticmethod
+    def build_random_context(num_obs: int) -> dict[str, np.ndarray]:
+        num_alternatives = np.random.randint(2, 5)
+        return RDM.build_context(num_obs, num_alternatives)
+
+    def simulate(self, params: dict[str, np.ndarray], context=None, randomize=False):
         results = simulate_rdm(**params, decay=self.decay, dt=self.dt, max_steps=self.max_steps)
         rts = results[:, 0][..., None]
         choices = results[:, 1][..., None]

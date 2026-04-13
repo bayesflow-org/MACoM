@@ -117,14 +117,26 @@ class Adapter:
         intrinsic_params: list[str],
         device: str | torch.device = torch.device("cuda"),
         num_params: int | None = None,
+        max_alternatives: int = 4,
     ) -> dict:
         design_matrices = samples["design_matrices"]
         rts = samples["sim_data"]["rts"]
         choices = samples["sim_data"]["choices"]
 
-        batch_size = design_matrices.shape[0]
+        batch_size, num_obs = design_matrices.shape[0], design_matrices.shape[1]
 
-        input_data = Adapter.stack([design_matrices, rts, choices], axis=-1)
+        # Normalize choices to [0, 1] by num_alternatives; append num_alternatives as a scalar column
+        num_alternatives = np.asarray(
+            samples.get("num_alternatives", np.full(batch_size, 2)), dtype=np.float32
+        ).reshape(batch_size)
+        denom = np.maximum(num_alternatives - 1.0, 1.0).reshape(batch_size, 1, 1)
+        choices_normalized = choices / denom
+        alt_col = np.repeat(
+            ((num_alternatives - 1.0) / max(max_alternatives - 1, 1)).reshape(batch_size, 1, 1),
+            num_obs, axis=1
+        ).astype(np.float32)
+
+        input_data = Adapter.stack([design_matrices, rts, choices_normalized, alt_col], axis=-1)
         input_data = Adapter.to_torch_tensor(input_data).to(torch.float32)
 
         # num_params overrides intrinsic_params length when called from a ModelClass pipeline

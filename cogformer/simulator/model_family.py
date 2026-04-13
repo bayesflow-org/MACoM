@@ -202,6 +202,7 @@ class ModelFamily:
             "regressor_mask": regressor_mask,
             "max_num_regressors": max_num_regressors,
             "keep_intercept": keep_intercept,
+            "num_alternatives": int((context or {}).get("num_alternatives", 2)),
         }
 
         if debug:
@@ -333,6 +334,7 @@ class ModelFamily:
         discrete_masks = -np.ones((batch_size, max_total_regressors))
         num_obs_array = np.zeros((batch_size, 1))
         num_regressors_array = np.zeros((batch_size, 1))
+        num_alternatives_array = np.zeros(batch_size, dtype=np.int32)
 
         # Collect lists
         model_names, design_configs = [], []
@@ -364,6 +366,7 @@ class ModelFamily:
             discrete_masks[i, :b["discrete_mask"].shape[0]] = b["discrete_mask"]
             num_obs_array[i] = b["num_obs"]
             num_regressors_array[i] = b["num_regressors"]
+            num_alternatives_array[i] = b.get("num_alternatives", 2)
 
             for k in sim_keys:
                 v = b["sim_trials"][k]
@@ -383,6 +386,7 @@ class ModelFamily:
             "discrete_masks": discrete_masks,
             "num_obs": num_obs_array,
             "num_regressors": num_regressors_array,
+            "num_alternatives": num_alternatives_array,
             "max_num_regressors": max_num_regressors,
             "max_num_categories": max_num_categories,
         }
