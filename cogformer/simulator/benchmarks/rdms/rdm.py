@@ -5,7 +5,7 @@ from cogformer.simulator import Model
 from cogformer.utils.simulator_utils import as_1d
 from cogformer.utils.simulator_utils import contaminate
 
-@njit
+@njit(cache=True, fastmath=True)
 def sample_rdm_trial(
     v: np.ndarray,
     a: float,
@@ -39,7 +39,7 @@ def sample_rdm_trial(
     return np.array([-1.0, -1.0], dtype=np.float32)
 
 
-@njit(parallel=True)
+@njit(parallel=True, cache=True, fastmath=True)
 def simulate_rdm(
     v: np.ndarray,
     a: np.ndarray,
@@ -88,7 +88,7 @@ class RDM(Model):
         - v_diff: added to accumulator specified by context['favored_idx']
     """
 
-    def __init__(self, dt: float = 2e-4, max_steps: int = 5e4, decay: float = 0.0, pi: float = 0.0):
+    def __init__(self, dt: float = 5e-4, max_steps: int = 20000, decay: float = 0.0, pi: float = 0.0):
         self.dt = dt
         self.max_steps = max_steps
         self.decay = decay  # Fixed decay parameter (0.0 = no collapsing bounds)

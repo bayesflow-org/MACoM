@@ -8,7 +8,7 @@ from cogformer.simulator import Model
 from cogformer.utils.simulator_utils import contaminate
 
 
-@njit
+@njit(cache=True, fastmath=True)
 def simulate_ddm_trial(
     v: float,
     a: float,
@@ -45,7 +45,7 @@ def simulate_ddm_trial(
     # No decision within max_steps
     return np.array([-1.0, -1.0], dtype=np.float32)
 
-@njit(parallel=True)
+@njit(parallel=True, cache=True, fastmath=True)
 def simulate_ddm(
     v: np.ndarray,
     a: np.ndarray,
@@ -79,7 +79,7 @@ def simulate_ddm(
 
 class DDM(Model):
 
-    def __init__(self, dt: float = 2e-4, max_steps: int = 5e4, pi: float = 0.0):
+    def __init__(self, dt: float = 5e-4, max_steps: int = 20000, pi: float = 0.0):
         self.dt = dt
         self.max_steps = max_steps
         self.pi = pi

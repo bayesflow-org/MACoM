@@ -6,7 +6,7 @@ from cogformer.utils.simulator_utils import as_1d
 from cogformer.utils.simulator_utils import contaminate
 
 
-@njit
+@njit(cache=True, fastmath=True)
 def simulate_cdm_trial(
     v: np.ndarray,
     a: float,
@@ -25,7 +25,8 @@ def simulate_cdm_trial(
     c = np.sqrt(dt) * sigma
     x = np.zeros(2)
     for i_iter in range(max_steps):
-        x += v_i * dt + c * np.random.randn(2)
+        x[0] += v_i[0] * dt + c * np.random.randn()
+        x[1] += v_i[1] * dt + c * np.random.randn()
         # Compute threshold inline (no array allocation); fast path when decay=0
         threshold_sq = a * a if decay == 0.0 else (a * np.exp(-decay * i_iter * dt)) ** 2
         if x[0] * x[0] + x[1] * x[1] >= threshold_sq:
@@ -33,7 +34,7 @@ def simulate_cdm_trial(
     # No decision within max_steps
     return np.array([-4.0, -4.0])
 
-@njit(parallel=True)
+@njit(parallel=True, cache=True, fastmath=True)
 def simulate_cdm(
     v: np.ndarray,
     a: np.ndarray,
@@ -66,7 +67,7 @@ def simulate_cdm(
 
 class CDM(Model):
 
-    def __init__(self, dt: float = 2e-4, max_steps: int = 5e4, decay: float = 0.0, pi: float = 0.0):
+    def __init__(self, dt: float = 5e-4, max_steps: int = 20000, decay: float = 0.0, pi: float = 0.0):
         super().__init__()
         self.dt = dt
         self.max_steps = max_steps
