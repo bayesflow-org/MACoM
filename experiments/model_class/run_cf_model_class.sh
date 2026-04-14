@@ -14,6 +14,11 @@
 
 set -euo pipefail
 
+# Ensure the project root is on PYTHONPATH so `cogformer` is importable
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
+export PYTHONPATH="${PROJECT_ROOT}${PYTHONPATH:+:$PYTHONPATH}"
+
 # ============================================================
 # Centralized config
 # ============================================================
@@ -34,7 +39,7 @@ LAYER_DROPOUT=0.05
 
 # Training
 LR=1e-4
-EPOCHS=5000
+EPOCHS=3000
 STEPS_PER_EPOCH=100
 TRAIN_BATCH=64
 VAL_BATCH=200
@@ -43,8 +48,8 @@ MAX_NUM_OBS=500
 VAL_NUM_OBS=500
 
 # Inference
-FM_STEPS=200
-FM_SAMPLES=100
+FM_STEPS=500
+FM_SAMPLES=500
 
 # ============================================================
 # Derived checkpoint path (must match model_class_cf_train naming)
@@ -104,6 +109,7 @@ python "$TRAIN_SCRIPT" \
     --val_num_obs      "$VAL_NUM_OBS" \
     --fm_sample_steps  "$FM_STEPS" \
     --fm_num_samples   "$FM_SAMPLES" \
+    --use_wandb \
     "${EXTRA_TRAIN_ARGS[@]}"
 
 echo ""

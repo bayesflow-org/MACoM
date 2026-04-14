@@ -10,6 +10,11 @@
 
 set -euo pipefail
 
+# Ensure the project root is on PYTHONPATH so `cogformer` is importable
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
+export PYTHONPATH="${PROJECT_ROOT}${PYTHONPATH:+:$PYTHONPATH}"
+
 MODELS=("ddm" "cdm" "rdm")
 CASES=("intercept_only" "fixed" "regressed" "fixed_regressed" "interaction" "full")
 TRAIN_SCRIPT="experiments/model_family/model_family_bf_train.py"

@@ -220,3 +220,5 @@ outputs/
 
 .claude/
 .claude/settings.local.json
+
+wandb/
