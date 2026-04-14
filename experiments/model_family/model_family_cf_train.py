@@ -44,9 +44,9 @@ MODELS = {
         "default_fixed_values": {"s_v": 0.0, "s_tau": 0.0},
         "val_epoch_interval": 250,
         "wandb_project": "cogformer-fm-ddm",
-        "checkpoint_dir": "./cogformer/experiments/checkpoints/fm/ddm/",
+        "checkpoint_dir": "./outputs/checkpoints/model_family/cf/ddm/",
         "checkpoint_prefix": "cogformer_mixed_attn",
-        "fig_subdir": "fm/ddm",
+        "fig_subdir": "model_family/cf/ddm",
         "val_scenarios": [
             ("interaction", {
                 "1": ["v", "a", "z", "tau", "s_v", "s_tau"],
@@ -72,9 +72,9 @@ MODELS = {
         "default_fixed_values": {"s_v": 0.0, "s_tau": 0.0},
         "val_epoch_interval": 1000,
         "wandb_project": "cogformer-fm-cdm",
-        "checkpoint_dir": "./cogformer/experiments/checkpoints/fm/cdm/",
+        "checkpoint_dir": "./outputs/checkpoints/model_family/cf/cdm/",
         "checkpoint_prefix": "cogformer_cdm_mixed_attn",
-        "fig_subdir": "fm/cdm",
+        "fig_subdir": "model_family/cf/cdm",
         "val_scenarios": [
             ("interaction", {
                 "1": ["v", "v_theta", "a", "tau", "s_v", "s_tau"],
@@ -100,9 +100,9 @@ MODELS = {
         "default_fixed_values": {"s_v": 0.0, "s_tau": 0.0},
         "val_epoch_interval": 1000,
         "wandb_project": "cogformer-fm-rdm",
-        "checkpoint_dir": "./cogformer/experiments/checkpoints/fm/rdm/",
+        "checkpoint_dir": "./outputs/checkpoints/model_family/cf/rdm/",
         "checkpoint_prefix": "cogformer_rdm_mixed_attn",
-        "fig_subdir": "fm/rdm",
+        "fig_subdir": "model_family/cf/rdm",
         "val_scenarios": [
             ("interaction", {
                 "1": ["v", "v_diff", "a", "tau", "s_v", "s_tau"],
@@ -223,7 +223,7 @@ class CogFormerTrainer:
 
         colors = cogformer_fm_colors()
         max_num_categories = config["model_family_config"]["max_num_categories"]
-        base = Path(f"./cogformer/experiments/figures/{fig_subdir}")
+        base = Path(f"./outputs/figures/{fig_subdir}")
 
         recovery_dir = base / "recovery"
         posterior_dir = base / "test_posterior"

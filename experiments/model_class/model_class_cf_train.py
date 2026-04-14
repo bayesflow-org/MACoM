@@ -99,7 +99,7 @@ class CogFormerTrainer:
             scheduler.step()
             pbar.close()
 
-        checkpoint_dir = Path("./cogformer/experiments/checkpoints/fm/model_class/")
+        checkpoint_dir = Path("./outputs/checkpoints/model_class/cf/")
         checkpoint_dir.mkdir(parents=True, exist_ok=True)
         torch.save(self.gpt.state_dict(), checkpoint_dir / checkpoint_path)
         logging.info(f"[saved] {checkpoint_dir / checkpoint_path}")
@@ -148,7 +148,7 @@ class CogFormerTrainer:
         max_num_params = self.model_class.max_num_params
         colors = cogformer_fm_colors()
 
-        figures_dir = Path("./cogformer/experiments/figures/fm/model_class/recovery")
+        figures_dir = Path("./outputs/figures/model_class/cf/recovery")
         figures_dir.mkdir(parents=True, exist_ok=True)
 
         for model_name, model_cfg in MODEL_CONFIGS.items():

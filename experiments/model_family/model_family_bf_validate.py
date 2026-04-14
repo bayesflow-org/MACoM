@@ -323,9 +323,9 @@ MODELS = {
         "intrinsic_params": ["v", "a", "z", "tau", "s_v", "s_tau"],
         "variable_names": [r"$v$", r"$a$", r"$z$", r"$\tau$", r"$s_v$", r"$s_\tau$"],
         "ckpt_prefix": "ddm_families_bf",
-        "figures_dir": "./cogformer/experiments/figures/bf/ddm",
-        "data_dir": "./cogformer/experiments/data",
-        "evals_dir": "./cogformer/experiments/evaluations",
+        "figures_dir": "./outputs/figures/model_family/bf/ddm",
+        "data_dir": "./outputs/data/model_family",
+        "evals_dir": "./outputs/evaluations/model_family/bf",
         "benchmark_configs": {
             "intercept_only": {"1": ["v", "a", "z", "tau", "s_v", "s_tau"], "u_1": [], "u_2": [], "u_1:u_2": []},
             "regressed": {"1": ["v", "a", "z", "tau", "s_v", "s_tau"], "u_1": ["v", "a", "z"], "u_2": ["v", "a", "z"], "u_1:u_2": []},
@@ -341,9 +341,9 @@ MODELS = {
         "intrinsic_params": ["v", "v_theta", "a", "tau", "s_v", "s_tau"],
         "variable_names": [r"$v$", r"$v_\theta$", r"$a$", r"$\tau$", r"$s_v$", r"$s_\tau$"],
         "ckpt_prefix": "cdm_families_bf",
-        "figures_dir": "./cogformer/experiments/figures/bf/cdm",
-        "data_dir": "./cogformer/experiments/data",
-        "evals_dir": "./cogformer/experiments/evaluations",
+        "figures_dir": "./outputs/figures/model_family/bf/cdm",
+        "data_dir": "./outputs/data/model_family",
+        "evals_dir": "./outputs/evaluations/model_family/bf",
         "benchmark_configs": {
             "intercept_only": {"1": ["v", "v_theta", "a", "tau", "s_v", "s_tau"], "u_1": [], "u_2": [], "u_1:u_2": []},
             "regressed": {"1": ["v", "v_theta", "a", "tau", "s_v", "s_tau"], "u_1": ["v", "a"], "u_2": ["v", "a"], "u_1:u_2": []},
@@ -359,9 +359,9 @@ MODELS = {
         "intrinsic_params": ["v", "v_diff", "a", "tau", "s_v", "s_tau"],
         "variable_names": [r"$v$", r"$v_{\mathrm{diff}}$", r"$a$", r"$\tau$", r"$s_v$", r"$s_\tau$"],
         "ckpt_prefix": "rdm_families_bf",
-        "figures_dir": "./cogformer/experiments/figures/bf/rdm",
-        "data_dir": "./cogformer/experiments/data",
-        "evals_dir": "./cogformer/experiments/evaluations",
+        "figures_dir": "./outputs/figures/model_family/bf/rdm",
+        "data_dir": "./outputs/data/model_family",
+        "evals_dir": "./outputs/evaluations/model_family/bf",
         "benchmark_configs": {
             "intercept_only": {"1": ["v", "v_diff", "a", "tau", "s_v", "s_tau"], "u_1": [], "u_2": [], "u_1:u_2": []},
             "regressed": {"1": ["v", "v_diff", "a", "tau", "s_v", "s_tau"], "u_1": ["v_diff", "a"], "u_2": ["v_diff", "a"], "u_1:u_2": []},
@@ -470,7 +470,7 @@ def test(model_key: str, case: str):
     print(f"  [Check] Params zero where masked: {'OK' if zero_where_masked else 'FAIL'}")
     assert zero_where_masked
 
-    checkpoint_path = f"./cogformer/experiments/checkpoints/{MODELS[model_key]['ckpt_prefix']}_{case}/model.keras"
+    checkpoint_path = f"./outputs/checkpoints/model_family/bf/{model_key}/{MODELS[model_key]['ckpt_prefix']}_{case}/model.keras"
     approximator = keras.saving.load_model(checkpoint_path)
     val_sims = simulator.sample(100)
     post_draws = approximator.sample(
@@ -490,7 +490,7 @@ def main(model_key: str, case: str, batch_size: int = 200, num_samples: int = 20
     variable_names = model_cfg["variable_names"]
 
     simulator = ModelFamilyBF(model_key=model_key, case=case)
-    ckpt_path = f"./cogformer/experiments/checkpoints/{model_cfg['ckpt_prefix']}_{case}/model.keras"
+    ckpt_path = f"./outputs/checkpoints/model_family/bf/{model_key}/{model_cfg['ckpt_prefix']}_{case}/model.keras"
     approximator = keras.saving.load_model(ckpt_path)
 
     data_dir = Path(model_cfg["data_dir"])

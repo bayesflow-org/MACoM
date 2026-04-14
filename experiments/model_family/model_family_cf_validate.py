@@ -38,7 +38,7 @@ MODELS = {
         "free_params": ["v", "a", "z", "tau"],
         "fixed_params": ["s_v", "s_tau"],
         "default_fixed_values": {"s_v": 0.0, "s_tau": 0.0},
-        "outdir": "./cogformer/experiments/figures/fm/ddm/",
+        "outdir": "./outputs/figures/model_family/cf/ddm/",
         # DDM uses singular "family", CDM/RDM use plural "families"
         "pred_filename_template": "{model}_family_{case}_gpt_pred.npz",
         "benchmark_configs": {
@@ -82,7 +82,7 @@ MODELS = {
         "free_params": ["v", "v_theta", "a", "tau"],
         "fixed_params": ["s_v", "s_tau"],
         "default_fixed_values": {"s_v": 0.0, "s_tau": 0.0},
-        "outdir": "./cogformer/experiments/figures/fm/cdm/",
+        "outdir": "./outputs/figures/model_family/cf/cdm/",
         "pred_filename_template": "{model}_families_{case}_gpt_pred.npz",
         "benchmark_configs": {
             "intercept_only": {
@@ -125,7 +125,7 @@ MODELS = {
         "free_params": ["v", "v_diff", "a", "tau"],
         "fixed_params": ["s_v", "s_tau"],
         "default_fixed_values": {"s_v": 0.0, "s_tau": 0.0},
-        "outdir": "./cogformer/experiments/figures/fm/rdm/",
+        "outdir": "./outputs/figures/model_family/cf/rdm/",
         "pred_filename_template": "{model}_families_{case}_gpt_pred.npz",
         "benchmark_configs": {
             "intercept_only": {
@@ -183,7 +183,7 @@ def infer_free_fixed_intrinsics(design_config, all_intrinsics, default_fixed_val
 
 def build_encoder_input_dim(max_num_regressors, max_num_categories, keep_intercept):
     max_total_regressors = max_num_regressors * (max_num_regressors + 1) // 2
-    return max_total_regressors * (max_num_categories - 1) + (3 if keep_intercept else 2)
+    return max_total_regressors * (max_num_categories - 1) + (4 if keep_intercept else 3)
 
 
 def parse_args():
@@ -193,8 +193,8 @@ def parse_args():
     p.add_argument("--checkpoint", type=str, required=True)
     p.add_argument("--outdir", type=str, default=None,
                    help="Output directory (defaults to model-specific path)")
-    p.add_argument("--pred_dir", type=str, default="./cogformer/experiments/data/")
-    p.add_argument("--data_dir", type=str, default="./cogformer/experiments/data/")
+    p.add_argument("--pred_dir", type=str, default="./outputs/data/model_family/")
+    p.add_argument("--data_dir", type=str, default="./outputs/data/model_family/")
     p.add_argument("--batch_size", type=int, default=200)
     p.add_argument("--num_obs", type=int, default=500)
     p.add_argument("--max_num_regressors", type=int, default=2)

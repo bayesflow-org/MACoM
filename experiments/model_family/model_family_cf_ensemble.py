@@ -34,7 +34,7 @@ MODELS = {
         "free_params": ["v", "a", "z", "tau"],
         "fixed_params": ["s_v", "s_tau"],
         "default_fixed_values": {"s_v": 0.0, "s_tau": 0.0},
-        "outdir": "./cogformer/experiments/figures/fm/ddm/ensemble/",
+        "outdir": "./outputs/figures/model_family/cf/ddm/ensemble/",
         # DDM uses "Intercept" (short) while CDM/RDM use "Intercept Only"
         "case_labels": {
             "intercept_only": "Intercept",
@@ -59,7 +59,7 @@ MODELS = {
         "free_params": ["v", "v_theta", "a", "tau"],
         "fixed_params": ["s_v", "s_tau"],
         "default_fixed_values": {"s_v": 0.0, "s_tau": 0.0},
-        "outdir": "./cogformer/experiments/figures/fm/cdm/ensemble/",
+        "outdir": "./outputs/figures/model_family/cf/cdm/ensemble/",
         "case_labels": {
             "intercept_only": "Intercept Only",
             "regressed": "Regressed",
@@ -83,7 +83,7 @@ MODELS = {
         "free_params": ["v", "v_diff", "a", "tau"],
         "fixed_params": ["s_v", "s_tau"],
         "default_fixed_values": {"s_v": 0.0, "s_tau": 0.0},
-        "outdir": "./cogformer/experiments/figures/fm/rdm/ensemble/",
+        "outdir": "./outputs/figures/model_family/cf/rdm/ensemble/",
         "case_labels": {
             "intercept_only": "Intercept Only",
             "regressed": "Regressed",
@@ -112,7 +112,7 @@ def infer_free_fixed_intrinsics(design_config, all_intrinsics, default_fixed_val
 
 def build_encoder_input_dim(max_num_regressors, max_num_categories, keep_intercept):
     max_total_regressors = max_num_regressors * (max_num_regressors + 1) // 2
-    return max_total_regressors * (max_num_categories - 1) + (3 if keep_intercept else 2)
+    return max_total_regressors * (max_num_categories - 1) + (4 if keep_intercept else 3)
 
 
 def parse_args():

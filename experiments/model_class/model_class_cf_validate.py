@@ -220,9 +220,9 @@ def build_encoder_input_dim(max_num_regressors: int, max_num_categories: int, ke
 def parse_args():
     p = argparse.ArgumentParser()
     p.add_argument("--checkpoint", type=str, required=True)
-    p.add_argument("--outdir", type=str, default="./cogformer/experiments/figures/fm/model_class/")
-    p.add_argument("--pred_dir", type=str, default="./cogformer/experiments/data/model_class/")
-    p.add_argument("--data_dir", type=str, default="./cogformer/experiments/data/", help="Directory with BayesFlow validation data")
+    p.add_argument("--outdir", type=str, default="./outputs/figures/model_class/cf/")
+    p.add_argument("--pred_dir", type=str, default="./outputs/data/model_class/")
+    p.add_argument("--data_dir", type=str, default="./outputs/data/model_class/", help="Directory with BayesFlow validation data")
 
     # Validation settings
     p.add_argument("--batch_size", type=int, default=200)

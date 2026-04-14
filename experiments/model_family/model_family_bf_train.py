@@ -374,7 +374,7 @@ def main(model_key: str, case: str, epochs: int = 1000, steps_per_epoch: int = 1
     inference_net = bf.networks.FlowMatching()
 
     ckpt_prefix = model_cfg["ckpt_prefix"]
-    checkpoint_path = f"./cogformer/experiments/checkpoints/{ckpt_prefix}_{case}"
+    checkpoint_path = f"./outputs/checkpoints/model_family/bf/{model_key}/{ckpt_prefix}_{case}"
 
     workflow = bf.BasicWorkflow(
         simulator=simulator,
