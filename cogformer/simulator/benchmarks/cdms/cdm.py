@@ -66,7 +66,7 @@ def simulate_cdm(
 
 class CDM(Model):
 
-    def __init__(self, dt: float = 1e-3, max_steps: int = 1e4, decay: float = 0.0, pi: float = 0.0):
+    def __init__(self, dt: float = 2e-4, max_steps: int = 5e4, decay: float = 0.0, pi: float = 0.0):
         super().__init__()
         self.dt = dt
         self.max_steps = max_steps

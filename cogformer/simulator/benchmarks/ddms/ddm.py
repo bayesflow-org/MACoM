@@ -79,7 +79,7 @@ def simulate_ddm(
 
 class DDM(Model):
 
-    def __init__(self, dt: float = 1e-3, max_steps: int = 1e4, pi: float = 0.0):
+    def __init__(self, dt: float = 2e-4, max_steps: int = 5e4, pi: float = 0.0):
         self.dt = dt
         self.max_steps = max_steps
         self.pi = pi
