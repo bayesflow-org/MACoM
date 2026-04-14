@@ -222,3 +222,6 @@ outputs/
 .claude/settings.local.json
 
 wandb/
+
+# Datasets
+datasets/
