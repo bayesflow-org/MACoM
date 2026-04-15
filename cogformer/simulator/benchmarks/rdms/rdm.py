@@ -5,7 +5,8 @@ from cogformer.simulator import Model
 from cogformer.utils.simulator_utils import as_1d
 from cogformer.utils.simulator_utils import contaminate
 
-@njit(cache=True, fastmath=True)
+
+@njit
 def sample_rdm_trial(
     v: np.ndarray,
     a: float,
@@ -17,11 +18,9 @@ def sample_rdm_trial(
     sigma: float = 1.0,
     max_steps: int = 10000,
 ) -> np.ndarray:
-    # Infer number of alternatives
     num_alternatives = v.shape[0]
     c = sigma * np.sqrt(dt)
 
-    # Inter-trial variability: sample drift and non-decision time for this trial
     v_i = np.empty(num_alternatives, dtype=np.float64)
     for k in range(num_alternatives):
         v_i[k] = np.random.normal(v[k], s_v)
@@ -29,17 +28,15 @@ def sample_rdm_trial(
 
     X = np.zeros(num_alternatives)
     for i_iter in range(max_steps):
-        # Compute threshold inline (no array allocation); fast path when decay=0
         threshold = a if decay == 0.0 else a * np.exp(-decay * i_iter * dt)
         for i in range(num_alternatives):
             X[i] += v_i[i] * dt + np.random.normal(0.0, c)
             if X[i] >= threshold:
                 return np.array([tau_i + i_iter * dt, i], dtype=np.float32)
-    # No decision within max_steps
     return np.array([-1.0, -1.0], dtype=np.float32)
 
 
-@njit(parallel=True, cache=True, fastmath=True)
+@njit(parallel=True)
 def simulate_rdm(
     v: np.ndarray,
     a: np.ndarray,
@@ -64,11 +61,12 @@ def simulate_rdm(
             decay=decay,
             sigma=sigma,
             dt=dt,
-            max_steps=max_steps
+            max_steps=max_steps,
         )
         sim_data[i] = sim_trial
 
     return sim_data
+
 
 class RDM(Model):
     """
@@ -133,13 +131,10 @@ class RDM(Model):
         s_tau  = as_1d(params["s_tau"], num_obs)
 
         if num_alternatives == 2:
-            # Standard 2-alternative response coding:
-            # accumulator 0 gets v, accumulator 1 gets v + v_diff
             v = np.zeros((num_obs, 2), dtype=np.float64)
             v[:, 0] = v_base
             v[:, 1] = v_base + v_diff
         else:
-            # K > 2 alternatives: need favored_idx from context
             if "favored_idx" not in context:
                 raise ValueError(
                     "For K > 2 alternatives, context['favored_idx'] is required "
@@ -151,7 +146,6 @@ class RDM(Model):
                     f"favored_idx length {favored_idx.shape[0]} != num_obs {num_obs}"
                 )
 
-            # All accumulators get v_base, favored one gets v_base + v_diff
             v = np.full((num_obs, num_alternatives), 0.0, dtype=np.float64)
             for i in range(num_obs):
                 v[i, :] = v_base[i]
@@ -164,7 +158,6 @@ class RDM(Model):
         """Build context for RDM simulation."""
         context = {"num_alternatives": num_alternatives}
         if num_alternatives > 2:
-            # Randomly assign favored accumulator for each trial
             context["favored_idx"] = np.random.randint(0, num_alternatives, size=num_obs)
         return context
 

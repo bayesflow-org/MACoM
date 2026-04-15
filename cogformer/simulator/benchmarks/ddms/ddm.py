@@ -8,7 +8,7 @@ from cogformer.simulator import Model
 from cogformer.utils.simulator_utils import contaminate
 
 
-@njit(cache=True, fastmath=True)
+@njit
 def simulate_ddm_trial(
     v: float,
     a: float,
@@ -24,7 +24,6 @@ def simulate_ddm_trial(
     v_i = np.random.normal(v, s_v)
     tau_i = tau + np.random.uniform(0, s_tau)
 
-    # initialize
     a0 = a if a > 1e-6 else 1e-6
     d  = decay if decay > 0.0 else 0.0
 
@@ -45,7 +44,8 @@ def simulate_ddm_trial(
     # No decision within max_steps
     return np.array([-1.0, -1.0], dtype=np.float32)
 
-@njit(parallel=True, cache=True, fastmath=True)
+
+@njit(parallel=True)
 def simulate_ddm(
     v: np.ndarray,
     a: np.ndarray,
@@ -77,6 +77,7 @@ def simulate_ddm(
 
     return sim_data
 
+
 class DDM(Model):
 
     def __init__(self, dt: float = 5e-4, max_steps: int = 20000, pi: float = 0.0):
@@ -92,23 +93,17 @@ class DDM(Model):
         return {"rts": rts, "choices": choices}
 
     def sample(self, batch_size: int | tuple, num_obs: int = 500, context=None):
-        # Infer batch size if none exist
         if isinstance(batch_size, tuple):
             batch_size = batch_size[0]
 
         params = {k: [] for k in ddm_priors().keys()}
         rts = []
         choices = []
-        # prior_draws = sample_ddm_baseline_priors()
-        # for k, v in prior_draws.items():
-        #     prior_draws[k] = np.zeros((batch_size, 1), dtype=np.float32)
 
         for i in range(batch_size):
             prior_draw = ddm_priors()
             for k, v in prior_draw.items():
                 params[k].append(v)
-                # prior_draws[k][i] = v
-                # priors[k] = np.full(num_obs, v)
             priors = {k: np.full(num_obs, v) for k, v in prior_draw.items()}
             results = self.simulate(params=priors, context=context)
             rts.append(results["rts"])

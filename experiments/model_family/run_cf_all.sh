@@ -4,7 +4,7 @@
 #
 # Usage:
 #   bash experiments/model_family/run_cf_all.sh
-#   bash experiments/model_family/run_cf_all.sh --epochs 2000 --train_batch_size 128
+#   bash experiments/model_family/run_cf_all.sh --epochs 1000 --train_batch_size 128
 #
 # Any flags after the script name override the defaults below and are forwarded
 # to the training script only. Validate and ensemble always use the centralized
@@ -38,7 +38,7 @@ LAYER_DROPOUT=0.05
 
 # Training
 LR=1e-4
-EPOCHS=2000
+EPOCHS=1000
 STEPS_PER_EPOCH=100
 TRAIN_BATCH=64
 VAL_BATCH=200
@@ -79,7 +79,7 @@ ARCH_ARGS=(
     --decoder_num_layers "$DECODER_LAYERS"
     --encoder_num_heads  "$ENCODER_HEADS"
     --decoder_num_heads  "$DECODER_HEADS"
-    --projection_dim     "$PROJ_DIM"
+    --proj_dim           "$PROJ_DIM"
     --num_seeds          "$NUM_SEEDS"
     --seed_dim           "$SEED_DIM"
     --time_embedding_dim "$TIME_EMB_DIM"

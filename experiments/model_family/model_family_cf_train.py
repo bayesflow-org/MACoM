@@ -365,7 +365,7 @@ def parse_args():
     parser.add_argument("--decoder_num_layers", type=int, default=8)
     parser.add_argument("--encoder_num_heads", type=int, default=8)
     parser.add_argument("--decoder_num_heads", type=int, default=8)
-    parser.add_argument("--projection_dim", type=int, default=256)
+    parser.add_argument("--proj_dim", type=int, default=256)
     parser.add_argument("--num_seeds", type=int, default=32)
     parser.add_argument("--seed_dim", type=int, default=64)
     parser.add_argument("--time_embedding_dim", type=int, default=32)
@@ -453,6 +453,7 @@ if __name__ == "__main__":
         "batch_size": args.val_batch_size,
         "model_family_config": model_family_config,
         "val_sample_config": val_sample_config,
+        "device": device,
     }
 
     cogformer_config = {
@@ -463,7 +464,7 @@ if __name__ == "__main__":
         "decoder_num_heads": args.decoder_num_heads,
         "num_seeds": args.num_seeds,
         "seed_dim": args.seed_dim,
-        "proj_dim": args.projection_dim,
+        "proj_dim": args.proj_dim,
         "dropout": args.dropout,
         "layer_dropout": args.layer_dropout,
         "decoder_layer_design": "mixed_attention",

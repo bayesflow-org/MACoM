@@ -6,7 +6,7 @@ from cogformer.utils.simulator_utils import as_1d
 from cogformer.utils.simulator_utils import contaminate
 
 
-@njit(cache=True, fastmath=True)
+@njit
 def simulate_cdm_trial(
     v: np.ndarray,
     a: float,
@@ -18,7 +18,6 @@ def simulate_cdm_trial(
     sigma: float = 1.0,
     max_steps: int = 10000,
 ) -> np.ndarray:
-    # Inter-trial variability
     v_i = v + s_v * np.random.randn(2)
     tau_i = tau + np.random.uniform(0, s_tau)
 
@@ -27,14 +26,13 @@ def simulate_cdm_trial(
     for i_iter in range(max_steps):
         x[0] += v_i[0] * dt + c * np.random.randn()
         x[1] += v_i[1] * dt + c * np.random.randn()
-        # Compute threshold inline (no array allocation); fast path when decay=0
         threshold_sq = a * a if decay == 0.0 else (a * np.exp(-decay * i_iter * dt)) ** 2
         if x[0] * x[0] + x[1] * x[1] >= threshold_sq:
             return np.array([tau_i + i_iter * dt, np.arctan2(x[1], x[0])])
-    # No decision within max_steps
     return np.array([-4.0, -4.0])
 
-@njit(parallel=True, cache=True, fastmath=True)
+
+@njit(parallel=True)
 def simulate_cdm(
     v: np.ndarray,
     a: np.ndarray,
@@ -59,11 +57,12 @@ def simulate_cdm(
             decay=decay,
             dt=dt,
             sigma=sigma,
-            max_steps=max_steps
+            max_steps=max_steps,
         )
         sim_data[i] = sim_trial
 
     return sim_data
+
 
 class CDM(Model):
 
@@ -120,7 +119,7 @@ class CDM(Model):
 
     @staticmethod
     def build_default_context(num_obs: int) -> dict[str, np.ndarray]:
-        theta_mode = np.random.choice(["random_uniform", "zeros"])  # Randomly pick per batch
+        theta_mode = np.random.choice(["random_uniform", "zeros"])
         return CDM.build_context(num_obs, theta_mode)
 
     def simulate(self, params: dict[str, np.ndarray], context=None):
