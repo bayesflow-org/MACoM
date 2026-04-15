@@ -1,8 +1,66 @@
 import numpy as np
+from itertools import combinations
 from typing import Callable
 from scipy.stats import invwishart
 
 from cogformer.utils.simulator_utils import shifted_softplus
+
+
+def split_design_space(
+    free_intrinsics: list[str],
+    split_ratio: float = 0.5,
+    seed: int | None = None,
+    include_empty: bool = True,
+) -> tuple[list[frozenset[str]], list[frozenset[str]]]:
+    """
+    Partition the space of per-regressor slope patterns into two disjoint sets.
+
+    Every design config produced with ``allowed_slope_patterns=set_a`` will
+    use only slope patterns drawn from set A, and vice-versa for set B.
+    The two sets are guaranteed to be disjoint, enabling held-out design
+    evaluation (train on A, test on B).
+
+    Parameters
+    ----------
+    free_intrinsics : list[str]
+        Parameters eligible to appear as slopes.
+    split_ratio : float
+        Fraction of patterns assigned to set A. Default 0.5.
+    seed : int or None
+        Random seed for reproducible splits.
+    include_empty : bool
+        Whether to include the empty pattern (a regressor with no slopes).
+        Default True.
+
+    Returns
+    -------
+    set_a, set_b : tuple of list[frozenset[str]]
+        Two disjoint lists of slope patterns. Pass either as
+        ``allowed_slope_patterns`` to ``build_random_design_config`` or
+        ``ModelFamily.batch_sample``.
+
+    Examples
+    --------
+    >>> set_a, set_b = split_design_space(["v", "a", "z", "tau"], seed=0)
+    >>> train_batch = mf.batch_sample(..., allowed_slope_patterns=set_a)
+    >>> test_batch  = mf.batch_sample(..., allowed_slope_patterns=set_b)
+    """
+    rng = np.random.default_rng(seed)
+    n = len(free_intrinsics)
+    start = 0 if include_empty else 1
+
+    all_patterns = [
+        frozenset(combo)
+        for r in range(start, n + 1)
+        for combo in combinations(free_intrinsics, r)
+    ]
+
+    order = rng.permutation(len(all_patterns))
+    n_a = round(len(all_patterns) * split_ratio)
+
+    set_a = [all_patterns[i] for i in order[:n_a]]
+    set_b = [all_patterns[i] for i in order[n_a:]]
+    return set_a, set_b
 
 
 class ContextManager:
@@ -65,6 +123,7 @@ class ContextManager:
             free_prob: float = 0.5,
             intercept_prob: float = 0.5,
             add_interaction: bool = False,
+            allowed_slope_patterns: list[frozenset[str]] | None = None,
     ) -> dict[str, list[str]]:
         """
         Randomly build a design_config mapping regressors and optional intercept
@@ -117,10 +176,14 @@ class ContextManager:
         main_keys = []
         for r in range(num_regressors):
             key = f"u_{r + 1}"
-            names = []
-            for param in intrinsic_params:
-                if (param in allowed_slope_params) and (np.random.rand() < free_prob):
-                    names.append(param)
+            if allowed_slope_patterns is not None:
+                pattern = allowed_slope_patterns[np.random.randint(len(allowed_slope_patterns))]
+                names = [p for p in intrinsic_params if p in pattern and p in allowed_slope_params]
+            else:
+                names = []
+                for param in intrinsic_params:
+                    if (param in allowed_slope_params) and (np.random.rand() < free_prob):
+                        names.append(param)
             config[key] = names
             main_keys.append(key)
 
@@ -198,6 +261,7 @@ class ContextManager:
         intercept_prob: float = 0.5,
         keep_intercept: bool = False,
         add_interaction: bool = False,
+        allowed_slope_patterns: list[frozenset[str]] | None = None,
     ) -> tuple:
         """
         Randomly generate both a design_config and its corresponding parameter mask.
@@ -214,7 +278,8 @@ class ContextManager:
             keep_intercept=keep_intercept,
             free_intrinsics=free_intrinsics,
             fixed_intrinsics=fixed_intrinsics,
-            add_interaction=add_interaction
+            add_interaction=add_interaction,
+            allowed_slope_patterns=allowed_slope_patterns,
         )
 
         parameter_mask = self.build_parameter_mask(

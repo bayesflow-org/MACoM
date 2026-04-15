@@ -58,6 +58,7 @@ class ModelFamily:
         add_interaction: bool = False,
         collinearity_df: float | None = None,
         category_concentration: float | None = None,
+        allowed_slope_patterns: list[frozenset[str]] | None = None,
     ):
         if prior_fun is None:
             prior_fun = self.prior_fun
@@ -110,6 +111,7 @@ class ModelFamily:
                 free_intrinsics=kwargs.get("free_intrinsics"),
                 fixed_intrinsics=kwargs.get("fixed_intrinsics"),
                 add_interaction=add_interaction,
+                allowed_slope_patterns=allowed_slope_patterns,
             )
 
         # Resolve intrinsic priors (common to all branches)
@@ -233,6 +235,7 @@ class ModelFamily:
         add_interaction: bool = False,
         collinearity_df: float | None = None,
         category_concentration: float | None = None,
+        allowed_slope_patterns: list[frozenset[str]] | None = None,
     ) -> list[dict] | dict:
         if prior_fun is None:
             prior_fun = self.prior_fun
@@ -287,6 +290,7 @@ class ModelFamily:
                 link_fun=link_fun,
                 collinearity_df=collinearity_df,
                 category_concentration=category_concentration,
+                allowed_slope_patterns=allowed_slope_patterns,
             )
 
             sim_instance["num_obs"] = num_obs
