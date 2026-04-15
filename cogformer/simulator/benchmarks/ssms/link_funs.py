@@ -10,29 +10,9 @@ def cdm_link_fun():
         "a": shifted_softplus,
         "tau": shifted_softplus,
         "s_v": shifted_softplus,
-        "s_tau": shifted_softplus
+        "s_tau": shifted_softplus,
+        "pi": lambda x: x,  # identity — pi is sampled directly in [0, 1]
     }
-#
-# def cdm_link_fun2():
-#     return {
-#         "v": exponential,
-#         "v_theta": scaled_sigmoid,
-#         "a": exponential,
-#         "tau": exponential,
-#         "s_v": exponential,
-#         "s_tau": exponential
-#     }
-
-
-# def ddm_link_fun():  # 5 params, no z
-#     return {
-#         "v": shifted_softplus,
-#         "a": shifted_softplus,
-#         "tau": shifted_softplus,
-#         "s_v": shifted_softplus,
-#         "s_tau": shifted_softplus
-#     }
-
 
 def ddm_link_fun():
     return {
@@ -41,17 +21,10 @@ def ddm_link_fun():
         "z": scaled_sigmoid,
         "tau": shifted_softplus,
         "s_v": shifted_softplus,
-        "s_tau": shifted_softplus
+        "s_tau": shifted_softplus,
+        "pi": lambda x: x,  # identity — pi is sampled directly in [0, 1]
     }
 
-def ddm_link_fun2():
-    return {
-        "v": exponential,
-        "a": exponential,
-        "tau": exponential,
-        "s_v": exponential,
-        "s_tau": sigmoid
-    }
 
 
 def rdm_link_fun():
@@ -62,9 +35,10 @@ def rdm_link_fun():
         "tau": shifted_softplus,
         "s_v": shifted_softplus,
         "s_tau": shifted_softplus,
+        "pi": lambda x: x,  # identity — pi is sampled directly in [0, 1]
     }
 
-def rdm_link_fun2():
+def lba_link_fun():
     return {
         "v": exponential,
         "v_diff": shifted_softplus,
