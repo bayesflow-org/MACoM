@@ -12,15 +12,11 @@ import matplotlib.pyplot as plt
 from pathlib import Path
 
 from cogformer.simulator.model_family import ModelFamily
-from cogformer.simulator.benchmarks.ddms.ddm import DDM
-from cogformer.simulator.benchmarks.ddms.ddm_priors import ddm_priors
-from cogformer.simulator.benchmarks.ddms.ddm_link_fun import ddm_link_fun
-from cogformer.simulator.benchmarks.cdms.cdm import CDM
-from cogformer.simulator.benchmarks.cdms.cdm_priors import cdm_priors
-from cogformer.simulator.benchmarks.cdms.cdm_link_fun import cdm_link_fun
-from cogformer.simulator.benchmarks.rdms.rdm import RDM
-from cogformer.simulator.benchmarks.rdms.rdm_priors import rdm_priors
-from cogformer.simulator.benchmarks.rdms.rdm_link_fun import rdm_link_fun
+from cogformer.simulator.benchmarks.ssms.ddm import DDM
+from cogformer.simulator.benchmarks.ssms.cdm import CDM
+from cogformer.simulator.benchmarks.ssms.rdm import RDM
+from cogformer.simulator.benchmarks.ssms.priors import ddm_priors, cdm_priors, rdm_priors
+from cogformer.simulator.benchmarks.ssms.link_funs import ddm_link_fun, cdm_link_fun, rdm_link_fun
 from cogformer.diagnostics.plot.adaptive_recovery import adaptive_recovery
 from cogformer.diagnostics.plot.adaptive_coverage import adaptive_coverage
 from cogformer.diagnostics.plot.adaptive_ecdf import adaptive_ecdf
