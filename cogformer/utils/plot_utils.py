@@ -84,6 +84,7 @@ def _add_mask_legend(
     pad: float = 0.012,
     gap: float = 0.018,
     pixel_alphas: list[float] | None = None,
+    thumb_scale: float = 1.0,
 ):
     """
     Add a row of parameter mask thumbnails as a visual legend at the bottom
@@ -113,8 +114,8 @@ def _add_mask_legend(
     figW, figH = fig.get_size_inches()
     n = len(parameter_masks)
 
-    # Fixed thumbnail width: n=12 fills ~full width (0.95)
-    thumb_w_fig  = (0.95 - 11 * gap) / 12
+    # Fixed thumbnail width: n=12 fills ~full width (0.95); thumb_scale adjusts size
+    thumb_w_fig  = thumb_scale * (0.95 - 11 * gap) / 12
     avail_w_fig  = n * thumb_w_fig + (n - 1) * gap
     total_gaps   = gap * (n - 1)
     # Centre the thumbnail strip horizontally

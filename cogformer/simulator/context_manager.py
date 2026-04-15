@@ -124,6 +124,7 @@ class ContextManager:
             intercept_prob: float = 0.5,
             add_interaction: bool = False,
             allowed_slope_patterns: list[frozenset[str]] | None = None,
+            global_params: list[str] | set[str] | None = None,
     ) -> dict[str, list[str]]:
         """
         Randomly build a design_config mapping regressors and optional intercept
@@ -136,18 +137,29 @@ class ContextManager:
           parameters which have an intercept entry.
         - Fixed intrinsics (if provided) are always included in the intercept and
           never appear in slope terms.
+        - Global params (if provided) are always included in the intercept and
+          never appear in slope terms. Unlike fixed intrinsics, their intercept
+          values are sampled from their prior (not set to a constant).
         """
         # Normalize inputs
         free_set = None if free_intrinsics is None else set(free_intrinsics)
         fixed_set: set[str] = set() if fixed_intrinsics is None else set(fixed_intrinsics)
+        global_set: set[str] = set() if global_params is None else set(global_params)
 
         config = {}
 
         # --- Intercept ---
-        # Randomize intercept membership for free intrinsics, but always include fixed intrinsics
+        # Randomize intercept membership for free intrinsics, but always include fixed/global intrinsics.
+        # Always build the intercept row when keep_intercept=True OR global params are present,
+        # so that global params are never silently absent from the parameter matrix.
         intercept_names: list[str] = []
-        if keep_intercept:
+        if keep_intercept or global_set:
             for p in intrinsic_params:
+                if p in global_set:
+                    # global params always get an intercept, never a slope
+                    intercept_names.append(p)
+                    continue
+
                 if free_set is not None and p in free_set:
                     # (1) free intrinsics always get intercepts
                     intercept_names.append(p)
@@ -171,6 +183,8 @@ class ContextManager:
 
         # Helper: slopes only allowed when intercept exists for the intrinsic
         allowed_slope_params = set(intercept_names) if keep_intercept else set(intrinsic_params)
+        # Global params never appear in slope terms
+        allowed_slope_params -= global_set
 
         # Main effect
         main_keys = []
@@ -212,7 +226,9 @@ class ContextManager:
         regressors (rows) to intrinsic parameters (columns).
         """
         regressor_keys = list(design_config.keys())
-        has_intercept = ("1" in regressor_keys) and keep_intercept
+        # Design config is the source of truth: "1" is present only when it was
+        # intentionally added (keep_intercept=True or global params exist).
+        has_intercept = "1" in regressor_keys
         regressor_keys = [k for k in regressor_keys if k != "1"]
 
         # Figure out block width and total number of columns
@@ -262,6 +278,7 @@ class ContextManager:
         keep_intercept: bool = False,
         add_interaction: bool = False,
         allowed_slope_patterns: list[frozenset[str]] | None = None,
+        global_params: list[str] | set[str] | None = None,
     ) -> tuple:
         """
         Randomly generate both a design_config and its corresponding parameter mask.
@@ -280,6 +297,7 @@ class ContextManager:
             fixed_intrinsics=fixed_intrinsics,
             add_interaction=add_interaction,
             allowed_slope_patterns=allowed_slope_patterns,
+            global_params=global_params,
         )
 
         parameter_mask = self.build_parameter_mask(
@@ -432,7 +450,7 @@ class ContextManager:
         # Provide context
         context = context or {}
         regressor_keys = list(design_config.keys())
-        has_intercept = ("1" in regressor_keys) and keep_intercept
+        has_intercept = "1" in regressor_keys
 
         # Exclude intercept from regressor keys
         regressor_keys = [k for k in regressor_keys if k != "1"]
@@ -724,7 +742,7 @@ class ContextManager:
         Only for prior predictive checks.
         """
         regressor_keys = list(design_config.keys())
-        has_intercept = ("1" in regressor_keys) and keep_intercept
+        has_intercept = "1" in regressor_keys
         regressor_keys = [k for k in regressor_keys if k != "1"]
 
         block_width = max_num_categories - 1
