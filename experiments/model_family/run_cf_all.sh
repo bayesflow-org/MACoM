@@ -36,6 +36,9 @@ POS_EMB_DIM=32
 DROPOUT=0.05
 LAYER_DROPOUT=0.05
 
+# Logging
+USE_WANDB="${USE_WANDB:-true}"   # set USE_WANDB=false to skip W&B logging
+
 # Training
 LR=1e-4
 EPOCHS=1000
@@ -47,8 +50,28 @@ MIN_NUM_OBS=200
 MAX_NUM_OBS=500
 
 # Inference
-FM_STEPS=500
+FM_STEPS=200
 FM_SAMPLES=500
+FM_SOLVER="midpoint"   # euler | midpoint | rk4  (rk4: same quality as euler at ~quarter the steps)
+
+# ============================================================
+# Apply any command-line overrides to centralized variables.
+# This ensures CKPT_SUFFIX matches the checkpoint the training script
+# will produce, and that validate/ensemble use the same settings.
+# ============================================================
+_args=("$@")
+for (( _i=0; _i<${#_args[@]}; _i++ )); do
+    case "${_args[$_i]}" in
+        --epochs)           EPOCHS="${_args[$(( _i+1 ))]}";         _i=$(( _i+1 )) ;;
+        --steps_per_epoch)  STEPS_PER_EPOCH="${_args[$(( _i+1 ))]}"; _i=$(( _i+1 )) ;;
+        --train_batch_size) TRAIN_BATCH="${_args[$(( _i+1 ))]}";    _i=$(( _i+1 )) ;;
+        --val_batch_size)   VAL_BATCH="${_args[$(( _i+1 ))]}";      _i=$(( _i+1 )) ;;
+        --num_obs)          NUM_OBS="${_args[$(( _i+1 ))]}";        _i=$(( _i+1 )) ;;
+        --fm_sample_steps)  FM_STEPS="${_args[$(( _i+1 ))]}";       _i=$(( _i+1 )) ;;
+        --fm_num_samples)   FM_SAMPLES="${_args[$(( _i+1 ))]}";     _i=$(( _i+1 )) ;;
+        --fm_solver)        FM_SOLVER="${_args[$(( _i+1 ))]}";      _i=$(( _i+1 )) ;;
+    esac
+done
 
 # ============================================================
 # Derived checkpoint path components (must match cf_train naming)
@@ -122,7 +145,8 @@ for model in "${MODELS[@]}"; do
             --max_num_obs     "$MAX_NUM_OBS" \
             --fm_sample_steps "$FM_STEPS" \
             --fm_num_samples  "$FM_SAMPLES" \
-            --use_wandb \
+            --fm_solver       "$FM_SOLVER" \
+            $( [[ "$USE_WANDB" == "true" ]] && echo "--use_wandb" ) \
             "${EXTRA_TRAIN_ARGS[@]}"; then
         echo "  [FAIL] Training failed — $model"
         FAILED+=("${model}/train")
@@ -140,7 +164,8 @@ for model in "${MODELS[@]}"; do
             --batch_size       "$VAL_BATCH" \
             --num_obs          "$NUM_OBS" \
             --num_sample_steps "$FM_STEPS" \
-            --num_samples      "$FM_SAMPLES"; then
+            --num_samples      "$FM_SAMPLES" \
+            --solver           "$FM_SOLVER"; then
         echo "  [FAIL] Validation failed — $model"
         FAILED+=("${model}/validate")
         continue
@@ -157,7 +182,8 @@ for model in "${MODELS[@]}"; do
             --batch_size       "$VAL_BATCH" \
             --num_obs          "$NUM_OBS" \
             --num_sample_steps "$FM_STEPS" \
-            --num_samples      "$FM_SAMPLES"; then
+            --num_samples      "$FM_SAMPLES" \
+            --solver           "$FM_SOLVER"; then
         echo "  [FAIL] Ensemble failed — $model"
         FAILED+=("${model}/ensemble")
         continue

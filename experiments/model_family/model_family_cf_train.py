@@ -33,25 +33,26 @@ MODELS = {
         "prior_fn": ddm_priors,
         "link_fn": ddm_link_fun,
         "name": "DDM",
-        "intrinsic_params": ["v", "a", "z", "tau", "s_v", "s_tau"],
-        "variable_names": [r"$v$", r"$a$", r"$z$", r"$\tau$", r"$s_v$", r"$s_\tau$"],
+        "intrinsic_params": ["v", "a", "z", "tau", "s_v", "s_tau", "pi"],
+        "variable_names": [r"$v$", r"$a$", r"$z$", r"$\tau$", r"$s_v$", r"$s_\tau$", r"$\pi$"],
         "free_params": ["v", "a", "z", "tau"],
         "fixed_params": ["s_v", "s_tau"],
+        "global_params": ["pi"],
         "default_fixed_values": {"s_v": 0.0, "s_tau": 0.0},
-        "val_epoch_interval": 250,
+        "val_epoch_interval": 500,
         "wandb_project": "cogformer-fm-ddm",
         "checkpoint_dir": "./outputs/checkpoints/model_family/cf/ddm/",
         "checkpoint_prefix": "cogformer_mixed_attn",
         "fig_subdir": "model_family/cf/ddm",
         "val_scenarios": [
             ("interaction", {
-                "1": ["v", "a", "z", "tau", "s_v", "s_tau"],
+                "1": ["v", "a", "z", "tau", "s_v", "s_tau", "pi"],
                 "u_1": ["v", "a", "z", "tau", "s_v"],
                 "u_2": ["v", "a", "z", "tau"],
                 "u_1:u_2": ["v", "a", "z"],
             }),
             ("fixed", {
-                "1": ["v", "a", "z", "tau"],
+                "1": ["v", "a", "z", "tau", "pi"],
                 "u_1": [], "u_2": [], "u_1:u_2": [],
             }),
         ],
@@ -61,25 +62,26 @@ MODELS = {
         "prior_fn": cdm_priors,
         "link_fn": cdm_link_fun,
         "name": "CDM",
-        "intrinsic_params": ["v", "v_theta", "a", "tau", "s_v", "s_tau"],
-        "variable_names": [r"$v$", r"$v_\theta$", r"$a$", r"$\tau$", r"$s_v$", r"$s_\tau$"],
+        "intrinsic_params": ["v", "v_theta", "a", "tau", "s_v", "s_tau", "pi"],
+        "variable_names": [r"$v$", r"$v_\theta$", r"$a$", r"$\tau$", r"$s_v$", r"$s_\tau$", r"$\pi$"],
         "free_params": ["v", "v_theta", "a", "tau"],
         "fixed_params": ["s_v", "s_tau"],
+        "global_params": ["pi"],
         "default_fixed_values": {"s_v": 0.0, "s_tau": 0.0},
-        "val_epoch_interval": 1000,
+        "val_epoch_interval": 500,
         "wandb_project": "cogformer-fm-cdm",
         "checkpoint_dir": "./outputs/checkpoints/model_family/cf/cdm/",
         "checkpoint_prefix": "cogformer_cdm_mixed_attn",
         "fig_subdir": "model_family/cf/cdm",
         "val_scenarios": [
             ("interaction", {
-                "1": ["v", "v_theta", "a", "tau", "s_v", "s_tau"],
+                "1": ["v", "v_theta", "a", "tau", "s_v", "s_tau", "pi"],
                 "u_1": ["v", "v_theta", "a", "tau", "s_v"],
                 "u_2": ["v", "v_theta", "a", "tau"],
                 "u_1:u_2": ["v", "v_theta", "a"],
             }),
             ("fixed", {
-                "1": ["v", "v_theta", "a", "tau"],
+                "1": ["v", "v_theta", "a", "tau", "pi"],
                 "u_1": [], "u_2": [], "u_1:u_2": [],
             }),
         ],
@@ -89,25 +91,27 @@ MODELS = {
         "prior_fn": rdm_priors,
         "link_fn": rdm_link_fun,
         "name": "RDM",
-        "intrinsic_params": ["v", "v_diff", "a", "tau", "s_v", "s_tau"],
-        "variable_names": [r"$v$", r"$v_{\mathrm{diff}}$", r"$a$", r"$\tau$", r"$s_v$", r"$s_\tau$"],
+        "intrinsic_params": ["v", "v_diff", "a", "tau", "s_v", "s_tau", "pi"],
+        "variable_names": [r"$v$", r"$v_{\mathrm{diff}}$", r"$a$", r"$\tau$", r"$s_v$", r"$s_\tau$", r"$\pi$"],
         "free_params": ["v", "v_diff", "a", "tau"],
         "fixed_params": ["s_v", "s_tau"],
+        "global_params": ["pi"],
         "default_fixed_values": {"s_v": 0.0, "s_tau": 0.0},
-        "val_epoch_interval": 1000,
+        "train_context": RDM.build_random_context,
+        "val_epoch_interval": 500,
         "wandb_project": "cogformer-fm-rdm",
         "checkpoint_dir": "./outputs/checkpoints/model_family/cf/rdm/",
         "checkpoint_prefix": "cogformer_rdm_mixed_attn",
         "fig_subdir": "model_family/cf/rdm",
         "val_scenarios": [
             ("interaction", {
-                "1": ["v", "v_diff", "a", "tau", "s_v", "s_tau"],
+                "1": ["v", "v_diff", "a", "tau", "s_v", "s_tau", "pi"],
                 "u_1": ["v", "v_diff", "a", "tau", "s_v"],
                 "u_2": ["v", "v_diff", "a", "tau"],
                 "u_1:u_2": ["v", "v_diff", "a"],
             }),
             ("fixed", {
-                "1": ["v", "v_diff", "a", "tau"],
+                "1": ["v", "v_diff", "a", "tau", "pi"],
                 "u_1": [], "u_2": [], "u_1:u_2": [],
             }),
         ],
@@ -115,16 +119,35 @@ MODELS = {
 }
 
 
+def strip_global_params(cfg: dict) -> dict:
+    """Return a shallow copy of cfg with all global_params removed from
+    intrinsic_params, variable_names, free_params, and val_scenarios."""
+    global_p = set(cfg.get("global_params", []))
+    if not global_p:
+        return cfg
+    cfg = dict(cfg)
+    keep = [i for i, p in enumerate(cfg["intrinsic_params"]) if p not in global_p]
+    cfg["intrinsic_params"] = [cfg["intrinsic_params"][i] for i in keep]
+    cfg["variable_names"]   = [cfg["variable_names"][i]   for i in keep]
+    cfg["free_params"]      = [p for p in cfg["free_params"]  if p not in global_p]
+    cfg["global_params"]    = []
+    cfg["val_scenarios"] = [
+        (tag, {k: [p for p in ps if p not in global_p] for k, ps in scenario.items()})
+        for tag, scenario in cfg["val_scenarios"]
+    ]
+    return cfg
+
+
 class CogFormerTrainer:
     def __init__(
         self,
-        gpt,
+        net,
         model_cfg,
         model_family=None,
         adapter=None,
         use_wandb=False,
     ):
-        self.gpt = gpt
+        self.net = net
         self.model_cfg = model_cfg
         self.adapter = adapter
         self.use_wandb = use_wandb
@@ -145,7 +168,7 @@ class CogFormerTrainer:
         fig_path="fig.pdf",
     ):
         global_step = 0
-        optimizer = AdamW(self.gpt.parameters(), lr=train_config["learning_rate"])
+        optimizer = AdamW(self.net.parameters(), lr=train_config["learning_rate"])
         scheduler = CosineAnnealingLR(optimizer, T_max=train_config["epochs"])
         val_interval = self.model_cfg["val_epoch_interval"]
 
@@ -178,7 +201,7 @@ class CogFormerTrainer:
 
         checkpoint_dir = Path(self.model_cfg["checkpoint_dir"])
         checkpoint_dir.mkdir(parents=True, exist_ok=True)
-        torch.save(self.gpt.state_dict(), checkpoint_dir / checkpoint_path)
+        torch.save(self.net.state_dict(), checkpoint_dir / checkpoint_path)
 
     def train_step(self, config, optimizer, scheduler):
         link_fn = self.model_cfg["link_fn"]
@@ -189,6 +212,7 @@ class CogFormerTrainer:
             batch_size=config["batch_size"],
             flatten_param_outputs=True,
             link_fun=link_fn(),
+            context=self.model_cfg.get("train_context"),
         )
         adapted = self.adapter.adapt(
             train_samples,
@@ -196,17 +220,17 @@ class CogFormerTrainer:
             device=config["device"],
         )
         optimizer.zero_grad()
-        pred_velocity, target_velocity = self.gpt(
+        pred_velocity, target_velocity = self.net(
             adapted["param_matrices"][..., None],
             adapted["input_data"],
             adapted["param_indices"],
             adapted["regressor_indices"],
             adapted["param_masks"],
         )
-        L = self.gpt.compute_loss(pred_velocity, target_velocity, adapted["param_masks"])
+        L = self.net.compute_loss(pred_velocity, target_velocity, adapted["param_masks"])
         L.backward()
         if config["gradient_clip_norm"] is not None:
-            torch.nn.utils.clip_grad_norm_(self.gpt.parameters(), config["gradient_clip_norm"])
+            torch.nn.utils.clip_grad_norm_(self.net.parameters(), config["gradient_clip_norm"])
         optimizer.step()
         return L.detach().item(), scheduler.get_last_lr()[0]
 
@@ -228,7 +252,7 @@ class CogFormerTrainer:
         for d in (recovery_dir, posterior_dir, coverage_dir, metrics_dir):
             d.mkdir(parents=True, exist_ok=True)
 
-        self.gpt.eval()
+        self.net.eval()
 
         for tag, design_config in self.model_cfg["val_scenarios"]:
             test_samples = self.model_family.batch_sample(
@@ -244,7 +268,7 @@ class CogFormerTrainer:
                 intrinsic_params=self.model_family.intrinsic_params,
                 device=config["device"],
             )
-            self.gpt(
+            self.net(
                 adapted["param_matrices"][..., None],
                 adapted["input_data"],
                 adapted["param_indices"],
@@ -259,14 +283,21 @@ class CogFormerTrainer:
             n_rows = true_set.shape[1] // n_cols
             true_set = true_set.reshape(config["batch_size"], n_rows, n_cols)
 
-            pred_set = self.gpt.sample(
-                adapted["input_data"],
-                adapted["param_indices"],
-                adapted["regressor_indices"],
-                adapted["param_masks"],
-                steps=config["fm_sample_steps"],
-                num_samples=config["fm_num_samples"],
-            )
+            chunk_size = config.get("val_sample_chunk_size", config["batch_size"])
+            pred_chunks = []
+            for c_start in range(0, config["batch_size"], chunk_size):
+                c_end = min(c_start + chunk_size, config["batch_size"])
+                chunk = self.net.sample(
+                    adapted["input_data"][c_start:c_end],
+                    adapted["param_indices"][c_start:c_end],
+                    adapted["regressor_indices"][c_start:c_end],
+                    adapted["param_masks"][c_start:c_end],
+                    steps=config["fm_sample_steps"],
+                    num_samples=config["fm_num_samples"],
+                    solver=config.get("fm_solver", "euler"),
+                )
+                pred_chunks.append(chunk)
+            pred_set = np.concatenate(pred_chunks, axis=0)
             pred_set = pred_set.reshape(
                 config["batch_size"], config["fm_num_samples"], n_rows, n_cols
             )
@@ -344,7 +375,7 @@ class CogFormerTrainer:
                 plt.close(coverage)
                 plt.close(metrics_fig)
 
-        self.gpt.train()
+        self.net.train()
 
     @staticmethod
     def finish():
@@ -382,6 +413,15 @@ def parse_args():
     # Inference
     parser.add_argument("--fm_sample_steps", type=int, default=200)
     parser.add_argument("--fm_num_samples", type=int, default=200)
+    parser.add_argument("--fm_solver", type=str, default="rk4",
+                        choices=["euler", "midpoint", "rk4"],
+                        help="ODE solver for flow matching sampling")
+    parser.add_argument("--val_sample_chunk_size", type=int, default=100,
+                        help="Batch chunk size for val sampling to avoid GPU OOM")
+    parser.add_argument("--estimate_global_params", action=argparse.BooleanOptionalAction,
+                        default=True,
+                        help="Include global parameters (e.g. contamination probability pi) "
+                             "in estimation. Use --no-estimate-global-params to disable.")
     return parser.parse_args()
 
 
@@ -390,6 +430,8 @@ if __name__ == "__main__":
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
     model_cfg = MODELS[args.model]
+    if not args.estimate_global_params:
+        model_cfg = strip_global_params(model_cfg)
     use_wandb = args.use_wandb
 
     max_num_regressors = 2
@@ -407,6 +449,7 @@ if __name__ == "__main__":
         "free_intrinsics": model_cfg["free_params"],
         "fixed_intrinsics": model_cfg["fixed_params"],
         "fixed_values": model_cfg["default_fixed_values"],
+        "global_params": model_cfg.get("global_params"),
     }
 
     val_params_kwargs = {
@@ -447,7 +490,9 @@ if __name__ == "__main__":
     val_config = {
         "fm_sample_steps": args.fm_sample_steps,
         "fm_num_samples": args.fm_num_samples,
+        "fm_solver": args.fm_solver,
         "batch_size": args.val_batch_size,
+        "val_sample_chunk_size": args.val_sample_chunk_size,
         "model_family_config": model_family_config,
         "val_sample_config": val_sample_config,
         "device": device,
@@ -496,7 +541,7 @@ if __name__ == "__main__":
         model_family=model_family,
         model_cfg=model_cfg,
         adapter=adapter,
-        gpt=cogformer,
+        net=cogformer,
         use_wandb=use_wandb,
     )
 

@@ -409,12 +409,12 @@ def main():
             # Save predictions
             tag = f"{model_name.lower()}_{cfg_name}"
             np.savez(
-                pred_dir / f"{tag}_gpt_pred.npz",
+                pred_dir / f"{tag}_cf_pred.npz",
                 pred_set=pred_set,
                 true_set=true_set,
                 params_mask=params_mask,
             )
-            logging.info(f"[saved] {pred_dir / f'{tag}_gpt_pred.npz'}")
+            logging.info(f"[saved] {pred_dir / f'{tag}_cf_pred.npz'}")
 
             # Recovery
             fig = adaptive_recovery(

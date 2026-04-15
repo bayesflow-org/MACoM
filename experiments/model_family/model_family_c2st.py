@@ -15,7 +15,7 @@ MODELS = {
         "intrinsic_params": ["v", "a", "z", "tau", "s_v", "s_tau"],
         "variable_names": [r"$v$", r"$a$", r"$z$", r"$\tau$", r"$s_v$", r"$s_\tau$"],
         # DDM uses singular "family"; CDM/RDM use "families"
-        "gpt_pred_filename": "{model}_family_{case}_gpt_pred.npz",
+        "cf_pred_filename": "{model}_family_{case}_cf_pred.npz",
         "outdir": "./cogformer/experiments/figures/c2st/ddm/",
         "benchmark_configs": {
             "intercept_only": {"1": ["v", "a", "z", "tau", "s_v", "s_tau"], "u_1": [], "u_2": [], "u_1:u_2": []},
@@ -28,7 +28,7 @@ MODELS = {
     "cdm": {
         "intrinsic_params": ["v", "v_theta", "a", "tau", "s_v", "s_tau"],
         "variable_names": [r"$v$", r"$v_\theta$", r"$a$", r"$\tau$", r"$s_v$", r"$s_\tau$"],
-        "gpt_pred_filename": "{model}_families_{case}_gpt_pred.npz",
+        "cf_pred_filename": "{model}_families_{case}_cf_pred.npz",
         "outdir": "./cogformer/experiments/figures/c2st/cdm/",
         "benchmark_configs": {
             "intercept_only": {"1": ["v", "v_theta", "a", "tau", "s_v", "s_tau"], "u_1": [], "u_2": [], "u_1:u_2": []},
@@ -41,7 +41,7 @@ MODELS = {
     "rdm": {
         "intrinsic_params": ["v", "v_diff", "a", "tau", "s_v", "s_tau"],
         "variable_names": [r"$v$", r"$v_{\mathrm{diff}}$", r"$a$", r"$\tau$", r"$s_v$", r"$s_\tau$"],
-        "gpt_pred_filename": "{model}_families_{case}_gpt_pred.npz",
+        "cf_pred_filename": "{model}_families_{case}_cf_pred.npz",
         "outdir": "./cogformer/experiments/figures/c2st/rdm/",
         "benchmark_configs": {
             "intercept_only": {"1": ["v", "v_diff", "a", "tau", "s_v", "s_tau"], "u_1": [], "u_2": [], "u_1:u_2": []},
@@ -54,7 +54,7 @@ MODELS = {
 }
 
 
-def reshape_bf_to_gpt(bf_samples, design_config, intrinsic_params):
+def reshape_bf_to_cf(bf_samples, design_config, intrinsic_params):
     *leading, num_active = bf_samples.shape
     num_rows = len(design_config)
     num_cols = len(intrinsic_params)
@@ -75,7 +75,7 @@ def load_bf_data(data_path):
     return {"param_masks": dataset["param_masks"], "pred_set": dataset["pred_set"]}
 
 
-def load_gpt_pred(pred_path):
+def load_cf_pred(pred_path):
     dataset = np.load(pred_path, allow_pickle=True)
     return dataset["pred_set"], dataset["params_mask"]
 
@@ -104,7 +104,7 @@ def parse_args():
     p = argparse.ArgumentParser()
     p.add_argument("--model", type=str, required=True, choices=list(MODELS.keys()))
     p.add_argument("--bf_data_dir", type=str, default="./cogformer/experiments/data")
-    p.add_argument("--gpt_pred_dir", type=str, default="./cogformer/experiments/data")
+    p.add_argument("--cf_pred_dir", type=str, default="./cogformer/experiments/data")
     p.add_argument("--mc_pred_dir", type=str, default="./cogformer/experiments/data/model_class",
                    help="Directory with ModelClass pred files; if set, also runs Class vs Family C2ST")
     p.add_argument("--outdir", type=str, default=None,
@@ -121,35 +121,35 @@ def main():
     variable_names = model_cfg["variable_names"]
     colors = cogformer_fm_colors()
     benchmark = model_cfg["benchmark_configs"]
-    gpt_pred_template = model_cfg["gpt_pred_filename"]
+    cf_pred_template = model_cfg["cf_pred_filename"]
     outdir_root = Path(args.outdir) if args.outdir else Path(model_cfg["outdir"])
     summary_rows = []
 
     for cfg_name, design_config in benchmark.items():
         bf_data_path = Path(args.bf_data_dir) / f"{model_name}_{cfg_name}_data.npz"
-        gpt_pred_filename = gpt_pred_template.format(model=model_name, case=cfg_name)
-        gpt_pred_path = Path(args.gpt_pred_dir) / gpt_pred_filename
+        cf_pred_filename = cf_pred_template.format(model=model_name, case=cfg_name)
+        cf_pred_path = Path(args.cf_pred_dir) / cf_pred_filename
 
         if not bf_data_path.exists():
             logging.warning(f"No BF data for '{cfg_name}', skipping.")
             continue
-        if not gpt_pred_path.exists():
+        if not cf_pred_path.exists():
             logging.warning(f"No GPT pred for '{cfg_name}', skipping.")
             continue
 
         outdir = outdir_root / cfg_name
         outdir.mkdir(parents=True, exist_ok=True)
 
-        gpt_pred_set, params_mask = load_gpt_pred(gpt_pred_path)
+        cf_pred_set, params_mask = load_cf_pred(cf_pred_path)
         bf_data = load_bf_data(bf_data_path)
         active_idx = bf_data["param_masks"][0].astype(bool)
-        bf_pred_reshaped = reshape_bf_to_gpt(
+        bf_pred_reshaped = reshape_bf_to_cf(
             bf_data["pred_set"][:, :, active_idx], design_config, intrinsic_params
         )
 
         # Family vs BF
         mean_acc, joint = run_comparison(
-            gpt_pred_set, bf_pred_reshaped, design_config, intrinsic_params,
+            cf_pred_set, bf_pred_reshaped, design_config, intrinsic_params,
             variable_names, colors, args.max_num_categories, params_mask,
             outdir, f"{model_name}_families_{cfg_name}",
         )
@@ -160,11 +160,11 @@ def main():
 
         # Class vs Family
         if args.mc_pred_dir is not None:
-            mc_pred_path = Path(args.mc_pred_dir) / f"{model_name}_{cfg_name}_gpt_pred.npz"
+            mc_pred_path = Path(args.mc_pred_dir) / f"{model_name}_{cfg_name}_cf_pred.npz"
             if mc_pred_path.exists():
-                mc_pred_set, _ = load_gpt_pred(mc_pred_path)
+                mc_pred_set, _ = load_cf_pred(mc_pred_path)
                 mean_acc_mc, joint_mc = run_comparison(
-                    mc_pred_set, gpt_pred_set, design_config, intrinsic_params,
+                    mc_pred_set, cf_pred_set, design_config, intrinsic_params,
                     variable_names, colors, args.max_num_categories, params_mask,
                     outdir, f"{model_name}_{cfg_name}_mc",
                 )

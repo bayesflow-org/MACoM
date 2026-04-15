@@ -370,7 +370,7 @@ MODELS = {
 }
 
 
-def reshape_bf_to_gpt(bf_samples, design_config, intrinsic_params):
+def reshape_bf_to_cf(bf_samples, design_config, intrinsic_params):
     *leading, num_active = bf_samples.shape
     num_rows = len(design_config)
     num_cols = len(intrinsic_params)
@@ -547,9 +547,9 @@ def main(model_key: str, case: str, batch_size: int = 200, num_samples: int = 20
     design_config = model_cfg["benchmark_configs"][case]
     adaptive_colors = bf_colors()
 
-    true_grid = reshape_bf_to_gpt(true_params, design_config, intrinsic_params)
-    pred_grid = reshape_bf_to_gpt(pred_params, design_config, intrinsic_params)
-    params_mask = reshape_bf_to_gpt(np.ones((1, true_params.shape[-1])), design_config, intrinsic_params)[0]
+    true_grid = reshape_bf_to_cf(true_params, design_config, intrinsic_params)
+    pred_grid = reshape_bf_to_cf(pred_params, design_config, intrinsic_params)
+    params_mask = reshape_bf_to_cf(np.ones((1, true_params.shape[-1])), design_config, intrinsic_params)[0]
 
     common = dict(
         design_config=design_config,

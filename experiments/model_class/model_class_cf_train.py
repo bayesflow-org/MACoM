@@ -57,15 +57,15 @@ MODEL_CONFIGS = {
 
 
 class CogFormerTrainer:
-    def __init__(self, gpt, model_class, adapter, use_wandb=False):
-        self.gpt = gpt
+    def __init__(self, net, model_class, adapter, use_wandb=False):
+        self.net = net
         self.model_class = model_class
         self.adapter = adapter
         self.use_wandb = use_wandb
 
     def train(self, train_config, val_config, checkpoint_path="cogformer_model_class_fm.pt", fig_path="fig"):
         global_step = 0
-        optimizer = AdamW(self.gpt.parameters(), lr=train_config["learning_rate"])
+        optimizer = AdamW(self.net.parameters(), lr=train_config["learning_rate"])
         scheduler = CosineAnnealingLR(optimizer, T_max=train_config["epochs"])
 
         for epoch in range(train_config["epochs"]):
@@ -97,7 +97,7 @@ class CogFormerTrainer:
 
         checkpoint_dir = Path("./outputs/checkpoints/model_class/cf/")
         checkpoint_dir.mkdir(parents=True, exist_ok=True)
-        torch.save(self.gpt.state_dict(), checkpoint_dir / checkpoint_path)
+        torch.save(self.net.state_dict(), checkpoint_dir / checkpoint_path)
         logging.info(f"[saved] {checkpoint_dir / checkpoint_path}")
 
     def train_step(self, config, optimizer, scheduler):
@@ -116,7 +116,7 @@ class CogFormerTrainer:
 
         optimizer.zero_grad()
 
-        pred_velocity, target_velocity = self.gpt(
+        pred_velocity, target_velocity = self.net(
             adapted["param_matrices"][..., None],
             adapted["input_data"],
             adapted["param_indices"],
@@ -125,11 +125,11 @@ class CogFormerTrainer:
             model_ids=adapted["model_ids"],
         )
 
-        L = self.gpt.compute_loss(pred_velocity, target_velocity, adapted["param_masks"])
+        L = self.net.compute_loss(pred_velocity, target_velocity, adapted["param_masks"])
         L.backward()
 
         if config["gradient_clip_norm"] is not None:
-            torch.nn.utils.clip_grad_norm_(self.gpt.parameters(), config["gradient_clip_norm"])
+            torch.nn.utils.clip_grad_norm_(self.net.parameters(), config["gradient_clip_norm"])
 
         optimizer.step()
         loss = L.detach().item()
@@ -138,7 +138,7 @@ class CogFormerTrainer:
 
     @torch.no_grad()
     def val_step(self, config, global_step, fig_path):
-        self.gpt.eval()
+        self.net.eval()
 
         model_family_config = config["model_family_config"]
         max_num_params = self.model_class.max_num_params
@@ -182,7 +182,7 @@ class CogFormerTrainer:
                 num_params=max_num_params,
             )
 
-            pred_set = self.gpt.sample(
+            pred_set = self.net.sample(
                 adapted["input_data"],
                 adapted["param_indices"],
                 adapted["regressor_indices"],
@@ -225,7 +225,7 @@ class CogFormerTrainer:
 
             plt.close(recovery_fig)
 
-        self.gpt.train()
+        self.net.train()
 
     @staticmethod
     def finish():
@@ -403,7 +403,7 @@ if __name__ == "__main__":
     )
 
     trainer = CogFormerTrainer(
-        gpt=cogformer,
+        net=cogformer,
         model_class=model_class,
         adapter=adapter,
         use_wandb=args.use_wandb,

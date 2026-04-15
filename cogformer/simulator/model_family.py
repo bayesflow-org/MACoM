@@ -92,6 +92,7 @@ class ModelFamily:
                     num_regressors=num_regressors,
                     keep_intercept=keep_intercept,
                     add_interaction=add_interaction,
+                    global_params=kwargs.get("global_params"),
                 )
             parameter_mask = self.context_manager.build_parameter_mask(
                 design_config=design_config,
@@ -112,6 +113,7 @@ class ModelFamily:
                 fixed_intrinsics=kwargs.get("fixed_intrinsics"),
                 add_interaction=add_interaction,
                 allowed_slope_patterns=allowed_slope_patterns,
+                global_params=kwargs.get("global_params"),
             )
 
         # Resolve intrinsic priors (common to all branches)
@@ -181,11 +183,16 @@ class ModelFamily:
         params = self.model.prepare_params(params=params, num_obs=num_obs, context=context)
         sim_trials = self.model.simulate(params, context=context)
 
+        # Derive whether an intercept column is actually present from the resolved
+        # design_config — this is True when keep_intercept=True OR global params
+        # forced a "1" entry, so collate() gets the correct column count.
+        has_intercept_col = "1" in design_config
+
         # Regressor mask
         regressor_mask = self.context_manager.build_regressor_mask(
             num_regressors=num_regressors_total,
             max_num_categories=max_num_categories,
-            keep_intercept=keep_intercept
+            keep_intercept=has_intercept_col,
         )
 
         # Flatten param outputs
@@ -203,7 +210,7 @@ class ModelFamily:
             "discrete_mask": discrete_mask,
             "regressor_mask": regressor_mask,
             "max_num_regressors": max_num_regressors,
-            "keep_intercept": keep_intercept,
+            "keep_intercept": has_intercept_col,
             "num_alternatives": int((context or {}).get("num_alternatives", 2)),
         }
 
