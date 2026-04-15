@@ -4,7 +4,7 @@ import numpy as np
 def contaminate(
     rts: np.ndarray,
     choices: np.ndarray,
-    pi: float,
+    pi: float | np.ndarray,
     num_alternatives: int = 2,
     is_circular: bool = False,
 ) -> tuple[np.ndarray, np.ndarray]:
@@ -22,8 +22,10 @@ def contaminate(
     ----------
     rts : np.ndarray, shape (n, 1)
     choices : np.ndarray, shape (n, 1)
-    pi : float
-        Contamination rate in [0, 1].  0.0 disables contamination entirely.
+    pi : float or np.ndarray
+        Contamination rate(s) in [0, 1]. A scalar applies one rate to all
+        trials; a 1-D array of length n applies per-trial rates.
+        Zero / all-zero disables contamination entirely.
     num_alternatives : int
         Number of discrete choice options (DDM: 2, RDM: K). Ignored when
         ``is_circular=True``.
@@ -36,11 +38,18 @@ def contaminate(
     rts, choices : np.ndarray
         Copies with contaminated trials replaced.
     """
-    if pi <= 0.0:
+    pi_arr = np.asarray(pi, dtype=np.float32).reshape(-1)
+    if (pi_arr <= 0.0).all():
         return rts, choices
 
     n = rts.shape[0]
-    mask = np.random.uniform(size=n) < pi
+    u = np.random.uniform(size=n)
+    if pi_arr.size == 1:
+        mask = u < pi_arr[0]
+    else:
+        if pi_arr.size != n:
+            raise ValueError(f"pi array length {pi_arr.size} != num_obs {n}")
+        mask = u < pi_arr
     if not mask.any():
         return rts, choices
 

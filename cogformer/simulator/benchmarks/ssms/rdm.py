@@ -129,6 +129,7 @@ class RDM(Model):
         tau    = as_1d(params["tau"], num_obs)
         s_v    = as_1d(params["s_v"], num_obs)
         s_tau  = as_1d(params["s_tau"], num_obs)
+        pi     = as_1d(params.get("pi", self.pi), num_obs)
 
         if num_alternatives == 2:
             v = np.zeros((num_obs, 2), dtype=np.float64)
@@ -151,7 +152,7 @@ class RDM(Model):
                 v[i, :] = v_base[i]
                 v[i, int(favored_idx[i])] = v_base[i] + v_diff[i]
 
-        return {"v": v, "a": a, "tau": tau, "s_v": s_v, "s_tau": s_tau}
+        return {"v": v, "a": a, "tau": tau, "s_v": s_v, "s_tau": s_tau, "pi": pi}
 
     @staticmethod
     def build_context(num_obs: int, num_alternatives: int = 2) -> dict[str, np.ndarray]:
@@ -172,11 +173,14 @@ class RDM(Model):
         return RDM.build_context(num_obs, num_alternatives)
 
     def simulate(self, params: dict[str, np.ndarray], context=None, randomize=False):
-        results = simulate_rdm(**params, decay=self.decay, dt=self.dt, max_steps=self.max_steps)
+        pi = params.get("pi", None)
+        rdm_params = {k: v for k, v in params.items() if k != "pi"}
+        results = simulate_rdm(**rdm_params, decay=self.decay, dt=self.dt, max_steps=self.max_steps)
         rts = results[:, 0][..., None]
         choices = results[:, 1][..., None]
         num_alternatives = int((context or {}).get("num_alternatives", 2))
-        rts, choices = contaminate(rts, choices, pi=self.pi, num_alternatives=num_alternatives)
+        pi_val = pi if pi is not None else self.pi
+        rts, choices = contaminate(rts, choices, pi=pi_val, num_alternatives=num_alternatives)
         return {"rts": rts, "choices": choices}
 
     def sample(self):

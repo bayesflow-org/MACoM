@@ -93,13 +93,14 @@ class CDM(Model):
         tau      = as_1d(params["tau"],     num_obs, "tau")
         s_v      = as_1d(params["s_v"],     num_obs, "s_v")
         s_tau    = as_1d(params["s_tau"],   num_obs, "s_tau")
+        pi       = as_1d(params.get("pi", self.pi), num_obs)
 
         # Polar -> Cartesian
         v_x = v * np.cos(v_theta)
         v_y = v * np.sin(v_theta)
         v   = np.stack([v_x, v_y], axis=1)
 
-        return {"v": v, "a": a, "tau": tau, "s_v": s_v, "s_tau": s_tau}
+        return {"v": v, "a": a, "tau": tau, "s_v": s_v, "s_tau": s_tau, "pi": pi}
 
     @staticmethod
     def build_context(num_obs: int, theta_mode: str = "random_uniform") -> dict[str, np.ndarray]:
@@ -123,8 +124,11 @@ class CDM(Model):
         return CDM.build_context(num_obs, theta_mode)
 
     def simulate(self, params: dict[str, np.ndarray], context=None):
-        results = simulate_cdm(**params, decay=self.decay, dt=self.dt, max_steps=self.max_steps)
+        pi = params.get("pi", None)
+        cdm_params = {k: v for k, v in params.items() if k != "pi"}
+        results = simulate_cdm(**cdm_params, decay=self.decay, dt=self.dt, max_steps=self.max_steps)
         rts = results[:, 0][..., None]
         choices = results[:, 1][..., None]
-        rts, choices = contaminate(rts, choices, pi=self.pi, is_circular=True)
+        pi_val = pi if pi is not None else self.pi
+        rts, choices = contaminate(rts, choices, pi=pi_val, is_circular=True)
         return {"rts": rts, "choices": choices}

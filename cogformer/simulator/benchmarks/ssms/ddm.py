@@ -5,7 +5,7 @@ from scipy.stats import halfnorm
 from .priors import ddm_priors
 
 from cogformer.simulator import Model
-from cogformer.utils.simulator_utils import contaminate
+from cogformer.utils.simulator_utils import as_1d, contaminate
 
 
 @njit
@@ -85,11 +85,29 @@ class DDM(Model):
         self.max_steps = max_steps
         self.pi = pi
 
+    def prepare_params(
+        self,
+        params: dict[str, np.ndarray],
+        num_obs: int,
+        context: dict[str, np.ndarray] | None = None,
+    ) -> dict[str, np.ndarray]:
+        v     = as_1d(params["v"],     num_obs)
+        a     = as_1d(params["a"],     num_obs)
+        z     = as_1d(params["z"],     num_obs)
+        tau   = as_1d(params["tau"],   num_obs)
+        s_v   = as_1d(params["s_v"],   num_obs)
+        s_tau = as_1d(params["s_tau"], num_obs)
+        pi    = as_1d(params.get("pi", self.pi), num_obs)
+        return {"v": v, "a": a, "z": z, "tau": tau, "s_v": s_v, "s_tau": s_tau, "pi": pi}
+
     def simulate(self, params: dict[str, np.ndarray], context=None):
-        results = simulate_ddm(**params, sigma=1.0, dt=self.dt, max_steps=self.max_steps)
+        pi = params.get("pi", None)
+        ddm_params = {k: v for k, v in params.items() if k != "pi"}
+        results = simulate_ddm(**ddm_params, sigma=1.0, dt=self.dt, max_steps=self.max_steps)
         rts = results[:, 0][..., None]
         choices = results[:, 1][..., None]
-        rts, choices = contaminate(rts, choices, pi=self.pi, num_alternatives=2)
+        pi_val = pi if pi is not None else self.pi
+        rts, choices = contaminate(rts, choices, pi=pi_val, num_alternatives=2)
         return {"rts": rts, "choices": choices}
 
     def sample(self, batch_size: int | tuple, num_obs: int = 500, context=None):
