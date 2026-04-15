@@ -47,7 +47,7 @@ def build_encoder_input_dim(
     max_num_regressors: int, max_num_categories: int, keep_intercept: bool
 ) -> int:
     max_total_regressors = max_num_regressors * (max_num_regressors + 1) // 2
-    return max_total_regressors * (max_num_categories - 1) + (3 if keep_intercept else 2)
+    return max_total_regressors * (max_num_categories - 1) + (4 if keep_intercept else 3)
 
 
 def parse_args():

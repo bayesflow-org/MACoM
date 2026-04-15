@@ -291,6 +291,7 @@ class CogFormerTrainer:
                 design_config=design_config,
                 intrinsic_params=params,
                 max_num_categories=max_num_categories,
+                parameter_mask=params_mask,
                 intercept_color=colors["intercept"],
                 main_effect_color=colors["main_effect"],
                 interaction_color=colors["interaction"],
