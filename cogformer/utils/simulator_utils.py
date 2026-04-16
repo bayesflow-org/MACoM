@@ -111,8 +111,6 @@ def scaled_sigmoid(
     """
     return lower_bound + (upper_bound - lower_bound) / (1.0 + np.exp(-x))
 
-
-
 def as_1d(x, n: int, allow_scalar: bool = True) -> np.ndarray:
     """Return a 1D array of length n. Broadcast scalars if allowed; else validate."""
     a = np.asarray(x)
@@ -136,3 +134,10 @@ def inspect(out: dict, verbose=False):
             print(v.keys())
         else:
             print(k, v)
+
+def one_hot_encode_choicea(choices: np.ndarray, num_alternatives: int) -> np.ndarray:
+    # Assume already a binary vector
+    if num_alternatives == 2:
+        return choices
+
+    return np.eye(num_alternatives, dtype=choices.dtype)[choices]
