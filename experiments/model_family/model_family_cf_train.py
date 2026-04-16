@@ -13,11 +13,6 @@ import matplotlib.pyplot as plt
 np.set_printoptions(suppress=True)
 
 from cogformer.simulator import ModelFamily
-from cogformer.simulator.benchmarks.ssms.ddm import DDM
-from cogformer.simulator.benchmarks.ssms.cdm import CDM
-from cogformer.simulator.benchmarks.ssms.rdm import RDM
-from cogformer.simulator.benchmarks.ssms.priors import ddm_priors, cdm_priors, rdm_priors
-from cogformer.simulator.benchmarks.ssms.link_funs import ddm_link_fun, cdm_link_fun, rdm_link_fun
 from cogformer.adapter import Adapter
 from cogformer.networks.transformers.cogformer import CogFormer
 from cogformer.diagnostics.plot.adaptive_recovery import adaptive_recovery
@@ -26,116 +21,52 @@ from cogformer.diagnostics.plot.adaptive_coverage import adaptive_coverage
 from cogformer.diagnostics.plot.adaptive_metrics import adaptive_metrics as plot_adaptive_metrics
 from cogformer.utils.plot_utils import cogformer_fm_colors
 
+import sys
+sys.path.insert(0, str(Path(__file__).parent.parent))
+from configs import MODELS as _BASE_MODELS, GLOBAL_PARAMS, GLOBAL_VARIABLE_NAMES
+from utils import add_global_params, strip_global_params, build_encoder_input_dim
+
+
+# CF train uses global params (pi) and adds script-specific train keys
+def _build_train_config(base: dict, val_epoch_interval: int, wandb_project: str,
+                        checkpoint_dir: str, checkpoint_prefix: str, fig_subdir: str) -> dict:
+    cfg = add_global_params(base, GLOBAL_PARAMS, GLOBAL_VARIABLE_NAMES)
+    cfg.update({
+        "val_epoch_interval": val_epoch_interval,
+        "wandb_project": wandb_project,
+        "checkpoint_dir": checkpoint_dir,
+        "checkpoint_prefix": checkpoint_prefix,
+        "fig_subdir": fig_subdir,
+    })
+    return cfg
+
 
 MODELS = {
-    "ddm": {
-        "model_cls": DDM,
-        "prior_fn": ddm_priors,
-        "link_fn": ddm_link_fun,
-        "name": "DDM",
-        "intrinsic_params": ["v", "a", "z", "tau", "s_v", "s_tau", "pi"],
-        "variable_names": [r"$v$", r"$a$", r"$z$", r"$\tau$", r"$s_v$", r"$s_\tau$", r"$\pi$"],
-        "free_params": ["v", "a", "z", "tau"],
-        "fixed_params": ["s_v", "s_tau"],
-        "global_params": ["pi"],
-        "default_fixed_values": {"s_v": 0.0, "s_tau": 0.0},
-        "val_epoch_interval": 500,
-        "wandb_project": "cogformer-fm-ddm",
-        "checkpoint_dir": "./outputs/checkpoints/model_family/cf/ddm/",
-        "checkpoint_prefix": "cogformer_mixed_attn",
-        "fig_subdir": "model_family/cf/ddm",
-        "val_scenarios": [
-            ("interaction", {
-                "1": ["v", "a", "z", "tau", "s_v", "s_tau", "pi"],
-                "u_1": ["v", "a", "z", "tau", "s_v"],
-                "u_2": ["v", "a", "z", "tau"],
-                "u_1:u_2": ["v", "a", "z"],
-            }),
-            ("fixed", {
-                "1": ["v", "a", "z", "tau", "pi"],
-                "u_1": [], "u_2": [], "u_1:u_2": [],
-            }),
-        ],
-    },
-    "cdm": {
-        "model_cls": CDM,
-        "prior_fn": cdm_priors,
-        "link_fn": cdm_link_fun,
-        "name": "CDM",
-        "intrinsic_params": ["v", "v_theta", "a", "tau", "s_v", "s_tau", "pi"],
-        "variable_names": [r"$v$", r"$v_\theta$", r"$a$", r"$\tau$", r"$s_v$", r"$s_\tau$", r"$\pi$"],
-        "free_params": ["v", "v_theta", "a", "tau"],
-        "fixed_params": ["s_v", "s_tau"],
-        "global_params": ["pi"],
-        "default_fixed_values": {"s_v": 0.0, "s_tau": 0.0},
-        "val_epoch_interval": 500,
-        "wandb_project": "cogformer-fm-cdm",
-        "checkpoint_dir": "./outputs/checkpoints/model_family/cf/cdm/",
-        "checkpoint_prefix": "cogformer_cdm_mixed_attn",
-        "fig_subdir": "model_family/cf/cdm",
-        "val_scenarios": [
-            ("interaction", {
-                "1": ["v", "v_theta", "a", "tau", "s_v", "s_tau", "pi"],
-                "u_1": ["v", "v_theta", "a", "tau", "s_v"],
-                "u_2": ["v", "v_theta", "a", "tau"],
-                "u_1:u_2": ["v", "v_theta", "a"],
-            }),
-            ("fixed", {
-                "1": ["v", "v_theta", "a", "tau", "pi"],
-                "u_1": [], "u_2": [], "u_1:u_2": [],
-            }),
-        ],
-    },
-    "rdm": {
-        "model_cls": RDM,
-        "prior_fn": rdm_priors,
-        "link_fn": rdm_link_fun,
-        "name": "RDM",
-        "intrinsic_params": ["v", "v_diff", "a", "tau", "s_v", "s_tau", "pi"],
-        "variable_names": [r"$v$", r"$v_{\mathrm{diff}}$", r"$a$", r"$\tau$", r"$s_v$", r"$s_\tau$", r"$\pi$"],
-        "free_params": ["v", "v_diff", "a", "tau"],
-        "fixed_params": ["s_v", "s_tau"],
-        "global_params": ["pi"],
-        "default_fixed_values": {"s_v": 0.0, "s_tau": 0.0},
-        "train_context": RDM.build_random_context,
-        "val_epoch_interval": 500,
-        "wandb_project": "cogformer-fm-rdm",
-        "checkpoint_dir": "./outputs/checkpoints/model_family/cf/rdm/",
-        "checkpoint_prefix": "cogformer_rdm_mixed_attn",
-        "fig_subdir": "model_family/cf/rdm",
-        "val_scenarios": [
-            ("interaction", {
-                "1": ["v", "v_diff", "a", "tau", "s_v", "s_tau", "pi"],
-                "u_1": ["v", "v_diff", "a", "tau", "s_v"],
-                "u_2": ["v", "v_diff", "a", "tau"],
-                "u_1:u_2": ["v", "v_diff", "a"],
-            }),
-            ("fixed", {
-                "1": ["v", "v_diff", "a", "tau", "pi"],
-                "u_1": [], "u_2": [], "u_1:u_2": [],
-            }),
-        ],
-    },
+    "ddm": _build_train_config(
+        _BASE_MODELS["ddm"],
+        val_epoch_interval=500,
+        wandb_project="cogformer-fm-ddm",
+        checkpoint_dir="./outputs/checkpoints/model_family/cf/ddm/",
+        checkpoint_prefix="cogformer_mixed_attn",
+        fig_subdir="model_family/cf/ddm",
+    ),
+    "cdm": _build_train_config(
+        _BASE_MODELS["cdm"],
+        val_epoch_interval=500,
+        wandb_project="cogformer-fm-cdm",
+        checkpoint_dir="./outputs/checkpoints/model_family/cf/cdm/",
+        checkpoint_prefix="cogformer_cdm_mixed_attn",
+        fig_subdir="model_family/cf/cdm",
+    ),
+    "rdm": _build_train_config(
+        _BASE_MODELS["rdm"],
+        val_epoch_interval=500,
+        wandb_project="cogformer-fm-rdm",
+        checkpoint_dir="./outputs/checkpoints/model_family/cf/rdm/",
+        checkpoint_prefix="cogformer_rdm_mixed_attn",
+        fig_subdir="model_family/cf/rdm",
+    ),
 }
-
-
-def strip_global_params(cfg: dict) -> dict:
-    """Return a shallow copy of cfg with all global_params removed from
-    intrinsic_params, variable_names, free_params, and val_scenarios."""
-    global_p = set(cfg.get("global_params", []))
-    if not global_p:
-        return cfg
-    cfg = dict(cfg)
-    keep = [i for i, p in enumerate(cfg["intrinsic_params"]) if p not in global_p]
-    cfg["intrinsic_params"] = [cfg["intrinsic_params"][i] for i in keep]
-    cfg["variable_names"]   = [cfg["variable_names"][i]   for i in keep]
-    cfg["free_params"]      = [p for p in cfg["free_params"]  if p not in global_p]
-    cfg["global_params"]    = []
-    cfg["val_scenarios"] = [
-        (tag, {k: [p for p in ps if p not in global_p] for k, ps in scenario.items()})
-        for tag, scenario in cfg["val_scenarios"]
-    ]
-    return cfg
 
 
 class CogFormerTrainer:
@@ -157,7 +88,7 @@ class CogFormerTrainer:
             self.model_family = ModelFamily(
                 name=model_cfg["name"],
                 model=model_cfg["model_cls"](),
-                prior_fun=model_cfg["prior_fn"](),
+                prior=model_cfg["prior_fn"](),
             )
 
     def train(
@@ -208,7 +139,7 @@ class CogFormerTrainer:
         train_samples = self.model_family.batch_sample(
             **config["model_family_config"],
             **config["train_sample_config"],
-            prior_fun=self.model_family.prior_fun,
+            prior=self.model_family.prior,
             batch_size=config["batch_size"],
             flatten_param_outputs=True,
             link_fun=link_fn(),
@@ -216,7 +147,6 @@ class CogFormerTrainer:
         )
         adapted = self.adapter.adapt(
             train_samples,
-            intrinsic_params=self.model_family.intrinsic_params,
             device=config["device"],
         )
         optimizer.zero_grad()
@@ -265,7 +195,6 @@ class CogFormerTrainer:
             )
             adapted = self.adapter.adapt(
                 test_samples,
-                intrinsic_params=self.model_family.intrinsic_params,
                 device=config["device"],
             )
             self.net(
@@ -452,6 +381,12 @@ if __name__ == "__main__":
         "global_params": model_cfg.get("global_params"),
     }
 
+    mask_randomizer_kwargs = {
+        "free_intrinsics": ["v", "a", "z", "tau"],
+        "fixed_intrinsics": ["s_v", "s_tau"],
+        "fixed_values": {"s_v": 0, "s_tau": 0},
+    }
+
     val_params_kwargs = {
         "free_intrinsics": model_cfg["intrinsic_params"],
         "fixed_intrinsics": [],
@@ -473,8 +408,7 @@ if __name__ == "__main__":
         "fixed_config": False,
     }
 
-    max_total_regressors = max_num_regressors * (max_num_regressors + 1) // 2
-    encoder_input_dim = max_total_regressors * (max_num_categories - 1) + (4 if keep_intercept else 3)
+    encoder_input_dim = build_encoder_input_dim(max_num_regressors, max_num_categories, keep_intercept)
 
     train_config = {
         "epochs": args.epochs,
@@ -531,7 +465,7 @@ if __name__ == "__main__":
     model_family = ModelFamily(
         model=model_cfg["model_cls"](),
         name=model_cfg["name"],
-        prior_fun=model_cfg["prior_fn"](),
+        prior=model_cfg["prior_fn"](),
         mask_randomizer_kwargs=train_params_kwargs,
     )
     adapter = Adapter()

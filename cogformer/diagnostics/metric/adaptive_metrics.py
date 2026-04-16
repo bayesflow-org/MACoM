@@ -2,7 +2,7 @@ import numpy as np
 import pandas as pd
 from scipy.stats import binom
 
-from cogformer.simulator.context_manager import ContextManager
+from cogformer.simulator.design_utils import build_parameter_mask, build_design_matrix, build_random_design_config
 
 
 # ---------------------------------------------------------------------------
@@ -210,8 +210,7 @@ def adaptive_metrics(
         ``adaptive_posterior``), columns = metric names.
     """
     if parameter_mask is None:
-        cm = ContextManager()
-        parameter_mask = cm.build_parameter_mask(
+        parameter_mask = build_parameter_mask(
             design_config=design_config,
             max_num_categories=max_num_categories,
             intrinsic_params=intrinsic_params,

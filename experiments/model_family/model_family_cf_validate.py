@@ -7,11 +7,6 @@ import torch
 import matplotlib.pyplot as plt
 
 from cogformer.simulator import ModelFamily
-from cogformer.simulator.benchmarks.ssms.ddm import DDM
-from cogformer.simulator.benchmarks.ssms.cdm import CDM
-from cogformer.simulator.benchmarks.ssms.rdm import RDM
-from cogformer.simulator.benchmarks.ssms.priors import ddm_priors, cdm_priors, rdm_priors
-from cogformer.simulator.benchmarks.ssms.link_funs import ddm_link_fun, cdm_link_fun, rdm_link_fun
 from cogformer.adapter import Adapter
 from cogformer.networks.transformers.cogformer import CogFormer
 from cogformer.diagnostics.plot.adaptive_posterior import adaptive_posterior
@@ -22,161 +17,24 @@ from cogformer.diagnostics.plot.adaptive_metrics import adaptive_metrics as plot
 from cogformer.diagnostics.metric.adaptive_metrics import adaptive_metrics as compute_adaptive_metrics
 from cogformer.utils.plot_utils import cogformer_fm_colors
 
+import sys
+sys.path.insert(0, str(Path(__file__).parent.parent))
+from configs import MODELS as _BASE_MODELS, GLOBAL_PARAMS, GLOBAL_VARIABLE_NAMES
+from utils import add_global_params, strip_global_params, infer_free_fixed_intrinsics, build_encoder_input_dim
 
-MODELS = {
-    "ddm": {
-        "model_cls": DDM,
-        "prior_fn": ddm_priors,
-        "link_fn": ddm_link_fun,
-        "name": "DDM",
-        "intrinsic_params": ["v", "a", "z", "tau", "s_v", "s_tau", "pi"],
-        "variable_names": [r"$v$", r"$a$", r"$z$", r"$\tau$", r"$s_v$", r"$s_\tau$", r"$\pi$"],
-        "free_params": ["v", "a", "z", "tau"],
-        "fixed_params": ["s_v", "s_tau"],
-        "global_params": ["pi"],
-        "default_fixed_values": {"s_v": 0.0, "s_tau": 0.0},
-        "outdir": "./outputs/figures/model_family/cf/ddm/",
-        # DDM uses singular "family", CDM/RDM use plural "families"
-        "pred_filename_template": "{model}_family_{case}_cf_pred.npz",
-        "benchmark_configs": {
-            "intercept_only": {
-                "1": ["v", "a", "z", "tau", "s_v", "s_tau", "pi"],
-                "u_1": [], "u_2": [], "u_1:u_2": [],
-            },
-            "regressed": {
-                "1": ["v", "a", "z", "tau", "s_v", "s_tau", "pi"],
-                "u_1": ["v", "a", "z"], "u_2": ["v", "a", "z"], "u_1:u_2": [],
-            },
-            "fixed": {
-                "1": ["v", "a", "z", "tau", "pi"],
-                "u_1": [], "u_2": [], "u_1:u_2": [],
-            },
-            "fixed_regressed": {
-                "1": ["v", "a", "z", "tau", "pi"],
-                "u_1": ["v", "a", "z"], "u_2": ["v", "a", "z"], "u_1:u_2": [],
-            },
-            "interaction": {
-                "1": ["v", "a", "z", "tau", "s_v", "s_tau", "pi"],
-                "u_1": ["v", "a", "z", "tau", "s_v"],
-                "u_2": ["v", "a", "z", "tau"],
-                "u_1:u_2": ["v", "a", "z"],
-            },
-            "full": {
-                "1": ["v", "a", "z", "tau", "s_v", "s_tau", "pi"],
-                "u_1": ["v", "a", "z", "tau", "s_v", "s_tau"],
-                "u_2": ["v", "a", "z", "tau", "s_v", "s_tau"],
-                "u_1:u_2": ["v", "a", "z", "tau", "s_v", "s_tau"],
-            },
-        },
-    },
-    "cdm": {
-        "model_cls": CDM,
-        "prior_fn": cdm_priors,
-        "link_fn": cdm_link_fun,
-        "name": "CDM",
-        "intrinsic_params": ["v", "v_theta", "a", "tau", "s_v", "s_tau", "pi"],
-        "variable_names": [r"$v$", r"$v_\theta$", r"$a$", r"$\tau$", r"$s_v$", r"$s_\tau$", r"$\pi$"],
-        "free_params": ["v", "v_theta", "a", "tau"],
-        "fixed_params": ["s_v", "s_tau"],
-        "global_params": ["pi"],
-        "default_fixed_values": {"s_v": 0.0, "s_tau": 0.0},
-        "outdir": "./outputs/figures/model_family/cf/cdm/",
-        "pred_filename_template": "{model}_families_{case}_cf_pred.npz",
-        "benchmark_configs": {
-            "intercept_only": {
-                "1": ["v", "v_theta", "a", "tau", "s_v", "s_tau", "pi"],
-                "u_1": [], "u_2": [], "u_1:u_2": [],
-            },
-            "regressed": {
-                "1": ["v", "v_theta", "a", "tau", "s_v", "s_tau", "pi"],
-                "u_1": ["v", "a"], "u_2": ["v", "a"], "u_1:u_2": [],
-            },
-            "fixed": {
-                "1": ["v", "v_theta", "a", "tau", "pi"],
-                "u_1": [], "u_2": [], "u_1:u_2": [],
-            },
-            "fixed_regressed": {
-                "1": ["v", "v_theta", "a", "tau", "pi"],
-                "u_1": ["v", "a"], "u_2": ["v", "a"], "u_1:u_2": [],
-            },
-            "interaction": {
-                "1": ["v", "v_theta", "a", "tau", "s_v", "s_tau", "pi"],
-                "u_1": ["v", "v_theta", "a", "tau", "s_v"],
-                "u_2": ["v", "v_theta", "a", "tau"],
-                "u_1:u_2": ["v", "v_theta", "a"],
-            },
-            "full": {
-                "1": ["v", "v_theta", "a", "tau", "s_v", "s_tau", "pi"],
-                "u_1": ["v", "v_theta", "a", "tau", "s_v", "s_tau"],
-                "u_2": ["v", "v_theta", "a", "tau", "s_v", "s_tau"],
-                "u_1:u_2": ["v", "v_theta", "a", "tau", "s_v", "s_tau"],
-            },
-        },
-    },
-    "rdm": {
-        "model_cls": RDM,
-        "prior_fn": rdm_priors,
-        "link_fn": rdm_link_fun,
-        "name": "RDM",
-        "intrinsic_params": ["v", "v_diff", "a", "tau", "s_v", "s_tau", "pi"],
-        "variable_names": [r"$v$", r"$v_{\mathrm{diff}}$", r"$a$", r"$\tau$", r"$s_v$", r"$s_\tau$", r"$\pi$"],
-        "free_params": ["v", "v_diff", "a", "tau"],
-        "fixed_params": ["s_v", "s_tau"],
-        "global_params": ["pi"],
-        "default_fixed_values": {"s_v": 0.0, "s_tau": 0.0},
-        "outdir": "./outputs/figures/model_family/cf/rdm/",
-        "pred_filename_template": "{model}_families_{case}_cf_pred.npz",
-        "benchmark_configs": {
-            "intercept_only": {
-                "1": ["v", "v_diff", "a", "tau", "s_v", "s_tau", "pi"],
-                "u_1": [], "u_2": [], "u_1:u_2": [],
-            },
-            "regressed": {
-                "1": ["v", "v_diff", "a", "tau", "s_v", "s_tau", "pi"],
-                "u_1": ["v_diff", "a"], "u_2": ["v_diff", "a"], "u_1:u_2": [],
-            },
-            "fixed": {
-                "1": ["v", "v_diff", "a", "tau", "pi"],
-                "u_1": [], "u_2": [], "u_1:u_2": [],
-            },
-            "fixed_regressed": {
-                "1": ["v", "v_diff", "a", "tau", "pi"],
-                "u_1": ["v_diff", "a"], "u_2": ["v_diff", "a"], "u_1:u_2": [],
-            },
-            "interaction": {
-                "1": ["v", "v_diff", "a", "tau", "s_v", "s_tau", "pi"],
-                "u_1": ["v", "v_diff", "a", "tau", "s_v"],
-                "u_2": ["v", "v_diff", "a", "tau"],
-                "u_1:u_2": ["v", "v_diff", "a"],
-            },
-            "full": {
-                "1": ["v", "v_diff", "a", "tau", "s_v", "s_tau", "pi"],
-                "u_1": ["v", "v_diff", "a", "tau", "s_v", "s_tau"],
-                "u_2": ["v", "v_diff", "a", "tau", "s_v", "s_tau"],
-                "u_1:u_2": ["v", "v_diff", "a", "tau", "s_v", "s_tau"],
-            },
-        },
-    },
+
+# CF validate uses global params (pi) and adds script-specific output keys
+_OUTDIR_MAP = {
+    "ddm": ("./outputs/figures/model_family/cf/ddm/", "{model}_family_{case}_cf_pred.npz"),
+    "cdm": ("./outputs/figures/model_family/cf/cdm/", "{model}_families_{case}_cf_pred.npz"),
+    "rdm": ("./outputs/figures/model_family/cf/rdm/", "{model}_families_{case}_cf_pred.npz"),
 }
 
-
-def strip_global_params(cfg: dict) -> dict:
-    """Return a shallow copy of cfg with all global_params removed from
-    intrinsic_params, variable_names, free_params, and benchmark_configs."""
-    global_p = set(cfg.get("global_params", []))
-    if not global_p:
-        return cfg
-    cfg = dict(cfg)
-    keep = [i for i, p in enumerate(cfg["intrinsic_params"]) if p not in global_p]
-    cfg["intrinsic_params"] = [cfg["intrinsic_params"][i] for i in keep]
-    cfg["variable_names"]   = [cfg["variable_names"][i]   for i in keep]
-    cfg["free_params"]      = [p for p in cfg["free_params"]  if p not in global_p]
-    cfg["global_params"]    = []
-    cfg["benchmark_configs"] = {
-        name: {k: [p for p in ps if p not in global_p] for k, ps in dc.items()}
-        for name, dc in cfg["benchmark_configs"].items()
-    }
-    return cfg
+MODELS = {}
+for _key, _base in _BASE_MODELS.items():
+    _cfg = add_global_params(_base, GLOBAL_PARAMS, GLOBAL_VARIABLE_NAMES)
+    _cfg["outdir"], _cfg["pred_filename_template"] = _OUTDIR_MAP[_key]
+    MODELS[_key] = _cfg
 
 
 def load_validation_data(data_path: Path):
@@ -188,20 +46,8 @@ def load_validation_data(data_path: Path):
         "sim_data": {"rts": dataset["rts"], "choices": dataset["choices"]},
         "param_matrices": dataset["true_set"],
         "param_masks": dataset["param_masks"],
+        "n_params": dataset["true_set"].shape[-1],
     }
-
-
-def infer_free_fixed_intrinsics(design_config, all_intrinsics, default_fixed_values):
-    used = {p for plist in design_config.values() for p in plist}
-    free_intrinsics = [p for p in all_intrinsics if p in used]
-    fixed_intrinsics = [p for p in all_intrinsics if p not in used]
-    fixed_values = {p: default_fixed_values[p] for p in fixed_intrinsics if p in default_fixed_values}
-    return free_intrinsics, fixed_intrinsics, fixed_values
-
-
-def build_encoder_input_dim(max_num_regressors, max_num_categories, keep_intercept):
-    max_total_regressors = max_num_regressors * (max_num_regressors + 1) // 2
-    return max_total_regressors * (max_num_categories - 1) + (4 if keep_intercept else 3)
 
 
 def parse_args():
@@ -271,7 +117,7 @@ def main():
     model_family = ModelFamily(
         model=model_cfg["model_cls"](),
         name=model_cfg["name"],
-        prior_fun=model_cfg["prior_fn"](),
+        prior=model_cfg["prior_fn"](),
         mask_randomizer_kwargs={
             "free_intrinsics": intrinsic_params,
             "fixed_intrinsics": [],
@@ -369,7 +215,7 @@ def main():
                 link_fun=link_fn(),
             )
 
-        adapted = adapter.adapt(test_samples, intrinsic_params=model_family.intrinsic_params)
+        adapted = adapter.adapt(test_samples)
         for k, v in adapted.items():
             if torch.is_tensor(v):
                 adapted[k] = v.to(device)

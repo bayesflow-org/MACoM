@@ -7,130 +7,50 @@ import torch
 import matplotlib.pyplot as plt
 
 from cogformer.simulator import ModelFamily
-from cogformer.simulator.benchmarks.ssms.ddm import DDM
-from cogformer.simulator.benchmarks.ssms.cdm import CDM
-from cogformer.simulator.benchmarks.ssms.rdm import RDM
-from cogformer.simulator.benchmarks.ssms.priors import ddm_priors, cdm_priors, rdm_priors
-from cogformer.simulator.benchmarks.ssms.link_funs import ddm_link_fun, cdm_link_fun, rdm_link_fun
 from cogformer.adapter import Adapter
 from cogformer.networks.transformers.cogformer import CogFormer
-from cogformer.simulator.context_manager import ContextManager
+from cogformer.simulator.design_utils import build_parameter_mask, build_design_matrix, build_random_design_config
 from cogformer.diagnostics.plot.ensemble_recovery import ensemble_recovery
 from cogformer.diagnostics.plot.ensemble_coverage import ensemble_coverage
 from cogformer.diagnostics.plot.ensemble_ecdf import ensemble_ecdf
 from cogformer.utils.plot_utils import cogformer_fm_colors
 
+import sys
+sys.path.insert(0, str(Path(__file__).parent.parent))
+from configs import MODELS as _BASE_MODELS, GLOBAL_PARAMS, GLOBAL_VARIABLE_NAMES
+from utils import add_global_params, strip_global_params, infer_free_fixed_intrinsics, build_encoder_input_dim
 
-MODELS = {
+
+_CASE_LABELS = {
     "ddm": {
-        "model_cls": DDM, "prior_fn": ddm_priors, "link_fn": ddm_link_fun,
-        "name": "DDM",
-        "intrinsic_params": ["v", "a", "z", "tau", "s_v", "s_tau", "pi"],
-        "variable_names": [r"$v$", r"$a$", r"$z$", r"$\tau$", r"$s_v$", r"$s_\tau$", r"$\pi$"],
-        "free_params": ["v", "a", "z", "tau"],
-        "fixed_params": ["s_v", "s_tau"],
-        "global_params": ["pi"],
-        "default_fixed_values": {"s_v": 0.0, "s_tau": 0.0},
-        "outdir": "./outputs/figures/model_family/cf/ddm/ensemble/",
-        # DDM uses "Intercept" (short) while CDM/RDM use "Intercept Only"
-        "case_labels": {
-            "intercept_only": "Intercept",
-            "regressed": "Regressed",
-            "fixed": "Fixed",
-            "fixed_regressed": "Fixed Reg.",
-            "interaction": "Interaction",
-        },
-        "benchmark_configs": {
-            "intercept_only": {"1": ["v", "a", "z", "tau", "s_v", "s_tau", "pi"], "u_1": [], "u_2": [], "u_1:u_2": []},
-            "regressed": {"1": ["v", "a", "z", "tau", "s_v", "s_tau", "pi"], "u_1": ["v", "a", "z"], "u_2": ["v", "a", "z"], "u_1:u_2": []},
-            "fixed": {"1": ["v", "a", "z", "tau", "pi"], "u_1": [], "u_2": [], "u_1:u_2": []},
-            "fixed_regressed": {"1": ["v", "a", "z", "tau", "pi"], "u_1": ["v", "a", "z"], "u_2": ["v", "a", "z"], "u_1:u_2": []},
-            "interaction": {"1": ["v", "a", "z", "tau", "s_v", "s_tau", "pi"], "u_1": ["v", "a", "z", "tau", "s_v"], "u_2": ["v", "a", "z", "tau"], "u_1:u_2": ["v", "a", "z"]},
-        },
+        "intercept_only": "Intercept", "regressed": "Regressed",
+        "fixed": "Fixed", "fixed_regressed": "Fixed Reg.", "interaction": "Interaction",
     },
     "cdm": {
-        "model_cls": CDM, "prior_fn": cdm_priors, "link_fn": cdm_link_fun,
-        "name": "CDM",
-        "intrinsic_params": ["v", "v_theta", "a", "tau", "s_v", "s_tau", "pi"],
-        "variable_names": [r"$v$", r"$v_\theta$", r"$a$", r"$\tau$", r"$s_v$", r"$s_\tau$", r"$\pi$"],
-        "free_params": ["v", "v_theta", "a", "tau"],
-        "fixed_params": ["s_v", "s_tau"],
-        "global_params": ["pi"],
-        "default_fixed_values": {"s_v": 0.0, "s_tau": 0.0},
-        "outdir": "./outputs/figures/model_family/cf/cdm/ensemble/",
-        "case_labels": {
-            "intercept_only": "Intercept Only",
-            "regressed": "Regressed",
-            "fixed": "Fixed Variability",
-            "fixed_regressed": "Fixed + Regressed",
-            "interaction": "With Interaction",
-        },
-        "benchmark_configs": {
-            "intercept_only": {"1": ["v", "v_theta", "a", "tau", "s_v", "s_tau", "pi"], "u_1": [], "u_2": [], "u_1:u_2": []},
-            "regressed": {"1": ["v", "v_theta", "a", "tau", "s_v", "s_tau", "pi"], "u_1": ["v", "a"], "u_2": ["v", "a"], "u_1:u_2": []},
-            "fixed": {"1": ["v", "v_theta", "a", "tau", "pi"], "u_1": [], "u_2": [], "u_1:u_2": []},
-            "fixed_regressed": {"1": ["v", "v_theta", "a", "tau", "pi"], "u_1": ["v", "a"], "u_2": ["v", "a"], "u_1:u_2": []},
-            "interaction": {"1": ["v", "v_theta", "a", "tau", "s_v", "s_tau", "pi"], "u_1": ["v", "v_theta", "a", "tau", "s_v"], "u_2": ["v", "v_theta", "a", "tau"], "u_1:u_2": ["v", "v_theta", "a"]},
-        },
+        "intercept_only": "Intercept Only", "regressed": "Regressed",
+        "fixed": "Fixed Variability", "fixed_regressed": "Fixed + Regressed", "interaction": "With Interaction",
     },
     "rdm": {
-        "model_cls": RDM, "prior_fn": rdm_priors, "link_fn": rdm_link_fun,
-        "name": "RDM",
-        "intrinsic_params": ["v", "v_diff", "a", "tau", "s_v", "s_tau", "pi"],
-        "variable_names": [r"$v$", r"$v_{\mathrm{diff}}$", r"$a$", r"$\tau$", r"$s_v$", r"$s_\tau$", r"$\pi$"],
-        "free_params": ["v", "v_diff", "a", "tau"],
-        "fixed_params": ["s_v", "s_tau"],
-        "global_params": ["pi"],
-        "default_fixed_values": {"s_v": 0.0, "s_tau": 0.0},
-        "outdir": "./outputs/figures/model_family/cf/rdm/ensemble/",
-        "case_labels": {
-            "intercept_only": "Intercept Only",
-            "regressed": "Regressed",
-            "fixed": "Fixed Variability",
-            "fixed_regressed": "Fixed + Regressed",
-            "interaction": "With Interaction",
-        },
-        "benchmark_configs": {
-            "intercept_only": {"1": ["v", "v_diff", "a", "tau", "s_v", "s_tau", "pi"], "u_1": [], "u_2": [], "u_1:u_2": []},
-            "regressed": {"1": ["v", "v_diff", "a", "tau", "s_v", "s_tau", "pi"], "u_1": ["v_diff", "a"], "u_2": ["v_diff", "a"], "u_1:u_2": []},
-            "fixed": {"1": ["v", "v_diff", "a", "tau", "pi"], "u_1": [], "u_2": [], "u_1:u_2": []},
-            "fixed_regressed": {"1": ["v", "v_diff", "a", "tau", "pi"], "u_1": ["v_diff", "a"], "u_2": ["v_diff", "a"], "u_1:u_2": []},
-            "interaction": {"1": ["v", "v_diff", "a", "tau", "s_v", "s_tau", "pi"], "u_1": ["v", "v_diff", "a", "tau", "s_v"], "u_2": ["v", "v_diff", "a", "tau"], "u_1:u_2": ["v", "v_diff", "a"]},
-        },
+        "intercept_only": "Intercept Only", "regressed": "Regressed",
+        "fixed": "Fixed Variability", "fixed_regressed": "Fixed + Regressed", "interaction": "With Interaction",
     },
 }
+_OUTDIRS = {
+    "ddm": "./outputs/figures/model_family/cf/ddm/ensemble/",
+    "cdm": "./outputs/figures/model_family/cf/cdm/ensemble/",
+    "rdm": "./outputs/figures/model_family/cf/rdm/ensemble/",
+}
 
-
-def strip_global_params(cfg: dict) -> dict:
-    """Return a shallow copy of cfg with all global_params removed from
-    intrinsic_params, variable_names, free_params, and benchmark_configs."""
-    global_p = set(cfg.get("global_params", []))
-    if not global_p:
-        return cfg
-    cfg = dict(cfg)
-    keep = [i for i, p in enumerate(cfg["intrinsic_params"]) if p not in global_p]
-    cfg["intrinsic_params"] = [cfg["intrinsic_params"][i] for i in keep]
-    cfg["variable_names"]   = [cfg["variable_names"][i]   for i in keep]
-    cfg["free_params"]      = [p for p in cfg["free_params"]  if p not in global_p]
-    cfg["global_params"]    = []
-    cfg["benchmark_configs"] = {
-        name: {k: [p for p in ps if p not in global_p] for k, ps in dc.items()}
-        for name, dc in cfg["benchmark_configs"].items()
+MODELS = {}
+for _key, _base in _BASE_MODELS.items():
+    _cfg = add_global_params(_base, GLOBAL_PARAMS, GLOBAL_VARIABLE_NAMES)
+    # Ensemble only uses a subset of benchmark cases (no "full")
+    _cfg["benchmark_configs"] = {
+        k: v for k, v in _cfg["benchmark_configs"].items() if k != "full"
     }
-    return cfg
-
-
-def infer_free_fixed_intrinsics(design_config, all_intrinsics, default_fixed_values):
-    used = {p for plist in design_config.values() for p in plist}
-    free_intrinsics = [p for p in all_intrinsics if p in used]
-    fixed_intrinsics = [p for p in all_intrinsics if p not in used]
-    fixed_values = {p: default_fixed_values[p] for p in fixed_intrinsics if p in default_fixed_values}
-    return free_intrinsics, fixed_intrinsics, fixed_values
-
-
-def build_encoder_input_dim(max_num_regressors, max_num_categories, keep_intercept):
-    max_total_regressors = max_num_regressors * (max_num_regressors + 1) // 2
-    return max_total_regressors * (max_num_categories - 1) + (4 if keep_intercept else 3)
+    _cfg["outdir"] = _OUTDIRS[_key]
+    _cfg["case_labels"] = _CASE_LABELS[_key]
+    MODELS[_key] = _cfg
 
 
 def parse_args():
@@ -195,7 +115,7 @@ def main():
     }
 
     model_family = ModelFamily(
-        model=model_cfg["model_cls"](), name=model_cfg["name"], prior_fun=model_cfg["prior_fn"](),
+        model=model_cfg["model_cls"](), name=model_cfg["name"], prior=model_cfg["prior_fn"](),
         mask_randomizer_kwargs={
             "free_intrinsics": intrinsic_params,
             "fixed_intrinsics": [],
@@ -204,7 +124,6 @@ def main():
         },
     )
     adapter = Adapter()
-    cm = ContextManager()
 
     encoder_input_dim = build_encoder_input_dim(
         args.max_num_regressors, args.max_num_categories, args.keep_intercept
@@ -247,7 +166,7 @@ def main():
             batch_size=args.batch_size, flatten_param_outputs=True,
             design_config=design_config, link_fun=link_fn(),
         )
-        adapted = adapter.adapt(samples, intrinsic_params=model_family.intrinsic_params)
+        adapted = adapter.adapt(samples)
         for k, v in adapted.items():
             if torch.is_tensor(v):
                 adapted[k] = v.to(device)
@@ -303,7 +222,7 @@ def main():
 
     # ── Random configs ensemble ────────────────────────────────────────────────
     random_design_configs = [
-        cm.build_random_design_config(
+        build_random_design_config(
             intrinsic_params=intrinsic_params,
             num_regressors=args.max_num_regressors,
             free_intrinsics=free_params,

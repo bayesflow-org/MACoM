@@ -5,12 +5,13 @@ import argparse
 import numpy as np
 import bayesflow as bf
 
+from pathlib import Path
+
 from cogformer.simulator.model_family import ModelFamily
-from cogformer.simulator.benchmarks.ssms.ddm import DDM
-from cogformer.simulator.benchmarks.ssms.cdm import CDM
-from cogformer.simulator.benchmarks.ssms.rdm import RDM
-from cogformer.simulator.benchmarks.ssms.priors import ddm_priors, cdm_priors, rdm_priors
-from cogformer.simulator.benchmarks.ssms.link_funs import ddm_link_fun, cdm_link_fun, rdm_link_fun
+
+import sys
+sys.path.insert(0, str(Path(__file__).parent.parent))
+from configs import MODELS as _BASE_MODELS
 
 
 # Per-model CASE_CONFIGS ─────────────────────────────────────────────────────
@@ -222,23 +223,15 @@ RDM_CASE_CONFIGS = {
     },
 }
 
-MODELS = {
-    "ddm": {
-        "model_cls": DDM, "prior_fn": ddm_priors, "link_fn": ddm_link_fun,
-        "name": "DDM", "case_configs": DDM_CASE_CONFIGS,
-        "ckpt_prefix": "ddm_families_bf",
-    },
-    "cdm": {
-        "model_cls": CDM, "prior_fn": cdm_priors, "link_fn": cdm_link_fun,
-        "name": "CDM", "case_configs": CDM_CASE_CONFIGS,
-        "ckpt_prefix": "cdm_families_bf",
-    },
-    "rdm": {
-        "model_cls": RDM, "prior_fn": rdm_priors, "link_fn": rdm_link_fun,
-        "name": "RDM", "case_configs": RDM_CASE_CONFIGS,
-        "ckpt_prefix": "rdm_families_bf",
-    },
-}
+_BF_CASE_CONFIGS = {"ddm": DDM_CASE_CONFIGS, "cdm": CDM_CASE_CONFIGS, "rdm": RDM_CASE_CONFIGS}
+_BF_CKPT_PREFIXES = {"ddm": "ddm_families_bf", "cdm": "cdm_families_bf", "rdm": "rdm_families_bf"}
+
+MODELS = {}
+for _key, _base in _BASE_MODELS.items():
+    _cfg = dict(_base)
+    _cfg["case_configs"] = _BF_CASE_CONFIGS[_key]
+    _cfg["ckpt_prefix"] = _BF_CKPT_PREFIXES[_key]
+    MODELS[_key] = _cfg
 
 
 class ModelFamilyBF(bf.simulators.Simulator):
@@ -256,7 +249,7 @@ class ModelFamilyBF(bf.simulators.Simulator):
 
         self.model_family = ModelFamily(
             model=model_cfg["model_cls"](),
-            prior_fun=model_cfg["prior_fn"](),
+            prior=model_cfg["prior_fn"](),
             regressed_params=self.config["regressed_params"],
             mask_randomizer_kwargs=dict(
                 free_intrinsics=self.config["free_intrinsics"],

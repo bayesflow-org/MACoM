@@ -8,10 +8,7 @@ import matplotlib.pyplot as plt
 import seaborn as sns
 
 from cogformer.simulator import ModelFamily, ModelClass
-from cogformer.simulator.benchmarks import DDM, RDM, CDM
-from cogformer.simulator.benchmarks.ssms.priors import ddm_priors, rdm_priors, cdm_priors
-from cogformer.simulator.benchmarks.ssms.link_funs import ddm_link_fun, rdm_link_fun, cdm_link_fun
-from cogformer.simulator.context_manager import ContextManager
+from cogformer.simulator.design_utils import build_parameter_mask, build_design_matrix, build_random_design_config
 from cogformer.adapter import Adapter
 from cogformer.networks.transformers.cogformer import CogFormer
 from cogformer.diagnostics.plot.ensemble_recovery import ensemble_recovery
@@ -19,33 +16,15 @@ from cogformer.diagnostics.plot.ensemble_coverage import ensemble_coverage
 from cogformer.diagnostics.plot.ensemble_ecdf import ensemble_ecdf
 from cogformer.diagnostics.plot.ensemble_metrics import ensemble_metrics
 
+import sys
+sys.path.insert(0, str(Path(__file__).parent.parent))
+from configs import MODELS as _BASE_MODELS, ALL_VARIABLE_NAMES as ALL_PARAMS_VARIABLE_NAMES
+from utils import infer_free_fixed_intrinsics, build_encoder_input_dim
 
-# Global parameter space variable names (ordered to match ModelClass.all_params)
-# ["v", "a", "z", "tau", "s_v", "s_tau", "v_diff", "v_theta"]
-ALL_PARAMS_VARIABLE_NAMES = [
-    r"$v$", r"$a$", r"$z$", r"$\tau$",
-    r"$s_v$", r"$s_\tau$",
-    r"$v_{\mathrm{diff}}$", r"$v_\theta$",
-]
 
 DEFAULT_FIXED_VALUES = {
-    "DDM": {"s_v": 0.0, "s_tau": 0.0},
-    "RDM": {"s_v": 0.0, "s_tau": 0.0},
-    "CDM": {"s_v": 0.0, "s_tau": 0.0},
+    m.upper(): cfg["default_fixed_values"] for m, cfg in _BASE_MODELS.items()
 }
-
-
-def infer_free_fixed_intrinsics(design_config, all_intrinsics, default_fixed_values):
-    used = {p for params in design_config.values() for p in params}
-    free_intrinsics = [p for p in all_intrinsics if p in used]
-    fixed_intrinsics = [p for p in all_intrinsics if p not in used]
-    fixed_values = {p: default_fixed_values[p] for p in fixed_intrinsics if p in default_fixed_values}
-    return free_intrinsics, fixed_intrinsics, fixed_values
-
-
-def build_encoder_input_dim(max_num_regressors, max_num_categories, keep_intercept):
-    max_total_regressors = max_num_regressors * (max_num_regressors + 1) // 2
-    return max_total_regressors * (max_num_categories - 1) + (4 if keep_intercept else 3)
 
 
 def parse_args():
@@ -88,16 +67,15 @@ def main():
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
     model_families = {
-        "DDM": ModelFamily(model=DDM(), name="DDM", prior_fun=ddm_priors()),
-        "RDM": ModelFamily(model=RDM(), name="RDM", prior_fun=rdm_priors()),
-        "CDM": ModelFamily(model=CDM(), name="CDM", prior_fun=cdm_priors()),
+        "DDM": ModelFamily(model=DDM(), name="DDM", prior=ddm_priors()),
+        "RDM": ModelFamily(model=RDM(), name="RDM", prior=rdm_priors()),
+        "CDM": ModelFamily(model=CDM(), name="CDM", prior=cdm_priors()),
     }
     link_funs = {"DDM": ddm_link_fun(), "RDM": rdm_link_fun(), "CDM": cdm_link_fun()}
     model_class = ModelClass(model_families=model_families, link_funs=link_funs)
     adapter = Adapter()
-    cm = ContextManager()
 
-    max_num_params = model_class.max_num_params  # 8
+    n_global_params = model_class.n_global_params  # 8
 
     encoder_input_dim = build_encoder_input_dim(
         args.max_num_regressors, args.max_num_categories, args.keep_intercept
@@ -148,12 +126,12 @@ def main():
         logging.info(f"Config {i + 1}/{args.n_configs}: {label}")
 
         mf = model_class.model_families[model_name]
-        model_id = model_class.model_registry[model_name]
+        model_id = model_class.model_index[model_name]
         intrinsic_params_local = mf.intrinsic_params
         link_fun = link_funs[model_name]
         default_fixed = DEFAULT_FIXED_VALUES[model_name]
 
-        dc = cm.build_random_design_config(
+        dc = build_random_design_config(
             intrinsic_params=intrinsic_params_local,
             num_regressors=args.max_num_regressors,
             free_intrinsics=[p for p in intrinsic_params_local if p not in default_fixed],
@@ -194,12 +172,7 @@ def main():
                 samples["param_masks"],
             )
 
-        adapted = adapter.adapt(
-            samples,
-            intrinsic_params=[],
-            num_params=max_num_params,
-            device=device,
-        )
+        adapted = adapter.adapt(samples, device=device)
 
         pred_set = cogformer.sample(
             adapted["input_data"],
@@ -212,12 +185,12 @@ def main():
         )
 
         # Keep in global 8-param space — no local extraction
-        n_rows = adapted["param_matrices"].shape[1] // max_num_params
+        n_rows = adapted["param_matrices"].shape[1] // n_global_params
         true_global = adapted["param_matrices"].detach().cpu().numpy()
-        true_global = true_global.reshape(args.batch_size, n_rows, max_num_params)
-        pred_global = pred_set.reshape(args.batch_size, args.num_samples, n_rows, max_num_params)
+        true_global = true_global.reshape(args.batch_size, n_rows, n_global_params)
+        pred_global = pred_set.reshape(args.batch_size, args.num_samples, n_rows, n_global_params)
         mask_global = adapted["param_masks"].detach().cpu().numpy()
-        mask_global = mask_global.reshape(args.batch_size, n_rows, max_num_params)[0]
+        mask_global = mask_global.reshape(args.batch_size, n_rows, n_global_params)[0]
 
         true_list.append(true_global)
         pred_list.append(pred_global)
@@ -228,7 +201,7 @@ def main():
     outdir = Path(args.outdir)
     outdir.mkdir(parents=True, exist_ok=True)
 
-    all_params = model_class.all_params
+    global_param_names = model_class.global_param_names
     variable_names = ALL_PARAMS_VARIABLE_NAMES
 
     logging.info("Generating ensemble recovery plot...")
@@ -236,7 +209,7 @@ def main():
         true_list=true_list,
         pred_list=pred_list,
         design_configs=design_configs_out,
-        intrinsic_params=all_params,
+        intrinsic_params=global_param_names,
         max_num_categories=args.max_num_categories,
         parameter_masks=masks,
         variable_names=variable_names,
@@ -253,7 +226,7 @@ def main():
         true_list=true_list,
         pred_list=pred_list,
         design_configs=design_configs_out,
-        intrinsic_params=all_params,
+        intrinsic_params=global_param_names,
         max_num_categories=args.max_num_categories,
         parameter_masks=masks,
         variable_names=variable_names,
@@ -270,7 +243,7 @@ def main():
         true_list=true_list,
         pred_list=pred_list,
         design_configs=design_configs_out,
-        intrinsic_params=all_params,
+        intrinsic_params=global_param_names,
         max_num_categories=args.max_num_categories,
         parameter_masks=masks,
         variable_names=variable_names,
@@ -288,7 +261,7 @@ def main():
             true_list=true_list,
             pred_list=pred_list,
             design_configs=design_configs_out,
-            intrinsic_params=all_params,
+            intrinsic_params=global_param_names,
             max_num_categories=args.max_num_categories,
             parameter_masks=masks,
             variable_names=variable_names,

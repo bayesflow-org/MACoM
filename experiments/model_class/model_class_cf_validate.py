@@ -7,9 +7,6 @@ import torch
 import matplotlib.pyplot as plt
 
 from cogformer.simulator import ModelFamily, ModelClass
-from cogformer.simulator.benchmarks import DDM, RDM, CDM
-from cogformer.simulator.benchmarks.ssms.priors import ddm_priors, rdm_priors, cdm_priors
-from cogformer.simulator.benchmarks.ssms.link_funs import ddm_link_fun, rdm_link_fun, cdm_link_fun
 from cogformer.adapter import Adapter
 from cogformer.networks.transformers.cogformer import CogFormer
 from cogformer.diagnostics.plot.adaptive_posterior import adaptive_posterior
@@ -19,6 +16,11 @@ from cogformer.diagnostics.plot.adaptive_ecdf import adaptive_ecdf
 from cogformer.diagnostics.plot.adaptive_metrics import adaptive_metrics as plot_adaptive_metrics
 from cogformer.diagnostics.metric.adaptive_metrics import adaptive_metrics as compute_adaptive_metrics
 from cogformer.utils.plot_utils import cogformer_mc_colors
+
+import sys
+sys.path.insert(0, str(Path(__file__).parent.parent))
+from configs import MODELS as _BASE_MODELS
+from utils import infer_free_fixed_intrinsics, build_encoder_input_dim
 
 
 def load_bf_validation_data(
@@ -73,144 +75,21 @@ def load_bf_validation_data(
     }
 
 
-# Benchmark design configs per model
 def get_benchmark_design_configs():
     return {
-        "DDM": {
-            "intrinsic_params": ["v", "a", "z", "tau", "s_v", "s_tau"],
-            "variable_names": [r"$v$", r"$a$", r"$z$", r"$\tau$", r"$s_v$", r"$s_\tau$"],
-            "default_fixed_values": {"s_v": 0.0, "s_tau": 0.0},
-            "benchmarks": {
-                "intercept_only": {
-                    "1": ["v", "a", "z", "tau", "s_v", "s_tau"],
-                    "u_1": [], "u_2": [], "u_1:u_2": [],
-                },
-                "regressed": {
-                    "1": ["v", "a", "z", "tau", "s_v", "s_tau"],
-                    "u_1": ["v", "a", "z"],
-                    "u_2": ["v", "a", "z"],
-                    "u_1:u_2": [],
-                },
-                "fixed": {
-                    "1": ["v", "a", "z", "tau"],
-                    "u_1": [], "u_2": [], "u_1:u_2": [],
-                },
-                "fixed_regressed": {
-                    "1": ["v", "a", "z", "tau"],
-                    "u_1": ["v", "a", "z"],
-                    "u_2": ["v", "a", "z"],
-                    "u_1:u_2": [],
-                },
-                "interaction": {
-                    "1": ["v", "a", "z", "tau", "s_v", "s_tau"],
-                    "u_1": ["v", "a", "z", "tau", "s_v"],
-                    "u_2": ["v", "a", "z", "tau"],
-                    "u_1:u_2": ["v", "a", "z"],
-                },
-                "full": {
-                    "1": ["v", "a", "z", "tau", "s_v", "s_tau"],
-                    "u_1": ["v", "a", "z", "tau", "s_v", "s_tau"],
-                    "u_2": ["v", "a", "z", "tau", "s_v", "s_tau"],
-                    "u_1:u_2": ["v", "a", "z", "tau", "s_v", "s_tau"],
-                },
-            },
-        },
-        "RDM": {
-            "intrinsic_params": ["v", "v_diff", "a", "tau", "s_v", "s_tau"],
-            "variable_names": [r"$v$", r"$v_{\mathrm{diff}}$", r"$a$", r"$\tau$", r"$s_v$", r"$s_\tau$"],
-            "default_fixed_values": {"s_v": 0.0, "s_tau": 0.0},
-            "benchmarks": {
-                "intercept_only": {
-                    "1": ["v", "v_diff", "a", "tau", "s_v", "s_tau"],
-                    "u_1": [], "u_2": [], "u_1:u_2": [],
-                },
-                "regressed": {
-                    "1": ["v", "v_diff", "a", "tau", "s_v", "s_tau"],
-                    "u_1": ["v_diff", "a"],
-                    "u_2": ["v_diff", "a"],
-                    "u_1:u_2": [],
-                },
-                "fixed": {
-                    "1": ["v", "v_diff", "a", "tau"],
-                    "u_1": [], "u_2": [], "u_1:u_2": [],
-                },
-                "fixed_regressed": {
-                    "1": ["v", "v_diff", "a", "tau"],
-                    "u_1": ["v_diff", "a"],
-                    "u_2": ["v_diff", "a"],
-                    "u_1:u_2": [],
-                },
-                "interaction": {
-                    "1": ["v", "v_diff", "a", "tau", "s_v", "s_tau"],
-                    "u_1": ["v", "v_diff", "a", "tau", "s_v"],
-                    "u_2": ["v", "v_diff", "a", "tau"],
-                    "u_1:u_2": ["v", "v_diff", "a"],
-                },
-                "full": {
-                    "1": ["v", "v_diff", "a", "tau", "s_v", "s_tau"],
-                    "u_1": ["v", "v_diff", "a", "tau", "s_v", "s_tau"],
-                    "u_2": ["v", "v_diff", "a", "tau", "s_v", "s_tau"],
-                    "u_1:u_2": ["v", "v_diff", "a", "tau", "s_v", "s_tau"],
-                },
-            },
-        },
-        "CDM": {
-            "intrinsic_params": ["v", "v_theta", "a", "tau", "s_v", "s_tau"],
-            "variable_names": [r"$v$", r"$v_\theta$", r"$a$", r"$\tau$", r"$s_v$", r"$s_\tau$"],
-            "default_fixed_values": {"s_v": 0.0, "s_tau": 0.0},
-            "benchmarks": {
-                "intercept_only": {
-                    "1": ["v", "v_theta", "a", "tau", "s_v", "s_tau"],
-                    "u_1": [], "u_2": [], "u_1:u_2": [],
-                },
-                "regressed": {
-                    "1": ["v", "v_theta", "a", "tau", "s_v", "s_tau"],
-                    "u_1": ["v_theta", "a"],
-                    "u_2": ["v_theta", "a"],
-                    "u_1:u_2": [],
-                },
-                "fixed": {
-                    "1": ["v", "v_theta", "a", "tau"],
-                    "u_1": [], "u_2": [], "u_1:u_2": [],
-                },
-                "fixed_regressed": {
-                    "1": ["v", "v_theta", "a", "tau"],
-                    "u_1": ["v_theta", "a"],
-                    "u_2": ["v_theta", "a"],
-                    "u_1:u_2": [],
-                },
-                "interaction": {
-                    "1": ["v", "v_theta", "a", "tau", "s_v", "s_tau"],
-                    "u_1": ["v", "v_theta", "a", "tau", "s_v"],
-                    "u_2": ["v", "v_theta", "a", "tau"],
-                    "u_1:u_2": ["v", "v_theta", "a"],
-                },
-                "full": {
-                    "1": ["v", "v_theta", "a", "tau", "s_v", "s_tau"],
-                    "u_1": ["v", "v_theta", "a", "tau", "s_v", "s_tau"],
-                    "u_2": ["v", "v_theta", "a", "tau", "s_v", "s_tau"],
-                    "u_1:u_2": ["v", "v_theta", "a", "tau", "s_v", "s_tau"],
-                },
-            },
-        },
+        m.upper(): {
+            "intrinsic_params": cfg["intrinsic_params"],
+            "variable_names": cfg["variable_names"],
+            "default_fixed_values": cfg["default_fixed_values"],
+            "benchmarks": cfg["benchmark_configs"],
+        }
+        for m, cfg in _BASE_MODELS.items()
     }
 
 
-def infer_mask_randomizer_kwargs(
-    design_config: dict[str, list[str]],
-    all_intrinsics: list[str],
-    default_fixed_values: dict[str, float],
-) -> dict:
-    used = {p for params in design_config.values() for p in params}
-    free_intrinsics = [p for p in all_intrinsics if p in used]
-    fixed_intrinsics = [p for p in all_intrinsics if p not in used]
-    fixed_values = {p: default_fixed_values[p] for p in fixed_intrinsics if p in default_fixed_values}
-    return {"free_intrinsics": free_intrinsics, "fixed_intrinsics": fixed_intrinsics, "fixed_values": fixed_values}
-
-
-def build_encoder_input_dim(max_num_regressors: int, max_num_categories: int, keep_intercept: bool) -> int:
-    max_total_regressors = max_num_regressors * (max_num_regressors + 1) // 2
-    return max_total_regressors * (max_num_categories - 1) + (4 if keep_intercept else 3)
+def infer_mask_randomizer_kwargs(design_config, all_intrinsics, default_fixed_values):
+    free, fixed, values = infer_free_fixed_intrinsics(design_config, all_intrinsics, default_fixed_values)
+    return {"free_intrinsics": free, "fixed_intrinsics": fixed, "fixed_values": values}
 
 
 def parse_args():
@@ -259,11 +138,11 @@ def main():
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-    # Rebuild ModelClass to access model_registry and max_num_params
+    # Rebuild ModelClass to access model_index and n_global_params
     model_families = {
-        "DDM": ModelFamily(model=DDM(), name="DDM", prior_fun=ddm_priors()),
-        "RDM": ModelFamily(model=RDM(), name="RDM", prior_fun=rdm_priors()),
-        "CDM": ModelFamily(model=CDM(), name="CDM", prior_fun=cdm_priors()),
+        "DDM": ModelFamily(model=DDM(), name="DDM", prior=ddm_priors()),
+        "RDM": ModelFamily(model=RDM(), name="RDM", prior=rdm_priors()),
+        "CDM": ModelFamily(model=CDM(), name="CDM", prior=cdm_priors()),
     }
     link_funs = {
         "DDM": ddm_link_fun(),
@@ -308,7 +187,7 @@ def main():
     if not args.include_full:
         for mc in all_model_configs.values():
             mc["benchmarks"] = {k: v for k, v in mc["benchmarks"].items() if k != "full"}
-    max_num_params = model_class.max_num_params
+    n_global_params = model_class.n_global_params
 
     model_family_config = {
         "max_num_regressors": args.max_num_regressors,
@@ -322,7 +201,7 @@ def main():
 
     for model_name, model_cfg in all_model_configs.items():
         mf = model_class.model_families[model_name]
-        model_id = model_class.model_registry[model_name]
+        model_id = model_class.model_index[model_name]
         link_fun = model_class.link_funs[model_name]
 
         intrinsic_params = model_cfg["intrinsic_params"]
@@ -380,11 +259,7 @@ def main():
                     test_samples["param_masks"],
                 )
 
-            adapted = adapter.adapt(
-                test_samples,
-                intrinsic_params=[],
-                num_params=max_num_params,
-            )
+            adapted = adapter.adapt(test_samples)
 
             pred_set = cogformer.sample(
                 adapted["input_data"],
@@ -399,12 +274,12 @@ def main():
             global_indices = model_class.local_to_global[model_name]
 
             true_set = adapted["param_matrices"].detach().cpu().numpy()
-            n_rows = true_set.shape[1] // max_num_params
-            true_set = true_set.reshape(args.batch_size, n_rows, max_num_params)[:, :, global_indices]
-            pred_set = pred_set.reshape(args.batch_size, args.num_samples, n_rows, max_num_params)[:, :, :, global_indices]
+            n_rows = true_set.shape[1] // n_global_params
+            true_set = true_set.reshape(args.batch_size, n_rows, n_global_params)[:, :, global_indices]
+            pred_set = pred_set.reshape(args.batch_size, args.num_samples, n_rows, n_global_params)[:, :, :, global_indices]
 
             params_mask = adapted["param_masks"].detach().cpu().numpy()
-            params_mask = params_mask.reshape(args.batch_size, n_rows, max_num_params)[0][:, global_indices]
+            params_mask = params_mask.reshape(args.batch_size, n_rows, n_global_params)[0][:, global_indices]
 
             # Save predictions
             tag = f"{model_name.lower()}_{cfg_name}"

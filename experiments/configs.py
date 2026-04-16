@@ -1,0 +1,200 @@
+"""
+Shared model definitions for all CogFormer experiments.
+
+Each model config contains:
+  model_cls, prior_fn, link_fn, name,
+  intrinsic_params, variable_names,
+  free_params, fixed_params, global_params, default_fixed_values,
+  benchmark_configs, val_scenarios, [train_context (RDM only)]
+
+benchmark_configs and val_scenarios are defined *without* global params (e.g. pi).
+Scripts that need global params in their configs should call
+utils.add_global_params() after importing.
+"""
+
+from cogformer.simulator.benchmarks.ssms.ddm import DDM
+from cogformer.simulator.benchmarks.ssms.cdm import CDM
+from cogformer.simulator.benchmarks.ssms.rdm import RDM
+from cogformer.simulator.benchmarks.ssms.priors import ddm_priors, cdm_priors, rdm_priors
+from cogformer.simulator.benchmarks.ssms.link_funs import ddm_link_fun, cdm_link_fun, rdm_link_fun
+
+
+# ── Global / nuisance parameters (used only in CF model-family scripts) ──────
+
+GLOBAL_PARAMS = ["pi"]
+GLOBAL_VARIABLE_NAMES = [r"$\pi$"]
+
+
+# ── DDM ───────────────────────────────────────────────────────────────────────
+
+DDM_BENCHMARK_CONFIGS = {
+    "intercept_only": {
+        "1": ["v", "a", "z", "tau", "s_v", "s_tau"],
+        "u_1": [], "u_2": [], "u_1:u_2": [],
+    },
+    "regressed": {
+        "1": ["v", "a", "z", "tau", "s_v", "s_tau"],
+        "u_1": ["v", "a", "z"], "u_2": ["v", "a", "z"], "u_1:u_2": [],
+    },
+    "fixed": {
+        "1": ["v", "a", "z", "tau"],
+        "u_1": [], "u_2": [], "u_1:u_2": [],
+    },
+    "fixed_regressed": {
+        "1": ["v", "a", "z", "tau"],
+        "u_1": ["v", "a", "z"], "u_2": ["v", "a", "z"], "u_1:u_2": [],
+    },
+    "interaction": {
+        "1": ["v", "a", "z", "tau", "s_v", "s_tau"],
+        "u_1": ["v", "a", "z", "tau", "s_v"],
+        "u_2": ["v", "a", "z", "tau"],
+        "u_1:u_2": ["v", "a", "z"],
+    },
+    "full": {
+        "1": ["v", "a", "z", "tau", "s_v", "s_tau"],
+        "u_1": ["v", "a", "z", "tau", "s_v", "s_tau"],
+        "u_2": ["v", "a", "z", "tau", "s_v", "s_tau"],
+        "u_1:u_2": ["v", "a", "z", "tau", "s_v", "s_tau"],
+    },
+}
+
+DDM_CONFIG = {
+    "model_cls": DDM,
+    "prior_fn": ddm_priors,
+    "link_fn": ddm_link_fun,
+    "name": "DDM",
+    "intrinsic_params": ["v", "a", "z", "tau", "s_v", "s_tau"],
+    "variable_names": [r"$v$", r"$a$", r"$z$", r"$\tau$", r"$s_v$", r"$s_\tau$"],
+    "free_params": ["v", "a", "z", "tau"],
+    "fixed_params": ["s_v", "s_tau"],
+    "global_params": [],
+    "default_fixed_values": {"s_v": 0.0, "s_tau": 0.0},
+    "benchmark_configs": DDM_BENCHMARK_CONFIGS,
+    "val_scenarios": [
+        ("interaction", DDM_BENCHMARK_CONFIGS["interaction"]),
+        ("fixed", DDM_BENCHMARK_CONFIGS["fixed"]),
+    ],
+}
+
+
+# ── CDM ───────────────────────────────────────────────────────────────────────
+
+CDM_BENCHMARK_CONFIGS = {
+    "intercept_only": {
+        "1": ["v", "v_theta", "a", "tau", "s_v", "s_tau"],
+        "u_1": [], "u_2": [], "u_1:u_2": [],
+    },
+    "regressed": {
+        "1": ["v", "v_theta", "a", "tau", "s_v", "s_tau"],
+        "u_1": ["v", "a"], "u_2": ["v", "a"], "u_1:u_2": [],
+    },
+    "fixed": {
+        "1": ["v", "v_theta", "a", "tau"],
+        "u_1": [], "u_2": [], "u_1:u_2": [],
+    },
+    "fixed_regressed": {
+        "1": ["v", "v_theta", "a", "tau"],
+        "u_1": ["v", "a"], "u_2": ["v", "a"], "u_1:u_2": [],
+    },
+    "interaction": {
+        "1": ["v", "v_theta", "a", "tau", "s_v", "s_tau"],
+        "u_1": ["v", "v_theta", "a", "tau", "s_v"],
+        "u_2": ["v", "v_theta", "a", "tau"],
+        "u_1:u_2": ["v", "v_theta", "a"],
+    },
+    "full": {
+        "1": ["v", "v_theta", "a", "tau", "s_v", "s_tau"],
+        "u_1": ["v", "v_theta", "a", "tau", "s_v", "s_tau"],
+        "u_2": ["v", "v_theta", "a", "tau", "s_v", "s_tau"],
+        "u_1:u_2": ["v", "v_theta", "a", "tau", "s_v", "s_tau"],
+    },
+}
+
+CDM_CONFIG = {
+    "model_cls": CDM,
+    "prior_fn": cdm_priors,
+    "link_fn": cdm_link_fun,
+    "name": "CDM",
+    "intrinsic_params": ["v", "v_theta", "a", "tau", "s_v", "s_tau"],
+    "variable_names": [r"$v$", r"$v_\theta$", r"$a$", r"$\tau$", r"$s_v$", r"$s_\tau$"],
+    "free_params": ["v", "v_theta", "a", "tau"],
+    "fixed_params": ["s_v", "s_tau"],
+    "global_params": [],
+    "default_fixed_values": {"s_v": 0.0, "s_tau": 0.0},
+    "benchmark_configs": CDM_BENCHMARK_CONFIGS,
+    "val_scenarios": [
+        ("interaction", CDM_BENCHMARK_CONFIGS["interaction"]),
+        ("fixed", CDM_BENCHMARK_CONFIGS["fixed"]),
+    ],
+}
+
+
+# ── RDM ───────────────────────────────────────────────────────────────────────
+
+RDM_BENCHMARK_CONFIGS = {
+    "intercept_only": {
+        "1": ["v", "v_diff", "a", "tau", "s_v", "s_tau"],
+        "u_1": [], "u_2": [], "u_1:u_2": [],
+    },
+    "regressed": {
+        "1": ["v", "v_diff", "a", "tau", "s_v", "s_tau"],
+        "u_1": ["v_diff", "a"], "u_2": ["v_diff", "a"], "u_1:u_2": [],
+    },
+    "fixed": {
+        "1": ["v", "v_diff", "a", "tau"],
+        "u_1": [], "u_2": [], "u_1:u_2": [],
+    },
+    "fixed_regressed": {
+        "1": ["v", "v_diff", "a", "tau"],
+        "u_1": ["v_diff", "a"], "u_2": ["v_diff", "a"], "u_1:u_2": [],
+    },
+    "interaction": {
+        "1": ["v", "v_diff", "a", "tau", "s_v", "s_tau"],
+        "u_1": ["v", "v_diff", "a", "tau", "s_v"],
+        "u_2": ["v", "v_diff", "a", "tau"],
+        "u_1:u_2": ["v", "v_diff", "a"],
+    },
+    "full": {
+        "1": ["v", "v_diff", "a", "tau", "s_v", "s_tau"],
+        "u_1": ["v", "v_diff", "a", "tau", "s_v", "s_tau"],
+        "u_2": ["v", "v_diff", "a", "tau", "s_v", "s_tau"],
+        "u_1:u_2": ["v", "v_diff", "a", "tau", "s_v", "s_tau"],
+    },
+}
+
+RDM_CONFIG = {
+    "model_cls": RDM,
+    "prior_fn": rdm_priors,
+    "link_fn": rdm_link_fun,
+    "name": "RDM",
+    "intrinsic_params": ["v", "v_diff", "a", "tau", "s_v", "s_tau"],
+    "variable_names": [r"$v$", r"$v_{\mathrm{diff}}$", r"$a$", r"$\tau$", r"$s_v$", r"$s_\tau$"],
+    "free_params": ["v", "v_diff", "a", "tau"],
+    "fixed_params": ["s_v", "s_tau"],
+    "global_params": [],
+    "default_fixed_values": {"s_v": 0.0, "s_tau": 0.0},
+    "benchmark_configs": RDM_BENCHMARK_CONFIGS,
+    "val_scenarios": [
+        ("interaction", RDM_BENCHMARK_CONFIGS["interaction"]),
+        ("fixed", RDM_BENCHMARK_CONFIGS["fixed"]),
+    ],
+    "train_context": RDM.build_random_context,
+}
+
+
+# ── Registries ────────────────────────────────────────────────────────────────
+
+MODELS = {
+    "ddm": DDM_CONFIG,
+    "cdm": CDM_CONFIG,
+    "rdm": RDM_CONFIG,
+}
+
+# Union of all parameters across models in ModelClass insertion order
+# (DDM → RDM adds v_diff → CDM adds v_theta)
+ALL_PARAMS = ["v", "a", "z", "tau", "s_v", "s_tau", "v_diff", "v_theta"]
+ALL_VARIABLE_NAMES = [
+    r"$v$", r"$a$", r"$z$", r"$\tau$",
+    r"$s_v$", r"$s_\tau$",
+    r"$v_{\mathrm{diff}}$", r"$v_\theta$",
+]

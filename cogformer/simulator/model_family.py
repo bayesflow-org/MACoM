@@ -2,7 +2,18 @@ import numpy as np
 from collections.abc import Callable
 
 from .model import Model
-from .context_manager import ContextManager
+from .design_utils import (
+    build_design_config,
+    build_random_design_config,
+    build_parameter_mask,
+    build_random_parameter_mask,
+    build_intrinsic_priors,
+    build_discrete_mask,
+    build_design_matrix,
+    build_link_functions,
+    build_regressor_mask,
+    sample_parameter_matrix,
+)
 
 from ..utils.simulator_utils import softplus, inspect
 
@@ -11,37 +22,115 @@ class ModelFamily:
     def __init__(
         self,
         model: Model,
-        prior_fun: dict[str, dict[str, Callable]],
+        prior: dict[str, dict[str, Callable]],
         intrinsic_params: list[str] | None = None,
         regressed_params: list[str] | None = None,
-        context_manager: ContextManager | None = None,
         mask_randomizer_kwargs: dict | None = None,
         name: str | None = None,
     ):
         self.name = name
         self.model = model
-        self.prior_fun = prior_fun
-
-        if context_manager is None:
-            context_manager = ContextManager()
-        self.context_manager = context_manager
+        self.prior = prior
 
         if intrinsic_params is None:
-            intrinsic_params = list(prior_fun.keys())
+            intrinsic_params = list(prior.keys())
         self.intrinsic_params = intrinsic_params
         self.regressed_params = regressed_params
 
         self.mask_randomizer_kwargs = mask_randomizer_kwargs
 
-
     @property
     def parameter_names(self) -> list[str]:
         return self.intrinsic_params
 
+    def _resolve_design(
+        self,
+        design_config: dict[str, list[str]] | None,
+        prior: dict,
+        num_regressors: int,
+        max_num_categories: int,
+        keep_intercept: bool,
+        free_prob: float,
+        fixed_config: bool,
+        add_interaction: bool,
+        allowed_slope_patterns: list[frozenset[str]] | None,
+        kwargs: dict,
+    ) -> tuple[dict, np.ndarray, dict]:
+        """
+        Resolve design_config, parameter_mask, and intrinsic prior from the
+        three possible specification modes:
+          1. Explicit design_config provided — build mask directly from it.
+          2. fixed_config=True — build a deterministic config from regressed_params
+             (or a random-but-fixed config from mask_randomizer_kwargs), then mask.
+          3. Fully random — sample both config and mask jointly.
+        Returns (design_config, parameter_mask, intrinsic_prior).
+        """
+        is_intrinsic_priors = all(isinstance(v, dict) for v in prior.values())
+
+        if design_config is not None:
+            parameter_mask = build_parameter_mask(
+                design_config=design_config,
+                intrinsic_params=self.intrinsic_params,
+                fixed_params=None,
+                max_num_categories=max_num_categories,
+                keep_intercept=keep_intercept,
+            )
+        elif fixed_config:
+            if self.regressed_params is not None:
+                design_config = build_design_config(
+                    intrinsic_params=self.intrinsic_params,
+                    regressed_params=self.regressed_params,
+                    num_regressors=num_regressors,
+                    keep_intercept=keep_intercept,
+                    add_interaction=add_interaction,
+                )
+            else:
+                design_config = build_random_design_config(
+                    intrinsic_params=self.intrinsic_params,
+                    free_intrinsics=kwargs.get("free_intrinsics"),
+                    fixed_intrinsics=kwargs.get("fixed_intrinsics"),
+                    num_regressors=num_regressors,
+                    keep_intercept=keep_intercept,
+                    add_interaction=add_interaction,
+                    global_params=kwargs.get("global_params"),
+                )
+            parameter_mask = build_parameter_mask(
+                design_config=design_config,
+                intrinsic_params=self.intrinsic_params,
+                fixed_params=kwargs.get("fixed_intrinsics"),
+                max_num_categories=max_num_categories,
+                keep_intercept=keep_intercept,
+            )
+        else:
+            parameter_mask, design_config = build_random_parameter_mask(
+                intrinsic_params=self.intrinsic_params,
+                num_regressors=num_regressors,
+                max_num_categories=max_num_categories,
+                keep_intercept=keep_intercept,
+                free_prob=free_prob,
+                intercept_prob=kwargs.get("intercept_prob", 0.5),
+                free_intrinsics=kwargs.get("free_intrinsics"),
+                fixed_intrinsics=kwargs.get("fixed_intrinsics"),
+                add_interaction=add_interaction,
+                allowed_slope_patterns=allowed_slope_patterns,
+                global_params=kwargs.get("global_params"),
+            )
+
+        if is_intrinsic_priors:
+            intrinsic_prior = prior
+        else:
+            intrinsic_prior = build_intrinsic_priors(
+                prior=prior,
+                design_config=design_config,
+                fixed_values=kwargs.get("fixed_values"),
+            )
+
+        return design_config, parameter_mask, intrinsic_prior
+
     def sample(
         self,
         design_config: dict[str, list[str]] = None,
-        prior_fun: dict[str, dict[str, Callable]] = None,
+        prior: dict[str, dict[str, Callable]] = None,
         num_obs: int = 10,
         num_regressors: int = 2,
         max_num_regressors: int = 5,
@@ -60,89 +149,30 @@ class ModelFamily:
         category_concentration: float | None = None,
         allowed_slope_patterns: list[frozenset[str]] | None = None,
     ):
-        if prior_fun is None:
-            prior_fun = self.prior_fun
-
-        is_intrinsic_priors = all(isinstance(v, dict) for v in prior_fun.values())
+        if prior is None:
+            prior = self.prior
         kwargs = mask_randomizer_kwargs if mask_randomizer_kwargs is not None else (self.mask_randomizer_kwargs or {})
 
-        # Resolve design_config and parameter_mask
-        if design_config is not None:
-            parameter_mask = self.context_manager.build_parameter_mask(
-                design_config=design_config,
-                intrinsic_params=self.intrinsic_params,
-                fixed_params=None,
-                max_num_categories=max_num_categories,
-                keep_intercept=keep_intercept,
-            )
-        elif fixed_config:
-            if self.regressed_params is not None:
-                design_config = self.context_manager.build_design_config(
-                    intrinsic_params=self.intrinsic_params,
-                    regressed_params=self.regressed_params,
-                    num_regressors=num_regressors,
-                    keep_intercept=keep_intercept,
-                    add_interaction=add_interaction,
-                )
-            else:
-                design_config = self.context_manager.build_random_design_config(
-                    intrinsic_params=self.intrinsic_params,
-                    free_intrinsics=kwargs.get("free_intrinsics"),
-                    fixed_intrinsics=kwargs.get("fixed_intrinsics"),
-                    num_regressors=num_regressors,
-                    keep_intercept=keep_intercept,
-                    add_interaction=add_interaction,
-                    global_params=kwargs.get("global_params"),
-                )
-            parameter_mask = self.context_manager.build_parameter_mask(
-                design_config=design_config,
-                intrinsic_params=self.intrinsic_params,
-                fixed_params=kwargs.get("fixed_intrinsics"),
-                max_num_categories=max_num_categories,
-                keep_intercept=keep_intercept,
-            )
-        else:
-            parameter_mask, design_config = self.context_manager.build_random_parameter_mask(
-                intrinsic_params=self.intrinsic_params,
-                num_regressors=num_regressors,
-                max_num_categories=max_num_categories,
-                keep_intercept=keep_intercept,
-                free_prob=free_prob,
-                intercept_prob=kwargs.get("intercept_prob", 0.5),
-                free_intrinsics=kwargs.get("free_intrinsics"),
-                fixed_intrinsics=kwargs.get("fixed_intrinsics"),
-                add_interaction=add_interaction,
-                allowed_slope_patterns=allowed_slope_patterns,
-                global_params=kwargs.get("global_params"),
-            )
-
-        # Resolve intrinsic priors (common to all branches)
-        if is_intrinsic_priors:
-            intrinsic_prior_fun = prior_fun
-        else:
-            intrinsic_prior_fun = self.context_manager.build_intrinsic_priors(
-                prior_fun=prior_fun,
-                design_config=design_config,
-                fixed_values=kwargs.get("fixed_values"),
-            )
-
-        # Partition regressor keys
-        regressor_keys = [k for k in design_config.keys() if k != "1"]
-        num_regressors_total = len(regressor_keys)
-
-        # Discrete mask
-        main_discrete_mask, discrete_mask = self.context_manager.build_discrete_mask(
+        design_config, parameter_mask, intrinsic_prior = self._resolve_design(
             design_config=design_config,
-            discrete_prob=discrete_prob,
+            prior=prior,
+            num_regressors=num_regressors,
+            max_num_categories=max_num_categories,
             keep_intercept=keep_intercept,
+            free_prob=free_prob,
+            fixed_config=fixed_config,
+            add_interaction=add_interaction,
+            allowed_slope_patterns=allowed_slope_patterns,
+            kwargs=kwargs,
         )
 
-        # Check if there is a context for the model
+        num_regressors_total = len([k for k in design_config if k != "1"])
+        _, discrete_mask = build_discrete_mask(design_config=design_config, discrete_prob=discrete_prob)
+
         if context is None and hasattr(self.model, 'build_default_context'):
             context = self.model.build_default_context(num_obs=num_obs)
 
-        # Design matrix
-        design_matrix = self.context_manager.build_design_matrix(
+        design_matrix = build_design_matrix(
             design_config=design_config,
             num_obs=num_obs,
             context=context,
@@ -153,49 +183,38 @@ class ModelFamily:
             category_concentration=category_concentration,
         )
 
-        # Parameter matrix
-        parameter_matrix = self.context_manager.sample_parameter_matrix(
+        parameter_matrix = sample_parameter_matrix(
             parameter_mask=parameter_mask,
-            prior_fun=intrinsic_prior_fun,
+            prior=intrinsic_prior,
             intrinsic_params=self.intrinsic_params,
             keep_intercept=keep_intercept,
         )
 
-        # Build link function
-        link_funs = self.context_manager.build_link_functions(
+        link_funs = build_link_functions(
             intrinsic_params=self.intrinsic_params,
             link_fun=link_fun,
-            default_link_fun=None
+            default_link_fun=None,
         )
 
-        # Compose per-trial intrinsic values
         predictor = design_matrix @ parameter_matrix
         regressed_parameters = np.empty_like(predictor, dtype=np.float32)
         for j, name in enumerate(self.intrinsic_params):
             regressed_parameters[:, j] = link_funs[name](predictor[:, j]).astype(np.float32, copy=False)
 
-        # Package for model
         params = {
             name: regressed_parameters[:, j].astype(np.float32, copy=False)
             for j, name in enumerate(self.intrinsic_params)
         }
-
         params = self.model.prepare_params(params=params, num_obs=num_obs, context=context)
-        sim_trials = self.model.simulate(params, context=context)
+        obs = self.model.simulate(params, context=context)
 
-        # Derive whether an intercept column is actually present from the resolved
-        # design_config — this is True when keep_intercept=True OR global params
-        # forced a "1" entry, so collate() gets the correct column count.
         has_intercept_col = "1" in design_config
-
-        # Regressor mask
-        regressor_mask = self.context_manager.build_regressor_mask(
+        regressor_mask = build_regressor_mask(
             num_regressors=num_regressors_total,
             max_num_categories=max_num_categories,
             keep_intercept=has_intercept_col,
         )
 
-        # Flatten param outputs
         if flatten_param_outputs:
             parameter_mask = parameter_mask.flatten()
             parameter_matrix = parameter_matrix.flatten()
@@ -206,7 +225,7 @@ class ModelFamily:
             "design_matrix": design_matrix,
             "param_mask": parameter_mask,
             "param_matrix": parameter_matrix,
-            "sim_trials": sim_trials,
+            "obs": obs,
             "discrete_mask": discrete_mask,
             "regressor_mask": regressor_mask,
             "max_num_regressors": max_num_regressors,
@@ -224,7 +243,7 @@ class ModelFamily:
         batch_size: int,
         num_obs: int | None = None,
         design_config: dict[str, list[str]] | None = None,
-        prior_fun: dict[str, dict[str, Callable]] = None,
+        prior: dict[str, dict[str, Callable]] = None,
         num_regressors: int | None = None,
         context: dict[str, np.ndarray] | None = None,
         link_fun: dict | Callable = softplus,
@@ -244,10 +263,9 @@ class ModelFamily:
         category_concentration: float | None = None,
         allowed_slope_patterns: list[frozenset[str]] | None = None,
     ) -> list[dict] | dict:
-        if prior_fun is None:
-            prior_fun = self.prior_fun
+        if prior is None:
+            prior = self.prior
 
-        # Sample num_obs and num_regressors per batch element if not provided
         if num_obs is None:
             num_obs = np.random.randint(min_num_obs, max_num_obs + 1)
 
@@ -259,35 +277,23 @@ class ModelFamily:
         if mask_randomizer_kwargs is None:
             mask_randomizer_kwargs = self.mask_randomizer_kwargs
 
-        # Initialize batch and keep track of the maximum num_obs
         list_batch = []
 
         for i in range(batch_size):
-
-            num_regressors = num_regressors_array[i]
-
-            # Resolve context per item:
             if context is None:
-                if hasattr(self.model, 'build_default_context'):
-                    ctx_i = self.model.build_default_context(num_obs=num_obs)
-                else:
-                    ctx_i = None
+                ctx_i = self.model.build_default_context(num_obs=num_obs) if hasattr(self.model, 'build_default_context') else None
             elif callable(context):
-                # If the whole context is a callable, let it build a dict with n_obs
                 ctx_i = context(num_obs)
             else:
-                # If context is a dict, allow callable values that depend on n_obs
-                ctx_i = {}
-                for k, v in context.items():
-                    ctx_i[k] = v(num_obs) if callable(v) else v
+                ctx_i = {k: v(num_obs) if callable(v) else v for k, v in context.items()}
 
             sim_instance = self.sample(
                 design_config=design_config,
-                prior_fun=prior_fun,
+                prior=prior,
                 num_obs=num_obs,
                 context=ctx_i,
                 mask_randomizer_kwargs=mask_randomizer_kwargs,
-                num_regressors=num_regressors,
+                num_regressors=int(num_regressors_array[i]),
                 discrete_prob=discrete_prob,
                 keep_intercept=keep_intercept,
                 max_num_categories=max_num_categories,
@@ -306,28 +312,25 @@ class ModelFamily:
             sim_instance["max_num_categories"] = max_num_categories
             list_batch.append(sim_instance)
 
-        batch = self.collate(
+        return self.collate(
             list_batch,
             flatten_param_outputs=flatten_param_outputs,
-            remove_intercept=remove_intercept_on_collate
+            remove_intercept=remove_intercept_on_collate,
         )
-        return batch
 
     def collate(
         self,
         list_batch: list[dict],
         flatten_param_outputs: bool = True,
-        remove_intercept: bool = True
+        remove_intercept: bool = True,
     ) -> dict[str, np.ndarray]:
 
-        # Infer batch size
         batch_size = len(list_batch)
         num_params = len(self.intrinsic_params)
         max_num_obs = max(b["num_obs"] for b in list_batch)
         max_num_regressors = list_batch[0]["max_num_regressors"]
         max_num_categories = list_batch[0]["max_num_categories"]
 
-        # Calculate max column width
         block_width = max_num_categories - 1
         max_total_regressors = max_num_regressors * (max_num_regressors + 1) // 2
         max_num_cols = max_total_regressors * block_width + (1 if list_batch[0]["keep_intercept"] else 0)
@@ -337,7 +340,6 @@ class ModelFamily:
         else:
             param_outputs_shape = (batch_size, max_num_cols, num_params)
 
-        # Preallocate arrays
         design_matrices = np.zeros((batch_size, max_num_obs, max_num_cols))
         param_masks = np.zeros(param_outputs_shape)
         param_matrices = np.zeros(param_outputs_shape)
@@ -347,21 +349,16 @@ class ModelFamily:
         num_regressors_array = np.zeros((batch_size, 1))
         num_alternatives_array = np.zeros(batch_size, dtype=np.int32)
 
-        # Collect lists
         model_names, design_configs = [], []
 
-        # Initialize sim_data dict with zero arrays
-        sim_keys = list_batch[0]["sim_trials"].keys()
+        sim_keys = list_batch[0]["obs"].keys()
         sim_data = {k: np.empty((batch_size, max_num_obs, 1)) for k in sim_keys}
 
-        # Collate batch entries
         for i, b in enumerate(list_batch):
             model_names.append(b["model_name"])
             design_configs.append(b["design_config"])
 
-            # Pad design_matrix, param_mask, param_matrix, and regressor_mask to max_num_regressors
             num_obs = b["num_obs"]
-            num_regressors = b["num_regressors"]
             num_cols = b["design_matrix"].shape[1]
 
             design_matrices[i, :num_obs, :num_cols] = b["design_matrix"]
@@ -380,7 +377,7 @@ class ModelFamily:
             num_alternatives_array[i] = b.get("num_alternatives", 2)
 
             for k in sim_keys:
-                v = b["sim_trials"][k]
+                v = b["obs"][k]
                 sim_data[k][i, :v.shape[0]] = v
 
         if remove_intercept:
@@ -400,4 +397,5 @@ class ModelFamily:
             "num_alternatives": num_alternatives_array,
             "max_num_regressors": max_num_regressors,
             "max_num_categories": max_num_categories,
+            "n_params": len(self.intrinsic_params),
         }

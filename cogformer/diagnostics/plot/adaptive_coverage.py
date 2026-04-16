@@ -1,7 +1,7 @@
 import numpy as np
 from scipy.stats import beta
 import matplotlib.pyplot as plt
-from cogformer.simulator.context_manager import ContextManager
+from cogformer.simulator.design_utils import build_parameter_mask, build_design_matrix, build_random_design_config
 from cogformer.utils.plot_utils import cogformer_cm_colors
 
 
@@ -126,8 +126,7 @@ def adaptive_coverage(
     """
 
     if parameter_mask is None:
-        context_manager = ContextManager()
-        parameter_mask = context_manager.build_parameter_mask(
+        parameter_mask = build_parameter_mask(
             design_config=design_config,
             max_num_categories=max_num_categories,
             intrinsic_params=intrinsic_params,
@@ -301,8 +300,7 @@ if __name__ == "__main__":
         num_draws = 256  # posterior samples per dataset
 
         # Build the same parameter mask used by adaptive_recovery
-        cm = ContextManager()
-        parameter_mask = cm.build_parameter_mask(
+        parameter_mask = build_parameter_mask(
             design_config=design_config,
             max_num_categories=num_categories,
             intrinsic_params=intrinsic_params,

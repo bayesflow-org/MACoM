@@ -33,7 +33,7 @@ class ModelClass:
         self.model_families = model_families
         self.link_funs = link_funs
         self.model_names = list(model_families.keys())
-        self.model_registry = {name: i for i, name in enumerate(self.model_names)}
+        self.model_index = {name: i for i, name in enumerate(self.model_names)}
         self.num_models = len(self.model_names)
 
         # Build global parameter space as ordered union across all model families
@@ -42,16 +42,16 @@ class ModelClass:
             for p in mf.intrinsic_params:
                 if p not in seen_order:
                     seen_order[p] = len(seen_order)
-        self.all_params: list[str] = list(seen_order.keys())
-        self.max_num_params: int = len(self.all_params)
+        self.global_param_names: list[str] = list(seen_order.keys())
+        self.n_global_params: int = len(self.global_param_names)
 
         # Per-model local→global index mappings and binary model masks
         self.local_to_global: dict[str, list[int]] = {}
         self.model_masks: dict[str, np.ndarray] = {}
         for name, mf in model_families.items():
-            g_indices = [self.all_params.index(p) for p in mf.intrinsic_params]
+            g_indices = [self.global_param_names.index(p) for p in mf.intrinsic_params]
             self.local_to_global[name] = g_indices
-            mask = np.zeros(self.max_num_params, dtype=np.float32)
+            mask = np.zeros(self.n_global_params, dtype=np.float32)
             mask[g_indices] = 1.0
             self.model_masks[name] = mask
 
@@ -116,7 +116,7 @@ class ModelClass:
                 link_fun=self.link_funs[model_name],
             )
 
-            sim_instance["model_id"] = self.model_registry[model_name]
+            sim_instance["model_id"] = self.model_index[model_name]
             sim_instance["num_obs"] = num_obs
             sim_instance["num_regressors"] = int(num_regressors_array[i])
             sim_instance["max_num_regressors"] = max_num_regressors
@@ -135,6 +135,8 @@ class ModelClass:
         flatten_param_outputs: bool = True,
         remove_intercept: bool = False,
     ) -> dict:
+        from collections import defaultdict
+
         batch_size = len(list_batch)
         max_num_obs = max(b["num_obs"] for b in list_batch)
         max_num_regressors = list_batch[0]["max_num_regressors"]
@@ -145,66 +147,70 @@ class ModelClass:
         max_num_cols = max_total_regressors * block_width + (
             1 if list_batch[0]["keep_intercept"] else 0
         )
-        max_num_params = self.max_num_params
+        n_global = self.n_global_params
 
-        if flatten_param_outputs:
-            param_outputs_shape = (batch_size, max_num_cols * max_num_params)
-        else:
-            param_outputs_shape = (batch_size, max_num_cols, max_num_params)
-
+        # Pre-allocate global output arrays (params always 3D internally; flattened at end if needed)
         design_matrices = np.zeros((batch_size, max_num_obs, max_num_cols))
-        param_masks = np.zeros(param_outputs_shape)
-        param_matrices = np.zeros(param_outputs_shape)
+        param_masks = np.zeros((batch_size, max_num_cols, n_global))
+        param_matrices = np.zeros((batch_size, max_num_cols, n_global))
         regressor_masks = np.zeros((batch_size, max_num_cols))
         discrete_masks = -np.ones((batch_size, max_total_regressors))
         num_obs_array = np.zeros((batch_size, 1))
         num_regressors_array = np.zeros((batch_size, 1))
+        num_alternatives_array = np.zeros(batch_size, dtype=np.int32)
         model_ids = np.zeros(batch_size, dtype=np.int64)
 
-        model_names_out, design_configs = [], []
-
-        # Union of sim_data keys across all models in this batch
-        all_sim_keys = set().union(*(b["sim_trials"].keys() for b in list_batch))
+        all_sim_keys = set().union(*(b["obs"].keys() for b in list_batch))
         sim_data = {k: np.zeros((batch_size, max_num_obs, 1)) for k in all_sim_keys}
 
+        model_names_out = [None] * batch_size
+        design_configs = [None] * batch_size
+
+        # Group by model_name, preserving original indices
+        groups: dict[str, list[dict]] = defaultdict(list)
+        group_indices: dict[str, list[int]] = defaultdict(list)
         for i, b in enumerate(list_batch):
-            model_name = b["model_name"]
-            num_params = len(self.model_families[model_name].intrinsic_params)
+            groups[b["model_name"]].append(b)
+            group_indices[b["model_name"]].append(i)
 
-            model_names_out.append(model_name)
-            design_configs.append(b["design_config"])
-            model_ids[i] = b["model_id"]
+        for model_name, items in groups.items():
+            mf = self.model_families[model_name]
+            indices = group_indices[model_name]
 
-            num_obs = b["num_obs"]
-            num_cols = b["design_matrix"].shape[1]
+            # Delegate common collation to ModelFamily (3D params, no intercept removal)
+            local = mf.collate(items, flatten_param_outputs=False, remove_intercept=False)
 
-            design_matrices[i, :num_obs, :num_cols] = b["design_matrix"]
+            local_n_obs = local["design_matrices"].shape[1]
 
-            # param_mask and param_matrix are (num_cols, num_params) — place at global positions
-            global_indices = self.local_to_global[model_name]
-            if flatten_param_outputs:
-                padded_mask = np.zeros((max_num_cols, max_num_params))
-                padded_matrix = np.zeros((max_num_cols, max_num_params))
-                for local_idx, global_idx in enumerate(global_indices):
-                    padded_mask[:num_cols, global_idx] = b["param_mask"][:, local_idx]
-                    padded_matrix[:num_cols, global_idx] = b["param_matrix"][:, local_idx]
-                param_masks[i] = padded_mask.flatten()
-                param_matrices[i] = padded_matrix.flatten()
-            else:
-                for local_idx, global_idx in enumerate(global_indices):
-                    param_masks[i, :num_cols, global_idx] = b["param_mask"][:, local_idx]
-                    param_matrices[i, :num_cols, global_idx] = b["param_matrix"][:, local_idx]
+            # Copy common fields into global arrays at the correct batch positions
+            design_matrices[indices, :local_n_obs, :] = local["design_matrices"]
+            regressor_masks[indices] = local["regressor_masks"]
+            discrete_masks[indices] = local["discrete_masks"]
+            num_obs_array[indices] = local["num_obs"]
+            num_regressors_array[indices] = local["num_regressors"]
+            num_alternatives_array[indices] = local["num_alternatives"]
+            model_ids[indices] = self.model_index[model_name]
 
-            regressor_masks[i, :num_cols] = b["regressor_mask"]
-            discrete_masks[i, : b["discrete_mask"].shape[0]] = b["discrete_mask"]
-            num_obs_array[i] = num_obs
-            num_regressors_array[i] = b["num_regressors"]
+            for k in all_sim_keys:
+                if k in local["sim_data"]:
+                    v = local["sim_data"][k]
+                    sim_data[k][indices, :v.shape[1]] = v
 
-            for k, v in b["sim_trials"].items():
-                sim_data[k][i, : v.shape[0]] = v
+            for local_i, global_i in enumerate(indices):
+                model_names_out[global_i] = model_name
+                design_configs[global_i] = items[local_i]["design_config"]
+
+            # Lift params from model-local to global parameter space
+            for local_idx, global_idx in enumerate(self.local_to_global[model_name]):
+                param_matrices[indices, :, global_idx] = local["param_matrices"][:, :, local_idx]
+                param_masks[indices, :, global_idx] = local["param_masks"][:, :, local_idx]
 
         if remove_intercept:
             design_matrices = design_matrices[:, :, 1:]
+
+        if flatten_param_outputs:
+            param_matrices = param_matrices.reshape(batch_size, max_num_cols * n_global)
+            param_masks = param_masks.reshape(batch_size, max_num_cols * n_global)
 
         return {
             "model_names": model_names_out,
@@ -218,9 +224,11 @@ class ModelClass:
             "discrete_masks": discrete_masks,
             "num_obs": num_obs_array,
             "num_regressors": num_regressors_array,
+            "num_alternatives": num_alternatives_array,
             "max_num_regressors": max_num_regressors,
             "max_num_categories": max_num_categories,
-            "max_num_params": self.max_num_params,
+            "n_global_params": self.n_global_params,
+            "n_params": self.n_global_params,
             "num_models": self.num_models,
         }
 
@@ -240,10 +248,10 @@ class ModelClass:
 
         Returns
         -------
-        (param_matrices_global, param_masks_global), both shape (batch_size, num_cols * max_num_params)
+        (param_matrices_global, param_masks_global), both shape (batch_size, num_cols * n_global_params)
         """
         n_local = len(self.model_families[model_name].intrinsic_params)
-        n_global = self.max_num_params
+        n_global = self.n_global_params
         batch_size = param_matrices.shape[0]
         n_rows = param_matrices.shape[1] // n_local
         global_indices = self.local_to_global[model_name]

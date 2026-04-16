@@ -38,16 +38,13 @@ import seaborn as sns
 
 from cogformer.adapter import Adapter
 from cogformer.networks.transformers.cogformer import CogFormer
-from cogformer.simulator.context_manager import ContextManager
+from cogformer.simulator.design_utils import build_parameter_mask, build_design_matrix, build_random_design_config
 from cogformer.diagnostics.plot.adaptive_posterior import adaptive_posterior
 from cogformer.utils.plot_utils import cogformer_fm_colors, credible_interval
 
-
-def build_encoder_input_dim(
-    max_num_regressors: int, max_num_categories: int, keep_intercept: bool
-) -> int:
-    max_total_regressors = max_num_regressors * (max_num_regressors + 1) // 2
-    return max_total_regressors * (max_num_categories - 1) + (4 if keep_intercept else 3)
+import sys
+sys.path.insert(0, str(Path(__file__).parent.parent))
+from utils import build_encoder_input_dim
 
 
 def parse_args():
@@ -90,7 +87,6 @@ def build_participant_batch(
     df: pd.DataFrame,
     participant_ids: list,
     design_config: dict,
-    cm: ContextManager,
     num_obs: int,
     max_num_categories: int,
     keep_intercept: bool,
@@ -121,7 +117,7 @@ def build_participant_batch(
         stim_type_vals    = pdata_s["stim_type"].values.astype(np.float32)
         factual_truth_vals = pdata_s["factual_truth"].values.astype(np.float32)
 
-        dm = cm.build_design_matrix(
+        dm = build_design_matrix(
             design_config=design_config,
             num_obs=num_obs,
             context={
@@ -303,8 +299,7 @@ def main():
     )
 
     # ── Build parameter mask ────────────────────────────────────────────────────
-    cm = ContextManager()
-    param_mask_2d = cm.build_parameter_mask(
+    param_mask_2d = build_parameter_mask(
         design_config=design_config,
         intrinsic_params=intrinsic_params,
         max_num_categories=args.max_num_categories,
@@ -319,7 +314,6 @@ def main():
         df=df,
         participant_ids=participant_ids,
         design_config=design_config,
-        cm=cm,
         num_obs=args.num_obs,
         max_num_categories=args.max_num_categories,
         keep_intercept=args.keep_intercept,
@@ -338,9 +332,10 @@ def main():
         "param_masks":        param_masks,
         "max_num_regressors": args.max_num_regressors,
         "max_num_categories": args.max_num_categories,
+        "n_params":           len(intrinsic_params),
     }
 
-    adapted = Adapter.adapt(samples_dict, intrinsic_params=intrinsic_params)
+    adapted = Adapter.adapt(samples_dict)
     for k, v in adapted.items():
         if torch.is_tensor(v):
             adapted[k] = v.to(device)

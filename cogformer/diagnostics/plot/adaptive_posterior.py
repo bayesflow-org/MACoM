@@ -4,7 +4,7 @@ import seaborn as sns
 import matplotlib.pyplot as plt
 
 from cogformer.utils.plot_utils import cogformer_cm_colors
-from cogformer.simulator.context_manager import ContextManager
+from cogformer.simulator.design_utils import build_parameter_mask, build_design_matrix, build_random_design_config
 
 
 from matplotlib.patches import Patch
@@ -206,8 +206,7 @@ def adaptive_posterior(
         col_labels = variable_names
 
     if parameter_mask is None:
-        cm = ContextManager()
-        parameter_mask = cm.build_parameter_mask(
+        parameter_mask = build_parameter_mask(
             design_config=design_config,
             max_num_categories=max_num_categories,
             intrinsic_params=intrinsic_params,
@@ -380,9 +379,8 @@ if __name__ == "__main__":
     }
     num_params = len(variable_names)
 
-    cm = ContextManager()
 
-    parameter_mask = cm.build_parameter_mask(
+    parameter_mask = build_parameter_mask(
         design_config=design_config,
         intrinsic_params=intrinsic_params,
         max_num_categories=2,

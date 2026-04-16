@@ -2,7 +2,7 @@ import numpy as np
 import seaborn as sns
 import matplotlib.pyplot as plt
 
-from cogformer.simulator.context_manager import ContextManager
+from cogformer.simulator.design_utils import build_parameter_mask, build_design_matrix, build_random_design_config
 from cogformer.diagnostics.plot.adaptive_coverage import compute_empirical_coverage
 from cogformer.utils.plot_utils import _add_mask_legend
 
@@ -76,9 +76,8 @@ def ensemble_coverage(
         variable_names = design_configs[0].get("1", intrinsic_params)
 
     if parameter_masks is None:
-        context_manager = ContextManager()
         parameter_masks = [
-            context_manager.build_parameter_mask(
+            build_parameter_mask(
                 design_config=dc,
                 max_num_categories=max_num_categories,
                 intrinsic_params=intrinsic_params,
@@ -220,9 +219,8 @@ if __name__ == "__main__":
     batch_size = 200
     draws = 256
 
-    cm = ContextManager()
     design_configs = [
-        cm.build_random_design_config(
+        build_random_design_config(
             intrinsic_params=intrinsic_params,
             num_regressors=2,
             keep_intercept=True,
@@ -233,8 +231,7 @@ if __name__ == "__main__":
     labels = [f"Config {i + 1}" for i in range(12)]
 
     def make_data(dc, batch, draws, max_cats):
-        cm = ContextManager()
-        mask = cm.build_parameter_mask(
+        mask = build_parameter_mask(
             design_config=dc,
             max_num_categories=max_cats,
             intrinsic_params=intrinsic_params,

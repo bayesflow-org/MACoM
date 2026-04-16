@@ -12,47 +12,25 @@ import matplotlib.pyplot as plt
 np.set_printoptions(suppress=True)
 
 from cogformer.simulator import ModelFamily, ModelClass
-from cogformer.simulator.benchmarks import DDM, RDM, CDM
-from cogformer.simulator.benchmarks.ssms.priors import ddm_priors, rdm_priors, cdm_priors
-from cogformer.simulator.benchmarks.ssms.link_funs import ddm_link_fun, rdm_link_fun, cdm_link_fun
 from cogformer.adapter import Adapter
 from cogformer.networks.transformers.cogformer import CogFormer
 from cogformer.diagnostics.plot.adaptive_recovery import adaptive_recovery
 from cogformer.utils.plot_utils import cogformer_fm_colors
 
+import sys
+sys.path.insert(0, str(Path(__file__).parent.parent))
+from configs import MODELS as _BASE_MODELS
+from utils import build_encoder_input_dim
 
-# Per-model metadata used in val_step (fixed design config + display info)
+
+# val_step uses the "interaction" benchmark config as the fixed validation design
 MODEL_CONFIGS = {
-    "DDM": {
-        "intrinsic_params": ["v", "a", "z", "tau", "s_v", "s_tau"],
-        "variable_names": [r"$v$", r"$a$", r"$z$", r"$\tau$", r"$s_v$", r"$s_\tau$"],
-        "val_design_config": {
-            "1": ["v", "a", "z", "tau", "s_v", "s_tau"],
-            "u_1": ["v", "a", "z", "tau", "s_v"],
-            "u_2": ["v", "a", "z", "tau"],
-            "u_1:u_2": ["v", "a", "z"],
-        },
-    },
-    "RDM": {
-        "intrinsic_params": ["v", "v_diff", "a", "tau", "s_v", "s_tau"],
-        "variable_names": [r"$v$", r"$v_{\mathrm{diff}}$", r"$a$", r"$\tau$", r"$s_v$", r"$s_\tau$"],
-        "val_design_config": {
-            "1": ["v", "v_diff", "a", "tau", "s_v", "s_tau"],
-            "u_1": ["v", "v_diff", "a", "tau", "s_v"],
-            "u_2": ["v", "v_diff", "a", "tau"],
-            "u_1:u_2": ["v", "v_diff", "a"],
-        },
-    },
-    "CDM": {
-        "intrinsic_params": ["v", "v_theta", "a", "tau", "s_v", "s_tau"],
-        "variable_names": [r"$v$", r"$v_\theta$", r"$a$", r"$\tau$", r"$s_v$", r"$s_\tau$"],
-        "val_design_config": {
-            "1": ["v", "v_theta", "a", "tau", "s_v", "s_tau"],
-            "u_1": ["v", "v_theta", "a", "tau", "s_v"],
-            "u_2": ["v", "v_theta", "a", "tau"],
-            "u_1:u_2": ["v", "v_theta", "a"],
-        },
-    },
+    m.upper(): {
+        "intrinsic_params": cfg["intrinsic_params"],
+        "variable_names": cfg["variable_names"],
+        "val_design_config": cfg["benchmark_configs"]["interaction"],
+    }
+    for m, cfg in _BASE_MODELS.items()
 }
 
 
@@ -108,11 +86,7 @@ class CogFormerTrainer:
             flatten_param_outputs=True,
         )
 
-        adapted = self.adapter.adapt(
-            train_samples,
-            intrinsic_params=[],
-            num_params=train_samples["max_num_params"],
-        )
+        adapted = self.adapter.adapt(train_samples)
 
         optimizer.zero_grad()
 
@@ -141,7 +115,7 @@ class CogFormerTrainer:
         self.net.eval()
 
         model_family_config = config["model_family_config"]
-        max_num_params = self.model_class.max_num_params
+        n_global_params = self.model_class.n_global_params
         colors = cogformer_fm_colors()
 
         figures_dir = Path("./outputs/figures/model_class/cf/recovery")
@@ -149,7 +123,7 @@ class CogFormerTrainer:
 
         for model_name, model_cfg in MODEL_CONFIGS.items():
             mf = self.model_class.model_families[model_name]
-            model_id = self.model_class.model_registry[model_name]
+            model_id = self.model_class.model_index[model_name]
             link_fun = self.model_class.link_funs[model_name]
 
             intrinsic_params = model_cfg["intrinsic_params"]
@@ -176,11 +150,7 @@ class CogFormerTrainer:
                     test_samples["param_masks"],
                 )
 
-            adapted = self.adapter.adapt(
-                test_samples,
-                intrinsic_params=[],
-                num_params=max_num_params,
-            )
+            adapted = self.adapter.adapt(test_samples)
 
             pred_set = self.net.sample(
                 adapted["input_data"],
@@ -196,12 +166,12 @@ class CogFormerTrainer:
             global_indices = self.model_class.local_to_global[model_name]
 
             true_set = adapted["param_matrices"].detach().cpu().numpy()
-            n_rows = true_set.shape[1] // max_num_params
-            true_set = true_set.reshape(batch_size, n_rows, max_num_params)[:, :, global_indices]
-            pred_set = pred_set.reshape(batch_size, config["fm_num_samples"], n_rows, max_num_params)[:, :, :, global_indices]
+            n_rows = true_set.shape[1] // n_global_params
+            true_set = true_set.reshape(batch_size, n_rows, n_global_params)[:, :, global_indices]
+            pred_set = pred_set.reshape(batch_size, config["fm_num_samples"], n_rows, n_global_params)[:, :, :, global_indices]
 
             params_mask = adapted["param_masks"].detach().cpu().numpy()
-            params_mask = params_mask.reshape(batch_size, n_rows, max_num_params)[0][:, global_indices]
+            params_mask = params_mask.reshape(batch_size, n_rows, n_global_params)[0][:, global_indices]
 
             recovery_fig = adaptive_recovery(
                 true=true_set,
@@ -294,8 +264,7 @@ if __name__ == "__main__":
         "fixed_config": False,
     }
 
-    max_total_regressors = max_num_regressors * (max_num_regressors + 1) // 2
-    encoder_input_dim = max_total_regressors * (max_num_categories - 1) + (4 if keep_intercept else 3)
+    encoder_input_dim = build_encoder_input_dim(max_num_regressors, max_num_categories, keep_intercept)
 
     train_config = {
         "epochs": args.epochs,
@@ -344,21 +313,21 @@ if __name__ == "__main__":
     # Build per-model families with their own mask randomizer kwargs
     model_families = {
         "DDM": ModelFamily(
-            model=DDM(), name="DDM", prior_fun=ddm_priors(),
+            model=DDM(), name="DDM", prior=ddm_priors(),
             mask_randomizer_kwargs={
                 "free_intrinsics": ["v", "a", "z", "tau"],
                 "fixed_intrinsics": ["s_v", "s_tau"], "fixed_values": {},
             },
         ),
         "RDM": ModelFamily(
-            model=RDM(), name="RDM", prior_fun=rdm_priors(),
+            model=RDM(), name="RDM", prior=rdm_priors(),
             mask_randomizer_kwargs={
                 "free_intrinsics": ["v", "v_diff", "a", "tau"],
                 "fixed_intrinsics": ["s_v", "s_tau"], "fixed_values": {},
             },
         ),
         "CDM": ModelFamily(
-            model=CDM(), name="CDM", prior_fun=cdm_priors(),
+            model=CDM(), name="CDM", prior=cdm_priors(),
             mask_randomizer_kwargs={
                 "free_intrinsics": ["v", "v_theta", "a", "tau"],
                 "fixed_intrinsics": ["s_v", "s_tau"], "fixed_values": {},

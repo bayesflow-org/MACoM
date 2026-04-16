@@ -12,11 +12,6 @@ import matplotlib.pyplot as plt
 from pathlib import Path
 
 from cogformer.simulator.model_family import ModelFamily
-from cogformer.simulator.benchmarks.ssms.ddm import DDM
-from cogformer.simulator.benchmarks.ssms.cdm import CDM
-from cogformer.simulator.benchmarks.ssms.rdm import RDM
-from cogformer.simulator.benchmarks.ssms.priors import ddm_priors, cdm_priors, rdm_priors
-from cogformer.simulator.benchmarks.ssms.link_funs import ddm_link_fun, cdm_link_fun, rdm_link_fun
 from cogformer.diagnostics.plot.adaptive_recovery import adaptive_recovery
 from cogformer.diagnostics.plot.adaptive_coverage import adaptive_coverage
 from cogformer.diagnostics.plot.adaptive_ecdf import adaptive_ecdf
@@ -24,6 +19,11 @@ from cogformer.diagnostics.plot.adaptive_posterior import adaptive_posterior
 from cogformer.diagnostics.plot.adaptive_metrics import adaptive_metrics as plot_adaptive_metrics
 from cogformer.diagnostics.metric.adaptive_metrics import adaptive_metrics as compute_adaptive_metrics
 from cogformer.utils.plot_utils import bf_colors
+
+import sys
+sys.path.insert(0, str(Path(__file__).parent.parent))
+from configs import MODELS as _BASE_MODELS
+from utils import reshape_bf_to_cf
 
 
 # Per-model CASE_CONFIGS with param_names for diagnostics ─────────────────────
@@ -312,78 +312,21 @@ RDM_CASE_CONFIGS = {
     },
 }
 
-MODELS = {
-    "ddm": {
-        "model_cls": DDM, "prior_fn": ddm_priors, "link_fn": ddm_link_fun,
-        "name": "DDM", "case_configs": DDM_CASE_CONFIGS,
-        "intrinsic_params": ["v", "a", "z", "tau", "s_v", "s_tau"],
-        "variable_names": [r"$v$", r"$a$", r"$z$", r"$\tau$", r"$s_v$", r"$s_\tau$"],
-        "ckpt_prefix": "ddm_families_bf",
-        "figures_dir": "./outputs/figures/model_family/bf/ddm",
-        "data_dir": "./outputs/data/model_family",
-        "evals_dir": "./outputs/evaluations/model_family/bf",
-        "benchmark_configs": {
-            "intercept_only": {"1": ["v", "a", "z", "tau", "s_v", "s_tau"], "u_1": [], "u_2": [], "u_1:u_2": []},
-            "regressed": {"1": ["v", "a", "z", "tau", "s_v", "s_tau"], "u_1": ["v", "a", "z"], "u_2": ["v", "a", "z"], "u_1:u_2": []},
-            "fixed": {"1": ["v", "a", "z", "tau"], "u_1": [], "u_2": [], "u_1:u_2": []},
-            "fixed_regressed": {"1": ["v", "a", "z", "tau"], "u_1": ["v", "a", "z"], "u_2": ["v", "a", "z"], "u_1:u_2": []},
-            "interaction": {"1": ["v", "a", "z", "tau", "s_v", "s_tau"], "u_1": ["v", "a", "z", "tau", "s_v"], "u_2": ["v", "a", "z", "tau"], "u_1:u_2": ["v", "a", "z"]},
-            "full": {"1": ["v", "a", "z", "tau", "s_v", "s_tau"], "u_1": ["v", "a", "z", "tau", "s_v", "s_tau"], "u_2": ["v", "a", "z", "tau", "s_v", "s_tau"], "u_1:u_2": ["v", "a", "z", "tau", "s_v", "s_tau"]},
-        },
-    },
-    "cdm": {
-        "model_cls": CDM, "prior_fn": cdm_priors, "link_fn": cdm_link_fun,
-        "name": "CDM", "case_configs": CDM_CASE_CONFIGS,
-        "intrinsic_params": ["v", "v_theta", "a", "tau", "s_v", "s_tau"],
-        "variable_names": [r"$v$", r"$v_\theta$", r"$a$", r"$\tau$", r"$s_v$", r"$s_\tau$"],
-        "ckpt_prefix": "cdm_families_bf",
-        "figures_dir": "./outputs/figures/model_family/bf/cdm",
-        "data_dir": "./outputs/data/model_family",
-        "evals_dir": "./outputs/evaluations/model_family/bf",
-        "benchmark_configs": {
-            "intercept_only": {"1": ["v", "v_theta", "a", "tau", "s_v", "s_tau"], "u_1": [], "u_2": [], "u_1:u_2": []},
-            "regressed": {"1": ["v", "v_theta", "a", "tau", "s_v", "s_tau"], "u_1": ["v", "a"], "u_2": ["v", "a"], "u_1:u_2": []},
-            "fixed": {"1": ["v", "v_theta", "a", "tau"], "u_1": [], "u_2": [], "u_1:u_2": []},
-            "fixed_regressed": {"1": ["v", "v_theta", "a", "tau"], "u_1": ["v", "a"], "u_2": ["v", "a"], "u_1:u_2": []},
-            "interaction": {"1": ["v", "v_theta", "a", "tau", "s_v", "s_tau"], "u_1": ["v", "v_theta", "a", "tau", "s_v"], "u_2": ["v", "v_theta", "a", "tau"], "u_1:u_2": ["v", "v_theta", "a"]},
-            "full": {"1": ["v", "v_theta", "a", "tau", "s_v", "s_tau"], "u_1": ["v", "v_theta", "a", "tau", "s_v", "s_tau"], "u_2": ["v", "v_theta", "a", "tau", "s_v", "s_tau"], "u_1:u_2": ["v", "v_theta", "a", "tau", "s_v", "s_tau"]},
-        },
-    },
-    "rdm": {
-        "model_cls": RDM, "prior_fn": rdm_priors, "link_fn": rdm_link_fun,
-        "name": "RDM", "case_configs": RDM_CASE_CONFIGS,
-        "intrinsic_params": ["v", "v_diff", "a", "tau", "s_v", "s_tau"],
-        "variable_names": [r"$v$", r"$v_{\mathrm{diff}}$", r"$a$", r"$\tau$", r"$s_v$", r"$s_\tau$"],
-        "ckpt_prefix": "rdm_families_bf",
-        "figures_dir": "./outputs/figures/model_family/bf/rdm",
-        "data_dir": "./outputs/data/model_family",
-        "evals_dir": "./outputs/evaluations/model_family/bf",
-        "benchmark_configs": {
-            "intercept_only": {"1": ["v", "v_diff", "a", "tau", "s_v", "s_tau"], "u_1": [], "u_2": [], "u_1:u_2": []},
-            "regressed": {"1": ["v", "v_diff", "a", "tau", "s_v", "s_tau"], "u_1": ["v_diff", "a"], "u_2": ["v_diff", "a"], "u_1:u_2": []},
-            "fixed": {"1": ["v", "v_diff", "a", "tau"], "u_1": [], "u_2": [], "u_1:u_2": []},
-            "fixed_regressed": {"1": ["v", "v_diff", "a", "tau"], "u_1": ["v_diff", "a"], "u_2": ["v_diff", "a"], "u_1:u_2": []},
-            "interaction": {"1": ["v", "v_diff", "a", "tau", "s_v", "s_tau"], "u_1": ["v", "v_diff", "a", "tau", "s_v"], "u_2": ["v", "v_diff", "a", "tau"], "u_1:u_2": ["v", "v_diff", "a"]},
-            "full": {"1": ["v", "v_diff", "a", "tau", "s_v", "s_tau"], "u_1": ["v", "v_diff", "a", "tau", "s_v", "s_tau"], "u_2": ["v", "v_diff", "a", "tau", "s_v", "s_tau"], "u_1:u_2": ["v", "v_diff", "a", "tau", "s_v", "s_tau"]},
-        },
-    },
+_BF_DIRS = {
+    "ddm": ("ddm_families_bf", "./outputs/figures/model_family/bf/ddm"),
+    "cdm": ("cdm_families_bf", "./outputs/figures/model_family/bf/cdm"),
+    "rdm": ("rdm_families_bf", "./outputs/figures/model_family/bf/rdm"),
 }
+_BF_CASE_CONFIGS = {"ddm": DDM_CASE_CONFIGS, "cdm": CDM_CASE_CONFIGS, "rdm": RDM_CASE_CONFIGS}
 
-
-def reshape_bf_to_cf(bf_samples, design_config, intrinsic_params):
-    *leading, num_active = bf_samples.shape
-    num_rows = len(design_config)
-    num_cols = len(intrinsic_params)
-    col_idx = {p: j for j, p in enumerate(intrinsic_params)}
-    result = np.zeros((*leading, num_rows, num_cols))
-    flat_pos = 0
-    for row_i, active_params in enumerate(design_config.values()):
-        ordered = [p for p in intrinsic_params if p in active_params]
-        for p in ordered:
-            result[..., row_i, col_idx[p]] = bf_samples[..., flat_pos]
-            flat_pos += 1
-    assert flat_pos == num_active, f"Expected {num_active} active params but mapped {flat_pos}."
-    return result
+MODELS = {}
+for _key, _base in _BASE_MODELS.items():
+    _cfg = dict(_base)
+    _cfg["case_configs"] = _BF_CASE_CONFIGS[_key]
+    _cfg["ckpt_prefix"], _cfg["figures_dir"] = _BF_DIRS[_key]
+    _cfg["data_dir"] = "./outputs/data/model_family"
+    _cfg["evals_dir"] = "./outputs/evaluations/model_family/bf"
+    MODELS[_key] = _cfg
 
 
 class ModelFamilyBF(bf.simulators.Simulator):
@@ -397,7 +340,7 @@ class ModelFamilyBF(bf.simulators.Simulator):
         self.link_fn = model_cfg["link_fn"]
         self.model_family = ModelFamily(
             model=model_cfg["model_cls"](),
-            prior_fun=model_cfg["prior_fn"](),
+            prior=model_cfg["prior_fn"](),
             regressed_params=self.config["regressed_params"],
             mask_randomizer_kwargs=dict(
                 free_intrinsics=self.config["free_intrinsics"],

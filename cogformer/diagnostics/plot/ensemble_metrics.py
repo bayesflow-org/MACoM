@@ -4,7 +4,7 @@ import matplotlib.colors as mcolors
 from matplotlib.patches import Rectangle
 import seaborn as sns
 
-from cogformer.simulator.context_manager import ContextManager
+from cogformer.simulator.design_utils import build_parameter_mask, build_design_matrix, build_random_design_config
 from cogformer.diagnostics.metric.adaptive_metrics import (
     _rmse,
     _contraction,
@@ -100,9 +100,8 @@ def ensemble_metrics(
         variable_names = design_configs[0].get("1", intrinsic_params)
 
     if parameter_masks is None:
-        context_manager = ContextManager()
         parameter_masks = [
-            context_manager.build_parameter_mask(
+            build_parameter_mask(
                 design_config=dc,
                 max_num_categories=max_num_categories,
                 intrinsic_params=intrinsic_params,
@@ -305,9 +304,8 @@ if __name__ == "__main__":
     batch_size = 50
     draws = 64
 
-    cm = ContextManager()
     design_configs = [
-        cm.build_random_design_config(
+        build_random_design_config(
             intrinsic_params=intrinsic_params,
             num_regressors=2,
             keep_intercept=True,
@@ -317,7 +315,7 @@ if __name__ == "__main__":
     ]
 
     def make_data(dc, batch, draws, max_cats):
-        mask = cm.build_parameter_mask(
+        mask = build_parameter_mask(
             design_config=dc,
             max_num_categories=max_cats,
             intrinsic_params=intrinsic_params,

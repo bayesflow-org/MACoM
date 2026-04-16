@@ -3,7 +3,7 @@ import pandas as pd
 from sklearn.model_selection import StratifiedKFold
 from sklearn.neural_network import MLPClassifier
 
-from cogformer.simulator.context_manager import ContextManager
+from cogformer.simulator.design_utils import build_parameter_mask, build_design_matrix, build_random_design_config
 
 
 def compute_c2st_accuracy(
@@ -125,8 +125,7 @@ def compute_joint_c2st(
         Single C2ST accuracy value for the joint distribution over all active parameters.
     """
     if parameter_mask is None:
-        cm = ContextManager()
-        parameter_mask = cm.build_parameter_mask(
+        parameter_mask = build_parameter_mask(
             design_config=design_config,
             max_num_categories=max_num_categories,
             intrinsic_params=intrinsic_params,
@@ -206,8 +205,7 @@ def adaptive_c2st(
         Rows = active parameters, column = "C2ST Accuracy".
     """
     if parameter_mask is None:
-        cm = ContextManager()
-        parameter_mask = cm.build_parameter_mask(
+        parameter_mask = build_parameter_mask(
             design_config=design_config,
             max_num_categories=max_num_categories,
             intrinsic_params=intrinsic_params,

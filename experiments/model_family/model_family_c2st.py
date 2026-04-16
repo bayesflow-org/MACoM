@@ -9,65 +9,36 @@ from cogformer.diagnostics.metric.adaptive_c2st import adaptive_c2st as compute_
 from cogformer.diagnostics.metric.adaptive_c2st import compute_joint_c2st
 from cogformer.utils.plot_utils import cogformer_fm_colors
 
+import sys
+sys.path.insert(0, str(Path(__file__).parent.parent))
+from configs import MODELS as _BASE_MODELS
+from utils import reshape_bf_to_cf
 
-MODELS = {
-    "ddm": {
-        "intrinsic_params": ["v", "a", "z", "tau", "s_v", "s_tau"],
-        "variable_names": [r"$v$", r"$a$", r"$z$", r"$\tau$", r"$s_v$", r"$s_\tau$"],
-        # DDM uses singular "family"; CDM/RDM use "families"
-        "cf_pred_filename": "{model}_family_{case}_cf_pred.npz",
-        "outdir": "./cogformer/experiments/figures/c2st/ddm/",
-        "benchmark_configs": {
-            "intercept_only": {"1": ["v", "a", "z", "tau", "s_v", "s_tau"], "u_1": [], "u_2": [], "u_1:u_2": []},
-            "regressed": {"1": ["v", "a", "z", "tau", "s_v", "s_tau"], "u_1": ["v", "a", "z"], "u_2": ["v", "a", "z"], "u_1:u_2": []},
-            "fixed": {"1": ["v", "a", "z", "tau"], "u_1": [], "u_2": [], "u_1:u_2": []},
-            "fixed_regressed": {"1": ["v", "a", "z", "tau"], "u_1": ["v", "a", "z"], "u_2": ["v", "a", "z"], "u_1:u_2": []},
-            "interaction": {"1": ["v", "a", "z", "tau", "s_v", "s_tau"], "u_1": ["v", "a", "z", "tau", "s_v"], "u_2": ["v", "a", "z", "tau"], "u_1:u_2": ["v", "a", "z"]},
-        },
-    },
-    "cdm": {
-        "intrinsic_params": ["v", "v_theta", "a", "tau", "s_v", "s_tau"],
-        "variable_names": [r"$v$", r"$v_\theta$", r"$a$", r"$\tau$", r"$s_v$", r"$s_\tau$"],
-        "cf_pred_filename": "{model}_families_{case}_cf_pred.npz",
-        "outdir": "./cogformer/experiments/figures/c2st/cdm/",
-        "benchmark_configs": {
-            "intercept_only": {"1": ["v", "v_theta", "a", "tau", "s_v", "s_tau"], "u_1": [], "u_2": [], "u_1:u_2": []},
-            "regressed": {"1": ["v", "v_theta", "a", "tau", "s_v", "s_tau"], "u_1": ["v", "a"], "u_2": ["v", "a"], "u_1:u_2": []},
-            "fixed": {"1": ["v", "v_theta", "a", "tau"], "u_1": [], "u_2": [], "u_1:u_2": []},
-            "fixed_regressed": {"1": ["v", "v_theta", "a", "tau"], "u_1": ["v", "a"], "u_2": ["v", "a"], "u_1:u_2": []},
-            "interaction": {"1": ["v", "v_theta", "a", "tau", "s_v", "s_tau"], "u_1": ["v", "v_theta", "a", "tau", "s_v"], "u_2": ["v", "v_theta", "a", "tau"], "u_1:u_2": ["v", "v_theta", "a"]},
-        },
-    },
-    "rdm": {
-        "intrinsic_params": ["v", "v_diff", "a", "tau", "s_v", "s_tau"],
-        "variable_names": [r"$v$", r"$v_{\mathrm{diff}}$", r"$a$", r"$\tau$", r"$s_v$", r"$s_\tau$"],
-        "cf_pred_filename": "{model}_families_{case}_cf_pred.npz",
-        "outdir": "./cogformer/experiments/figures/c2st/rdm/",
-        "benchmark_configs": {
-            "intercept_only": {"1": ["v", "v_diff", "a", "tau", "s_v", "s_tau"], "u_1": [], "u_2": [], "u_1:u_2": []},
-            "regressed": {"1": ["v", "v_diff", "a", "tau", "s_v", "s_tau"], "u_1": ["v_diff", "a"], "u_2": ["v_diff", "a"], "u_1:u_2": []},
-            "fixed": {"1": ["v", "v_diff", "a", "tau"], "u_1": [], "u_2": [], "u_1:u_2": []},
-            "fixed_regressed": {"1": ["v", "v_diff", "a", "tau"], "u_1": ["v_diff", "a"], "u_2": ["v_diff", "a"], "u_1:u_2": []},
-            "interaction": {"1": ["v", "v_diff", "a", "tau", "s_v", "s_tau"], "u_1": ["v", "v_diff", "a", "tau", "s_v"], "u_2": ["v", "v_diff", "a", "tau"], "u_1:u_2": ["v", "v_diff", "a"]},
-        },
-    },
+
+_CF_PRED_FILENAMES = {
+    "ddm": "{model}_family_{case}_cf_pred.npz",   # DDM uses singular "family"
+    "cdm": "{model}_families_{case}_cf_pred.npz",
+    "rdm": "{model}_families_{case}_cf_pred.npz",
+}
+_C2ST_OUTDIRS = {
+    "ddm": "./outputs/figures/c2st/ddm/",
+    "cdm": "./outputs/figures/c2st/cdm/",
+    "rdm": "./outputs/figures/c2st/rdm/",
 }
 
-
-def reshape_bf_to_cf(bf_samples, design_config, intrinsic_params):
-    *leading, num_active = bf_samples.shape
-    num_rows = len(design_config)
-    num_cols = len(intrinsic_params)
-    col_idx = {p: j for j, p in enumerate(intrinsic_params)}
-    result = np.zeros((*leading, num_rows, num_cols))
-    flat_pos = 0
-    for row_i, active_params in enumerate(design_config.values()):
-        ordered = [p for p in intrinsic_params if p in active_params]
-        for p in ordered:
-            result[..., row_i, col_idx[p]] = bf_samples[..., flat_pos]
-            flat_pos += 1
-    assert flat_pos == num_active
-    return result
+MODELS = {}
+for _key, _base in _BASE_MODELS.items():
+    _cfg = {
+        "intrinsic_params": _base["intrinsic_params"],
+        "variable_names": _base["variable_names"],
+        "cf_pred_filename": _CF_PRED_FILENAMES[_key],
+        "outdir": _C2ST_OUTDIRS[_key],
+        # c2st uses a subset of benchmark cases (no "full")
+        "benchmark_configs": {
+            k: v for k, v in _base["benchmark_configs"].items() if k != "full"
+        },
+    }
+    MODELS[_key] = _cfg
 
 
 def load_bf_data(data_path):

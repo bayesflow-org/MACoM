@@ -4,7 +4,7 @@ import matplotlib.pyplot as plt
 
 from collections.abc import Callable
 
-from cogformer.simulator.context_manager import ContextManager
+from cogformer.simulator.design_utils import build_parameter_mask, build_design_matrix, build_random_design_config
 from cogformer.utils.plot_utils import credible_interval, _add_mask_legend
 
 
@@ -74,9 +74,8 @@ def ensemble_recovery(
 
     # Build masks if not provided
     if parameter_masks is None:
-        context_manager = ContextManager()
         parameter_masks = [
-            context_manager.build_parameter_mask(
+            build_parameter_mask(
                 design_config=dc,
                 max_num_categories=max_num_categories,
                 intrinsic_params=intrinsic_params,
@@ -243,9 +242,8 @@ if __name__ == "__main__":
     batch_size = 20
     draws = 50
 
-    context_manager = ContextManager()
     design_configs = [
-        context_manager.build_random_design_config(
+        build_random_design_config(
             intrinsic_params=intrinsic_params,
             num_regressors=2,
             keep_intercept=True,
@@ -256,8 +254,7 @@ if __name__ == "__main__":
     labels = [f"Config {i + 1}" for i in range(12)]
 
     def make_data(dc, batch, draws, max_cats, poor_recovery=False):
-        context_manager = ContextManager()
-        mask = context_manager.build_parameter_mask(
+        mask = build_parameter_mask(
             design_config=dc,
             max_num_categories=max_cats,
             intrinsic_params=intrinsic_params,

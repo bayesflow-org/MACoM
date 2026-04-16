@@ -7,62 +7,28 @@ import torch
 import matplotlib.pyplot as plt
 
 from cogformer.simulator import ModelFamily
-from cogformer.simulator.benchmarks.ssms.ddm import DDM
-from cogformer.simulator.benchmarks.ssms.cdm import CDM
-from cogformer.simulator.benchmarks.ssms.rdm import RDM
-from cogformer.simulator.benchmarks.ssms.priors import ddm_priors, cdm_priors, rdm_priors
-from cogformer.simulator.benchmarks.ssms.link_funs import ddm_link_fun, cdm_link_fun, rdm_link_fun
-from cogformer.simulator.context_manager import ContextManager
+from cogformer.simulator.design_utils import build_parameter_mask, build_design_matrix, build_random_design_config
 from cogformer.adapter import Adapter
 from cogformer.networks.transformers.cogformer import CogFormer
 from cogformer.diagnostics.plot.ensemble_metrics import ensemble_metrics
 
+import sys
+sys.path.insert(0, str(Path(__file__).parent.parent))
+from configs import MODELS as _BASE_MODELS
+from utils import infer_free_fixed_intrinsics, build_encoder_input_dim
 
-MODELS = {
-    "ddm": {
-        "model_cls": DDM, "prior_fn": ddm_priors, "link_fn": ddm_link_fun,
-        "name": "DDM",
-        "intrinsic_params": ["v", "a", "z", "tau", "s_v", "s_tau"],
-        "variable_names": [r"$v$", r"$a$", r"$z$", r"$\tau$", r"$s_v$", r"$s_\tau$"],
-        "free_params": ["v", "a", "z", "tau"],
-        "fixed_params": ["s_v", "s_tau"],
-        "default_fixed_values": {"s_v": 0.0, "s_tau": 0.0},
-        "outdir": "./cogformer/experiments/figures/fm/ddm/ensemble/",
-    },
-    "cdm": {
-        "model_cls": CDM, "prior_fn": cdm_priors, "link_fn": cdm_link_fun,
-        "name": "CDM",
-        "intrinsic_params": ["v", "v_theta", "a", "tau", "s_v", "s_tau"],
-        "variable_names": [r"$v$", r"$v_\theta$", r"$a$", r"$\tau$", r"$s_v$", r"$s_\tau$"],
-        "free_params": ["v", "v_theta", "a", "tau"],
-        "fixed_params": ["s_v", "s_tau"],
-        "default_fixed_values": {"s_v": 0.0, "s_tau": 0.0},
-        "outdir": "./cogformer/experiments/figures/fm/cdm/ensemble/",
-    },
-    "rdm": {
-        "model_cls": RDM, "prior_fn": rdm_priors, "link_fn": rdm_link_fun,
-        "name": "RDM",
-        "intrinsic_params": ["v", "v_diff", "a", "tau", "s_v", "s_tau"],
-        "variable_names": [r"$v$", r"$v_{\mathrm{diff}}$", r"$a$", r"$\tau$", r"$s_v$", r"$s_\tau$"],
-        "free_params": ["v", "v_diff", "a", "tau"],
-        "fixed_params": ["s_v", "s_tau"],
-        "default_fixed_values": {"s_v": 0.0, "s_tau": 0.0},
-        "outdir": "./cogformer/experiments/figures/fm/rdm/ensemble/",
-    },
+
+_OUTDIRS = {
+    "ddm": "./outputs/figures/model_family/cf/ddm/ensemble/",
+    "cdm": "./outputs/figures/model_family/cf/cdm/ensemble/",
+    "rdm": "./outputs/figures/model_family/cf/rdm/ensemble/",
 }
 
-
-def infer_free_fixed_intrinsics(design_config, all_intrinsics, default_fixed_values):
-    used = {p for plist in design_config.values() for p in plist}
-    free_intrinsics = [p for p in all_intrinsics if p in used]
-    fixed_intrinsics = [p for p in all_intrinsics if p not in used]
-    fixed_values = {p: default_fixed_values[p] for p in fixed_intrinsics if p in default_fixed_values}
-    return free_intrinsics, fixed_intrinsics, fixed_values
-
-
-def build_encoder_input_dim(max_num_regressors, max_num_categories, keep_intercept):
-    max_total_regressors = max_num_regressors * (max_num_regressors + 1) // 2
-    return max_total_regressors * (max_num_categories - 1) + (4 if keep_intercept else 3)
+MODELS = {}
+for _key, _base in _BASE_MODELS.items():
+    _cfg = dict(_base)
+    _cfg["outdir"] = _OUTDIRS[_key]
+    MODELS[_key] = _cfg
 
 
 def parse_args():
@@ -120,7 +86,7 @@ def main():
     model_family = ModelFamily(
         model=model_cfg["model_cls"](),
         name=model_cfg["name"],
-        prior_fun=model_cfg["prior_fn"](),
+        prior=model_cfg["prior_fn"](),
         mask_randomizer_kwargs={
             "free_intrinsics": intrinsic_params,
             "fixed_intrinsics": [],
@@ -153,9 +119,8 @@ def main():
     cogformer.load_state_dict(state)
     cogformer.eval()
 
-    cm = ContextManager()
     design_configs = [
-        cm.build_random_design_config(
+        build_random_design_config(
             intrinsic_params=intrinsic_params,
             num_regressors=args.max_num_regressors,
             free_intrinsics=free_params,
@@ -187,7 +152,7 @@ def main():
             design_config=dc,
             link_fun=link_fn(),
         )
-        adapted = adapter.adapt(samples, intrinsic_params=model_family.intrinsic_params)
+        adapted = adapter.adapt(samples)
         for k, v in adapted.items():
             if torch.is_tensor(v):
                 adapted[k] = v.to(device)
