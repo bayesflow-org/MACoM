@@ -41,9 +41,9 @@ def split_design_space(
 
     Examples
     --------
-    >>> set_a, set_b = split_design_space(["v", "a", "z", "tau"], seed=0)
-    >>> train_batch = mf.batch_sample(..., allowed_slope_patterns=set_a)
-    >>> test_batch  = mf.batch_sample(..., allowed_slope_patterns=set_b)
+    set_a, set_b = split_design_space(["v", "a", "z", "tau"], seed=0)
+    train_batch = mf.batch_sample(..., allowed_slope_patterns=set_a)
+    test_batch  = mf.batch_sample(..., allowed_slope_patterns=set_b)
     """
     rng = np.random.default_rng(seed)
     n = len(free_intrinsics)
@@ -349,7 +349,6 @@ def build_design_matrix(
     num_obs: int,
     context: dict[str, np.ndarray] | None = None,
     discrete_prob: float = 0.5,
-    keep_intercept: bool = False,
     min_num_categories: int = 2,
     max_num_categories: int = 4,
     main_discrete_mask: np.ndarray = None,
@@ -359,7 +358,7 @@ def build_design_matrix(
     """
     Build design matrix based on the respective configuration of free intrinsic parameters.
 
-    All non-context main effect regressors are drawn jointly from X ~ MVN(0, Sigma),
+    All regressors (not context vars) are drawn jointly from X ~ MVN(0, Sigma),
     Sigma ~ Inv-Wishart(collinearity_df, I_k), giving a shared latent covariance structure
     across both continuous and discrete regressors.
 
@@ -394,12 +393,13 @@ def build_design_matrix(
         Sigma = invwishart.rvs(df=collinearity_df_val, scale=np.eye(k))
         Sigma = np.atleast_2d(Sigma).reshape(k, k)
         X_mvn = np.random.multivariate_normal(np.zeros(k), Sigma, size=num_obs)
-        X_mvn /= X_mvn.std(axis=0).clip(1e-8)
+        X_mvn /= np.sqrt(np.diag(Sigma))[np.newaxis, :]
         mvn_col_map = {j: X_mvn[:, i].astype(np.float32) for i, j in enumerate(non_context_indices)}
     else:
         mvn_col_map = {}
 
     col_idx = 0
+
     if has_intercept:
         design_matrix[:, 0] = 1.0
         col_idx = 1
@@ -534,7 +534,6 @@ def sample_parameter_matrix(
 def build_column_labels(
     design_config: dict[str, list[str]],
     max_num_categories: int = 4,
-    keep_intercept: bool = False,
 ) -> list[str]:
     """Build human-readable column labels aligned with build_design_matrix() output."""
     regressor_keys = list(design_config.keys())
