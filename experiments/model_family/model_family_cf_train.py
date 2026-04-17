@@ -164,6 +164,7 @@ class CogFormerTrainer:
         optimizer.step()
         return L.detach().item(), scheduler.get_last_lr()[0]
 
+    @torch.no_grad()
     def val_step(self, config, global_step, fig_path):
         model_name = self.model_cfg["name"].lower()
         params = self.model_cfg["intrinsic_params"]
@@ -196,13 +197,6 @@ class CogFormerTrainer:
             adapted = self.adapter.adapt(
                 test_samples,
                 device=config["device"],
-            )
-            self.net(
-                adapted["param_matrices"][..., None],
-                adapted["input_data"],
-                adapted["param_indices"],
-                adapted["regressor_indices"],
-                adapted["param_masks"],
             )
 
             true_set = adapted["param_matrices"].detach().cpu().numpy()

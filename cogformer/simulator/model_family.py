@@ -177,7 +177,6 @@ class ModelFamily:
             num_obs=num_obs,
             context=context,
             discrete_prob=discrete_prob,
-            keep_intercept=keep_intercept,
             max_num_categories=max_num_categories,
             collinearity_df=collinearity_df,
             category_concentration=category_concentration,
