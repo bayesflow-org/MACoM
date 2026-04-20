@@ -41,7 +41,7 @@ USE_WANDB="${USE_WANDB:-true}"   # set USE_WANDB=false to skip W&B logging
 
 # Training
 LR=1e-4
-EPOCHS=1000
+EPOCHS=5000
 STEPS_PER_EPOCH=100
 TRAIN_BATCH=64
 VAL_BATCH=200
@@ -92,9 +92,9 @@ CKPT_PREFIX["rdm"]="cogformer_rdm_mixed_attn"
 # ============================================================
 # Scripts
 # ============================================================
-TRAIN_SCRIPT="experiments/model_family/model_family_cf_train.py"
-VALIDATE_SCRIPT="experiments/model_family/model_family_cf_validate.py"
-ENSEMBLE_SCRIPT="experiments/model_family/model_family_cf_ensemble.py"
+TRAIN_MODULE="experiments.model_family.model_family_cf_train"
+VALIDATE_MODULE="experiments.model_family.model_family_cf_validate"
+ENSEMBLE_MODULE="experiments.model_family.model_family_cf_ensemble"
 
 # Shared architecture args — reused verbatim across train / validate / ensemble
 ARCH_ARGS=(
@@ -132,7 +132,7 @@ for model in "${MODELS[@]}"; do
     echo "------------------------------------------------------------"
     echo " TRAIN  :  $model"
     echo "------------------------------------------------------------"
-    if ! python "$TRAIN_SCRIPT" \
+    if ! python -m "$TRAIN_MODULE" \
             --model "$model" \
             "${ARCH_ARGS[@]}" \
             --lr              "$LR" \
@@ -157,7 +157,7 @@ for model in "${MODELS[@]}"; do
     echo "------------------------------------------------------------"
     echo " VALIDATE  :  $model"
     echo "------------------------------------------------------------"
-    if ! python "$VALIDATE_SCRIPT" \
+    if ! python -m "$VALIDATE_MODULE" \
             --model      "$model" \
             --checkpoint "$CKPT_PATH" \
             "${ARCH_ARGS[@]}" \
@@ -175,7 +175,7 @@ for model in "${MODELS[@]}"; do
     echo "------------------------------------------------------------"
     echo " ENSEMBLE  :  $model"
     echo "------------------------------------------------------------"
-    if ! python "$ENSEMBLE_SCRIPT" \
+    if ! python -m "$ENSEMBLE_MODULE" \
             --model      "$model" \
             --checkpoint "$CKPT_PATH" \
             "${ARCH_ARGS[@]}" \

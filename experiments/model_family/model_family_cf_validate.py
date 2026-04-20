@@ -17,10 +17,8 @@ from cogformer.diagnostics.plot.adaptive_metrics import adaptive_metrics as plot
 from cogformer.diagnostics.metric.adaptive_metrics import adaptive_metrics as compute_adaptive_metrics
 from cogformer.utils.plot_utils import cogformer_fm_colors
 
-import sys
-sys.path.insert(0, str(Path(__file__).parent.parent))
-from configs import MODELS as _BASE_MODELS, GLOBAL_PARAMS, GLOBAL_VARIABLE_NAMES
-from utils import add_global_params, strip_global_params, infer_free_fixed_intrinsics, build_encoder_input_dim
+from ..configs import MODELS as _BASE_MODELS, GLOBAL_PARAMS, GLOBAL_VARIABLE_NAMES
+from ..utils import add_global_params, strip_global_params, infer_free_fixed_intrinsics, build_encoder_input_dim
 
 
 # CF validate uses global params (pi) and adds script-specific output keys
@@ -215,10 +213,7 @@ def main():
                 link_fun=link_fn(),
             )
 
-        adapted = adapter.adapt(test_samples)
-        for k, v in adapted.items():
-            if torch.is_tensor(v):
-                adapted[k] = v.to(device)
+        adapted = adapter.adapt(test_samples, device=device)
 
         true_set = adapted["param_matrices"].detach().cpu().numpy()
         n_cols = len(intrinsic_params)

@@ -9,10 +9,8 @@ from cogformer.diagnostics.metric.adaptive_c2st import adaptive_c2st as compute_
 from cogformer.diagnostics.metric.adaptive_c2st import compute_joint_c2st
 from cogformer.utils.plot_utils import cogformer_fm_colors
 
-import sys
-sys.path.insert(0, str(Path(__file__).parent.parent))
-from configs import MODELS as _BASE_MODELS
-from utils import reshape_bf_to_cf
+from ..configs import MODELS as _BASE_MODELS
+from ..utils import reshape_bf_to_cf
 
 
 _CF_PRED_FILENAMES = {

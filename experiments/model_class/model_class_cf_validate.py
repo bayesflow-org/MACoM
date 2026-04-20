@@ -22,10 +22,8 @@ from cogformer.diagnostics.plot.adaptive_metrics import adaptive_metrics as plot
 from cogformer.diagnostics.metric.adaptive_metrics import adaptive_metrics as compute_adaptive_metrics
 from cogformer.utils.plot_utils import cogformer_mc_colors
 
-import sys
-sys.path.insert(0, str(Path(__file__).parent.parent))
-from configs import MODELS as _BASE_MODELS
-from utils import infer_free_fixed_intrinsics, build_encoder_input_dim
+from ..configs import MODELS as _BASE_MODELS
+from ..utils import infer_free_fixed_intrinsics, build_encoder_input_dim
 
 
 def load_bf_validation_data(

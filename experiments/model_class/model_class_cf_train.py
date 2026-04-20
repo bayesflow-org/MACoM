@@ -22,10 +22,8 @@ from cogformer.networks.transformers.cogformer import CogFormer
 from cogformer.diagnostics.plot.adaptive_recovery import adaptive_recovery
 from cogformer.utils.plot_utils import cogformer_fm_colors
 
-import sys
-sys.path.insert(0, str(Path(__file__).parent.parent))
-from configs import MODELS as _BASE_MODELS
-from utils import build_encoder_input_dim
+from ..configs import MODELS as _BASE_MODELS
+from ..utils import build_encoder_input_dim
 
 
 # val_step uses the "interaction" benchmark config as the fixed validation design
@@ -217,7 +215,7 @@ def parse_args():
     parser.add_argument("--decoder_num_layers", type=int, default=8)
     parser.add_argument("--encoder_num_heads", type=int, default=8)
     parser.add_argument("--decoder_num_heads", type=int, default=8)
-    parser.add_argument("--projection_dim", type=int, default=256)
+    parser.add_argument("--proj_dim", type=int, default=256)
     parser.add_argument("--num_seeds", type=int, default=32)
     parser.add_argument("--seed_dim", type=int, default=128)
     parser.add_argument("--model_embed_dim", type=int, default=8)
@@ -299,7 +297,7 @@ if __name__ == "__main__":
         "decoder_num_heads": args.decoder_num_heads,
         "num_seeds": args.num_seeds,
         "seed_dim": args.seed_dim,
-        "proj_dim": args.projection_dim,
+        "proj_dim": args.proj_dim,
         "dropout": args.dropout,
         "layer_dropout": args.layer_dropout,
         "time_embedding_dim": args.time_embedding_dim,

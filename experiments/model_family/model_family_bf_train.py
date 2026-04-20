@@ -9,9 +9,7 @@ from pathlib import Path
 
 from cogformer.simulator.model_family import ModelFamily
 
-import sys
-sys.path.insert(0, str(Path(__file__).parent.parent))
-from configs import MODELS as _BASE_MODELS
+from ..configs import MODELS as _BASE_MODELS
 
 
 # Per-model CASE_CONFIGS ─────────────────────────────────────────────────────

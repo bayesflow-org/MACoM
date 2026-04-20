@@ -21,10 +21,8 @@ from cogformer.diagnostics.plot.adaptive_coverage import adaptive_coverage
 from cogformer.diagnostics.plot.adaptive_metrics import adaptive_metrics as plot_adaptive_metrics
 from cogformer.utils.plot_utils import cogformer_fm_colors
 
-import sys
-sys.path.insert(0, str(Path(__file__).parent.parent))
-from configs import MODELS as _BASE_MODELS, GLOBAL_PARAMS, GLOBAL_VARIABLE_NAMES
-from utils import add_global_params, strip_global_params, build_encoder_input_dim
+from ..configs import MODELS as _BASE_MODELS, GLOBAL_PARAMS, GLOBAL_VARIABLE_NAMES
+from ..utils import add_global_params, strip_global_params, build_encoder_input_dim
 
 
 # CF train uses global params (pi) and adds script-specific train keys
@@ -44,7 +42,7 @@ def _build_train_config(base: dict, val_epoch_interval: int, wandb_project: str,
 MODELS = {
     "ddm": _build_train_config(
         _BASE_MODELS["ddm"],
-        val_epoch_interval=500,
+        val_epoch_interval=1000,
         wandb_project="cogformer-fm-ddm",
         checkpoint_dir="./outputs/checkpoints/model_family/cf/ddm/",
         checkpoint_prefix="cogformer_mixed_attn",
@@ -52,7 +50,7 @@ MODELS = {
     ),
     "cdm": _build_train_config(
         _BASE_MODELS["cdm"],
-        val_epoch_interval=500,
+        val_epoch_interval=1000,
         wandb_project="cogformer-fm-cdm",
         checkpoint_dir="./outputs/checkpoints/model_family/cf/cdm/",
         checkpoint_prefix="cogformer_cdm_mixed_attn",
@@ -60,7 +58,7 @@ MODELS = {
     ),
     "rdm": _build_train_config(
         _BASE_MODELS["rdm"],
-        val_epoch_interval=500,
+        val_epoch_interval=1000,
         wandb_project="cogformer-fm-rdm",
         checkpoint_dir="./outputs/checkpoints/model_family/cf/rdm/",
         checkpoint_prefix="cogformer_rdm_mixed_attn",
@@ -373,12 +371,6 @@ if __name__ == "__main__":
         "fixed_intrinsics": model_cfg["fixed_params"],
         "fixed_values": model_cfg["default_fixed_values"],
         "global_params": model_cfg.get("global_params"),
-    }
-
-    mask_randomizer_kwargs = {
-        "free_intrinsics": ["v", "a", "z", "tau"],
-        "fixed_intrinsics": ["s_v", "s_tau"],
-        "fixed_values": {"s_v": 0, "s_tau": 0},
     }
 
     val_params_kwargs = {

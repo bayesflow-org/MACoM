@@ -7,15 +7,18 @@ import torch
 import matplotlib.pyplot as plt
 
 from cogformer.simulator import ModelFamily, ModelClass
+from cogformer.simulator.benchmarks.ssms.ddm import DDM
+from cogformer.simulator.benchmarks.ssms.rdm import RDM
+from cogformer.simulator.benchmarks.ssms.cdm import CDM
+from cogformer.simulator.benchmarks.ssms.priors import ddm_priors, rdm_priors, cdm_priors
+from cogformer.simulator.benchmarks.ssms.link_funs import ddm_link_fun, rdm_link_fun, cdm_link_fun
 from cogformer.simulator.design_utils import build_parameter_mask, build_design_matrix, build_random_design_config
 from cogformer.adapter import Adapter
 from cogformer.networks.transformers.cogformer import CogFormer
 from cogformer.diagnostics.plot.ensemble_metrics import ensemble_metrics
 
-import sys
-sys.path.insert(0, str(Path(__file__).parent.parent))
-from configs import MODELS as _BASE_MODELS, ALL_VARIABLE_NAMES as ALL_PARAMS_VARIABLE_NAMES
-from utils import infer_free_fixed_intrinsics, build_encoder_input_dim
+from ..configs import MODELS as _BASE_MODELS, ALL_VARIABLE_NAMES as ALL_PARAMS_VARIABLE_NAMES
+from ..utils import infer_free_fixed_intrinsics, build_encoder_input_dim
 
 
 DEFAULT_FIXED_VALUES = {
@@ -60,12 +63,22 @@ def main():
     rng = np.random.default_rng(args.seed)
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
+    def _no_pi(d: dict) -> dict:
+        return {k: v for k, v in d.items() if k != "pi"}
+
     model_families = {
-        "DDM": ModelFamily(model=DDM(), name="DDM", prior=ddm_priors()),
-        "RDM": ModelFamily(model=RDM(), name="RDM", prior=rdm_priors()),
-        "CDM": ModelFamily(model=CDM(), name="CDM", prior=cdm_priors()),
+        "DDM": ModelFamily(model=DDM(), name="DDM", prior=_no_pi(ddm_priors()),
+                           intrinsic_params=_BASE_MODELS["ddm"]["intrinsic_params"]),
+        "RDM": ModelFamily(model=RDM(), name="RDM", prior=_no_pi(rdm_priors()),
+                           intrinsic_params=_BASE_MODELS["rdm"]["intrinsic_params"]),
+        "CDM": ModelFamily(model=CDM(), name="CDM", prior=_no_pi(cdm_priors()),
+                           intrinsic_params=_BASE_MODELS["cdm"]["intrinsic_params"]),
     }
-    link_funs = {"DDM": ddm_link_fun(), "RDM": rdm_link_fun(), "CDM": cdm_link_fun()}
+    link_funs = {
+        "DDM": _no_pi(ddm_link_fun()),
+        "RDM": _no_pi(rdm_link_fun()),
+        "CDM": _no_pi(cdm_link_fun()),
+    }
     model_class = ModelClass(model_families=model_families, link_funs=link_funs)
     adapter = Adapter()
 
@@ -152,6 +165,7 @@ def main():
                 samples["param_matrices"],
                 samples["param_masks"],
             )
+        samples["n_params"] = n_global_params
 
         adapted = adapter.adapt(samples, device=device)
 

@@ -42,9 +42,7 @@ from cogformer.simulator.design_utils import build_parameter_mask, build_design_
 from cogformer.diagnostics.plot.adaptive_posterior import adaptive_posterior
 from cogformer.utils.plot_utils import cogformer_fm_colors, credible_interval
 
-import sys
-sys.path.insert(0, str(Path(__file__).parent.parent))
-from utils import build_encoder_input_dim
+from ..utils import build_encoder_input_dim
 
 
 def parse_args():

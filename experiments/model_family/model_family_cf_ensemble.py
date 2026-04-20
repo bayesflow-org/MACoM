@@ -15,10 +15,8 @@ from cogformer.diagnostics.plot.ensemble_coverage import ensemble_coverage
 from cogformer.diagnostics.plot.ensemble_ecdf import ensemble_ecdf
 from cogformer.utils.plot_utils import cogformer_fm_colors
 
-import sys
-sys.path.insert(0, str(Path(__file__).parent.parent))
-from configs import MODELS as _BASE_MODELS, GLOBAL_PARAMS, GLOBAL_VARIABLE_NAMES
-from utils import add_global_params, strip_global_params, infer_free_fixed_intrinsics, build_encoder_input_dim
+from ..configs import MODELS as _BASE_MODELS, GLOBAL_PARAMS, GLOBAL_VARIABLE_NAMES
+from ..utils import add_global_params, strip_global_params, infer_free_fixed_intrinsics, build_encoder_input_dim
 
 
 _CASE_LABELS = {

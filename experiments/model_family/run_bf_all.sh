@@ -17,7 +17,7 @@ export PYTHONPATH="${PROJECT_ROOT}${PYTHONPATH:+:$PYTHONPATH}"
 
 MODELS=("ddm" "cdm" "rdm")
 CASES=("intercept_only" "fixed" "regressed" "fixed_regressed" "interaction" "full")
-TRAIN_SCRIPT="experiments/model_family/model_family_bf_train.py"
+TRAIN_MODULE="experiments.model_family.model_family_bf_train"
 TRAIN_ARGS=("$@")
 
 SKIPPED=()
@@ -40,7 +40,7 @@ for model in "${MODELS[@]}"; do
         echo "------------------------------------------------------------"
         echo " SIMULATOR CHECK  :  $tag"
         echo "------------------------------------------------------------"
-        if ! python "$TRAIN_SCRIPT" --model "$model" --case "$case" --test; then
+        if ! python -m "$TRAIN_MODULE" --model "$model" --case "$case" --test; then
             echo "  [SKIP] Simulator check failed — $tag"
             SKIPPED+=("$tag")
             continue
@@ -50,7 +50,7 @@ for model in "${MODELS[@]}"; do
         echo "------------------------------------------------------------"
         echo " TRAINING         :  $tag"
         echo "------------------------------------------------------------"
-        if python "$TRAIN_SCRIPT" --model "$model" --case "$case" "${TRAIN_ARGS[@]}"; then
+        if python -m "$TRAIN_MODULE" --model "$model" --case "$case" "${TRAIN_ARGS[@]}"; then
             PASSED+=("$tag")
         else
             echo "  [FAIL] Training failed — $tag"

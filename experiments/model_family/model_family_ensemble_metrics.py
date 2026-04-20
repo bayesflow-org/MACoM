@@ -12,10 +12,8 @@ from cogformer.adapter import Adapter
 from cogformer.networks.transformers.cogformer import CogFormer
 from cogformer.diagnostics.plot.ensemble_metrics import ensemble_metrics
 
-import sys
-sys.path.insert(0, str(Path(__file__).parent.parent))
-from configs import MODELS as _BASE_MODELS
-from utils import infer_free_fixed_intrinsics, build_encoder_input_dim
+from ..configs import MODELS as _BASE_MODELS
+from ..utils import infer_free_fixed_intrinsics, build_encoder_input_dim
 
 
 _OUTDIRS = {

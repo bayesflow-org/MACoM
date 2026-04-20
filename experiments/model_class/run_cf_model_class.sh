@@ -64,9 +64,9 @@ CKPT_PATH="${CKPT_DIR}/${CKPT_FILE}"
 # ============================================================
 # Scripts
 # ============================================================
-TRAIN_SCRIPT="experiments/model_class/model_class_cf_train.py"
-VALIDATE_SCRIPT="experiments/model_class/model_class_cf_validate.py"
-ENSEMBLE_SCRIPT="experiments/model_class/model_class_cf_ensemble.py"
+TRAIN_MODULE="experiments.model_class.model_class_cf_train"
+VALIDATE_MODULE="experiments.model_class.model_class_cf_validate"
+ENSEMBLE_MODULE="experiments.model_class.model_class_cf_ensemble"
 
 # Shared architecture args — reused verbatim across train / validate / ensemble
 ARCH_ARGS=(
@@ -74,7 +74,7 @@ ARCH_ARGS=(
     --decoder_num_layers "$DECODER_LAYERS"
     --encoder_num_heads  "$ENCODER_HEADS"
     --decoder_num_heads  "$DECODER_HEADS"
-    --projection_dim     "$PROJ_DIM"
+    --proj_dim           "$PROJ_DIM"
     --num_seeds          "$NUM_SEEDS"
     --seed_dim           "$SEED_DIM"
     --model_embed_dim    "$MODEL_EMBED_DIM"
@@ -97,7 +97,7 @@ echo ""
 echo "------------------------------------------------------------"
 echo " TRAIN"
 echo "------------------------------------------------------------"
-python "$TRAIN_SCRIPT" \
+python -m "$TRAIN_MODULE" \
     "${ARCH_ARGS[@]}" \
     --lr               "$LR" \
     --epochs           "$EPOCHS" \
@@ -116,7 +116,7 @@ echo ""
 echo "------------------------------------------------------------"
 echo " VALIDATE"
 echo "------------------------------------------------------------"
-python "$VALIDATE_SCRIPT" \
+python -m "$VALIDATE_MODULE" \
     --checkpoint       "$CKPT_PATH" \
     "${ARCH_ARGS[@]}" \
     --batch_size       "$VAL_BATCH" \
@@ -128,7 +128,7 @@ echo ""
 echo "------------------------------------------------------------"
 echo " ENSEMBLE"
 echo "------------------------------------------------------------"
-python "$ENSEMBLE_SCRIPT" \
+python -m "$ENSEMBLE_MODULE" \
     --checkpoint       "$CKPT_PATH" \
     "${ARCH_ARGS[@]}" \
     --batch_size       "$VAL_BATCH" \
