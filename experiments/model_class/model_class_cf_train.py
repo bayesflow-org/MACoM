@@ -240,6 +240,12 @@ def parse_args():
     parser.add_argument("--fm_sample_steps", type=int, default=200)
     parser.add_argument("--fm_num_samples", type=int, default=100)
 
+    # Design space
+    parser.add_argument("--max_num_regressors", type=int, default=5)
+    parser.add_argument("--max_num_categories", type=int, default=5)
+    parser.add_argument("--keep_intercept", action="store_true", default=True)
+    parser.add_argument("--add_interaction", action="store_true", default=True)
+
     return parser.parse_args()
 
 
@@ -249,16 +255,16 @@ if __name__ == "__main__":
     logging.basicConfig(level=logging.INFO)
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-    max_num_regressors = 2
-    max_num_categories = 2
-    keep_intercept = True
+    max_num_regressors = args.max_num_regressors
+    max_num_categories = args.max_num_categories
+    keep_intercept = args.keep_intercept
     num_models = 3
 
     model_family_config = {
         "max_num_regressors": max_num_regressors,
         "max_num_categories": max_num_categories,
         "keep_intercept": keep_intercept,
-        "add_interaction": True,
+        "add_interaction": args.add_interaction,
     }
 
     train_sample_config = {

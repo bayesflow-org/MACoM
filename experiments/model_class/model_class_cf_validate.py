@@ -105,8 +105,8 @@ def parse_args():
     # Validation settings
     p.add_argument("--batch_size", type=int, default=200)
     p.add_argument("--num_obs", type=int, default=500)
-    p.add_argument("--max_num_regressors", type=int, default=2)
-    p.add_argument("--max_num_categories", type=int, default=2)
+    p.add_argument("--max_num_regressors", type=int, default=5)
+    p.add_argument("--max_num_categories", type=int, default=5)
     p.add_argument("--keep_intercept", action="store_true", default=True)
     p.add_argument("--add_interaction", action="store_true", default=True)
 

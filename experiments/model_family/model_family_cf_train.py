@@ -346,8 +346,8 @@ def parse_args():
     parser.add_argument("--val_epoch_interval", type=int, default=None,
                         help="Override the model-default validation interval (epochs between val steps).")
     # Design space
-    parser.add_argument("--max_num_regressors", type=int, default=2)
-    parser.add_argument("--max_num_categories", type=int, default=2)
+    parser.add_argument("--max_num_regressors", type=int, default=5)
+    parser.add_argument("--max_num_categories", type=int, default=5)
     parser.add_argument("--keep_intercept", action="store_true", default=True)
     parser.add_argument("--add_interaction", action="store_true", default=True)
     return parser.parse_args()
