@@ -345,6 +345,11 @@ def parse_args():
                              "in estimation. Use --no-estimate-global-params to disable.")
     parser.add_argument("--val_epoch_interval", type=int, default=None,
                         help="Override the model-default validation interval (epochs between val steps).")
+    # Design space
+    parser.add_argument("--max_num_regressors", type=int, default=2)
+    parser.add_argument("--max_num_categories", type=int, default=2)
+    parser.add_argument("--keep_intercept", action="store_true", default=True)
+    parser.add_argument("--add_interaction", action="store_true", default=True)
     return parser.parse_args()
 
 
@@ -360,15 +365,15 @@ if __name__ == "__main__":
         model_cfg["val_epoch_interval"] = args.val_epoch_interval
     use_wandb = args.use_wandb
 
-    max_num_regressors = 2
-    max_num_categories = 2
-    keep_intercept = True
+    max_num_regressors = args.max_num_regressors
+    max_num_categories = args.max_num_categories
+    keep_intercept = args.keep_intercept
 
     model_family_config = {
         "max_num_regressors": max_num_regressors,
         "max_num_categories": max_num_categories,
         "keep_intercept": keep_intercept,
-        "add_interaction": True,
+        "add_interaction": args.add_interaction,
     }
 
     train_params_kwargs = {
