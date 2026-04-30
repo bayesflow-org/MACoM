@@ -47,3 +47,29 @@ def lba_link_fun():
         "s_v": exponential,
         "s_tau": sigmoid
     }
+
+def lca_link_fun():
+    return {
+        "v":      shifted_softplus,
+        "v_diff": shifted_softplus,
+        "k":      shifted_softplus,
+        "beta":   shifted_softplus,
+        "a":      shifted_softplus,
+        "tau":    shifted_softplus,
+        "s_v":    shifted_softplus,
+        "s_tau":  shifted_softplus,
+        "pi":     lambda x: x,
+    }
+
+def ffi_link_fun():
+    return {
+        "v":      shifted_softplus,
+        "v_diff": shifted_softplus,
+        "k":      shifted_softplus,
+        "beta":   shifted_softplus,
+        "a":      shifted_softplus,
+        "tau":    shifted_softplus,
+        "s_v":    shifted_softplus,
+        "s_tau":  shifted_softplus,
+        "pi":     lambda x: x,
+    }
