@@ -105,8 +105,8 @@ def build_random_design_config(
     free_intrinsics: list[str] | set[str] | None = None,
     fixed_intrinsics: list[str] | set[str] | None = None,
     keep_intercept: bool = False,
-    free_prob: float = 0.5,
-    intercept_prob: float = 0.5,
+    free_prob: float | None = None,
+    intercept_prob: float | None = None,
     add_interaction: bool = False,
     allowed_slope_patterns: list[frozenset[str]] | None = None,
     global_params: list[str] | set[str] | None = None,
@@ -122,7 +122,15 @@ def build_random_design_config(
     - Fixed intrinsics are always included in the intercept and never appear in slope terms.
     - Global params are always included in the intercept and never appear in slope terms.
       Unlike fixed intrinsics, their intercept values are sampled from their prior.
+    - When `free_prob` or `intercept_prob` is None, each is sampled independently
+      from Beta(2, 2), covering the full [0, 1] range while concentrating probability
+      near the centre to expose the model to the full design space during training.
     """
+    if free_prob is None:
+        free_prob = float(np.random.beta(2, 2))
+    if intercept_prob is None:
+        intercept_prob = float(np.random.beta(2, 2))
+
     free_set = None if free_intrinsics is None else set(free_intrinsics)
     fixed_set: set[str] = set() if fixed_intrinsics is None else set(fixed_intrinsics)
     global_set: set[str] = set() if global_params is None else set(global_params)
@@ -229,8 +237,8 @@ def build_random_parameter_mask(
     max_num_categories: int = 4,
     free_intrinsics: list[str] | set[str] | None = None,
     fixed_intrinsics: list[str] | set[str] | None = None,
-    free_prob: float = 0.5,
-    intercept_prob: float = 0.5,
+    free_prob: float | None = None,
+    intercept_prob: float | None = None,
     keep_intercept: bool = False,
     add_interaction: bool = False,
     allowed_slope_patterns: list[frozenset[str]] | None = None,

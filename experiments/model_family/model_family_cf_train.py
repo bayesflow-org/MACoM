@@ -343,6 +343,8 @@ def parse_args():
                         default=True,
                         help="Include global parameters (e.g. contamination probability pi) "
                              "in estimation. Use --no-estimate-global-params to disable.")
+    parser.add_argument("--val_epoch_interval", type=int, default=None,
+                        help="Override the model-default validation interval (epochs between val steps).")
     return parser.parse_args()
 
 
@@ -353,6 +355,9 @@ if __name__ == "__main__":
     model_cfg = MODELS[args.model]
     if not args.estimate_global_params:
         model_cfg = strip_global_params(model_cfg)
+    if args.val_epoch_interval is not None:
+        model_cfg = dict(model_cfg)
+        model_cfg["val_epoch_interval"] = args.val_epoch_interval
     use_wandb = args.use_wandb
 
     max_num_regressors = 2
