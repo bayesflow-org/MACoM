@@ -1,5 +1,5 @@
-# CogFormer: Learn All Your Models Once
-Jerry M. Huang, Lukas Schumacher, Niek Stevenson, and Stefan T. Radev
+# CogFormer 2: Learn All Your Models More
+Jerry M. Huang, Lukas Schumacher, Niek Stevenson, Mischa von Krause, SgSand Stefan T. Radev
 
 
 This repository contains the code and experiments for the paper **CogFormer: Learn All Your Models Once** (2026).
