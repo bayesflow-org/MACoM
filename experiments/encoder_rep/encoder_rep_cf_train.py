@@ -1,0 +1,425 @@
+import torch
+import wandb
+import logging
+import argparse
+from pathlib import Path
+from tqdm.auto import tqdm
+from torch.optim import AdamW
+from torch.optim.lr_scheduler import CosineAnnealingLR
+
+import numpy as np
+import matplotlib.pyplot as plt
+np.set_printoptions(suppress=True)
+
+from cogformer.simulator import ModelFamily, ModelClass
+from cogformer.simulator.benchmarks.ssms.ddm import DDM
+from cogformer.simulator.benchmarks.ssms.rdm import RDM
+from cogformer.simulator.benchmarks.ssms.cdm import CDM
+from cogformer.simulator.benchmarks.ssms.lba import LBA
+from cogformer.simulator.benchmarks.ssms.priors import ddm_priors, rdm_priors, cdm_priors, lba_priors
+from cogformer.simulator.benchmarks.ssms.link_funs import ddm_link_fun, rdm_link_fun, cdm_link_fun, lba_link_fun
+from cogformer.adapter import Adapter
+from cogformer.networks.transformers.cogformer import CogFormer
+from cogformer.diagnostics.plot.adaptive_recovery import adaptive_recovery
+from cogformer.utils.plot_utils import cogformer_mc_colors
+
+from ..configs import MODELS as _BASE_MODELS
+from ..utils import add_global_params, build_encoder_input_dim
+
+
+GLOBAL_PARAMS = ["pi"]
+GLOBAL_VARIABLE_NAMES = [r"$\pi$"]
+
+_MODELS_WITH_PI = {
+    m: add_global_params(cfg, GLOBAL_PARAMS, GLOBAL_VARIABLE_NAMES)
+    for m, cfg in _BASE_MODELS.items()
+}
+
+MODEL_CONFIGS = {
+    m.upper(): {
+        "intrinsic_params": cfg["intrinsic_params"],
+        "variable_names": cfg["variable_names"],
+        "val_design_config": cfg["benchmark_configs"]["interaction"],
+    }
+    for m, cfg in _MODELS_WITH_PI.items()
+}
+
+
+class CogFormerTrainer:
+    def __init__(self, net, model_class, adapter, use_wandb=False):
+        self.net = net
+        self.model_class = model_class
+        self.adapter = adapter
+        self.use_wandb = use_wandb
+
+    def train(self, train_config, val_config, checkpoint_path="cogformer_encoder_rep_fm.pt", fig_path="fig"):
+        global_step = 0
+        optimizer = AdamW(self.net.parameters(), lr=train_config["learning_rate"])
+        scheduler = CosineAnnealingLR(optimizer, T_max=train_config["epochs"])
+
+        for epoch in range(train_config["epochs"]):
+            pbar = tqdm(
+                total=train_config["steps_per_epoch"],
+                desc=f"Epoch {epoch + 1}/{train_config['epochs']}",
+                miniters=100,
+            )
+            for _ in range(train_config["steps_per_epoch"]):
+                loss, current_lr = self.train_step(
+                    config=train_config,
+                    optimizer=optimizer,
+                    scheduler=scheduler,
+                )
+                if self.use_wandb:
+                    wandb.log(
+                        {"train/loss": loss, "opt/lr": current_lr, "epoch": epoch + 1},
+                        step=global_step,
+                    )
+                global_step += 1
+                pbar.set_postfix(loss=f"{loss:.4f}", lr=f"{current_lr:.2e}")
+                pbar.update(1)
+
+            if (epoch + 1) % 1000 == 0:
+                self.val_step(val_config, global_step, fig_path)
+
+            scheduler.step()
+            pbar.close()
+
+        checkpoint_dir = Path("./outputs/checkpoints/encoder_rep/cf/")
+        checkpoint_dir.mkdir(parents=True, exist_ok=True)
+        torch.save(self.net.state_dict(), checkpoint_dir / checkpoint_path)
+        logging.info(f"[saved] {checkpoint_dir / checkpoint_path}")
+
+    def train_step(self, config, optimizer, scheduler):
+        train_samples = self.model_class.batch_sample(
+            **config["model_family_config"],
+            **config["train_sample_config"],
+            batch_size=config["batch_size"],
+            flatten_param_outputs=True,
+        )
+
+        adapted = self.adapter.adapt(train_samples)
+
+        optimizer.zero_grad()
+
+        pred_velocity, target_velocity = self.net(
+            adapted["param_matrices"][..., None],
+            adapted["input_data"],
+            adapted["param_indices"],
+            adapted["regressor_indices"],
+            adapted["param_masks"],
+            model_ids=adapted["model_ids"],
+        )
+
+        L = self.net.compute_loss(pred_velocity, target_velocity, adapted["param_masks"])
+        L.backward()
+
+        if config["gradient_clip_norm"] is not None:
+            torch.nn.utils.clip_grad_norm_(self.net.parameters(), config["gradient_clip_norm"])
+
+        optimizer.step()
+        loss = L.detach().item()
+        current_lr = scheduler.get_last_lr()[0]
+        return loss, current_lr
+
+    @torch.no_grad()
+    def val_step(self, config, global_step, fig_path):
+        self.net.eval()
+
+        model_family_config = config["model_family_config"]
+        n_global_params = self.model_class.n_global_params
+        colors = cogformer_mc_colors()
+
+        figures_dir = Path("./outputs/figures/encoder_rep/cf/recovery")
+        figures_dir.mkdir(parents=True, exist_ok=True)
+
+        for model_name, model_cfg in MODEL_CONFIGS.items():
+            mf = self.model_class.model_families[model_name]
+            model_id = self.model_class.model_index[model_name]
+            link_fun = self.model_class.link_funs[model_name]
+
+            intrinsic_params = model_cfg["intrinsic_params"]
+            variable_names = model_cfg["variable_names"]
+            design_config = model_cfg["val_design_config"]
+
+            test_samples = mf.batch_sample(
+                design_config=design_config,
+                batch_size=config["batch_size"],
+                num_obs=config["num_obs"],
+                max_num_regressors=model_family_config["max_num_regressors"],
+                max_num_categories=model_family_config["max_num_categories"],
+                keep_intercept=model_family_config["keep_intercept"],
+                flatten_param_outputs=True,
+                link_fun=link_fun,
+            )
+            test_samples["model_ids"] = np.full(config["batch_size"], model_id, dtype=np.int64)
+
+            test_samples["param_matrices"], test_samples["param_masks"] = \
+                self.model_class.lift_to_global_space(
+                    model_name,
+                    test_samples["param_matrices"],
+                    test_samples["param_masks"],
+                )
+            test_samples["n_params"] = n_global_params
+
+            adapted = self.adapter.adapt(test_samples)
+
+            pred_set = self.net.sample(
+                adapted["input_data"],
+                adapted["param_indices"],
+                adapted["regressor_indices"],
+                adapted["param_masks"],
+                steps=config["fm_sample_steps"],
+                num_samples=config["fm_num_samples"],
+                model_ids=adapted["model_ids"],
+            )
+
+            batch_size = config["batch_size"]
+            global_indices = self.model_class.local_to_global[model_name]
+
+            true_set = adapted["param_matrices"].detach().cpu().numpy()
+            n_rows = true_set.shape[1] // n_global_params
+            true_set = true_set.reshape(batch_size, n_rows, n_global_params)[:, :, global_indices]
+            pred_set = pred_set.reshape(batch_size, config["fm_num_samples"], n_rows, n_global_params)[:, :, :, global_indices]
+
+            params_mask = adapted["param_masks"].detach().cpu().numpy()
+            params_mask = params_mask.reshape(batch_size, n_rows, n_global_params)[0][:, global_indices]
+
+            recovery_fig = adaptive_recovery(
+                true=true_set,
+                pred=pred_set,
+                design_config=design_config,
+                intrinsic_params=intrinsic_params,
+                max_num_categories=model_family_config["max_num_categories"],
+                parameter_mask=params_mask,
+                variable_names=variable_names,
+                intercept_color=colors["intercept"],
+                main_effect_color=colors["main_effect"],
+                interaction_color=colors["interaction"],
+            )
+
+            fig_name = f"{model_name.lower()}_{fig_path}_recovery.pdf"
+            recovery_fig.savefig(figures_dir / fig_name, bbox_inches="tight")
+            logging.info(f"[saved] {figures_dir / fig_name}")
+
+            if self.use_wandb:
+                wandb.log({f"val/{model_name}/recovery": wandb.Image(recovery_fig)}, step=global_step)
+
+            plt.close(recovery_fig)
+
+        self.net.train()
+
+    @staticmethod
+    def finish():
+        wandb.finish()
+
+
+def parse_args():
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--use_wandb", action="store_true")
+
+    # Architecture
+    parser.add_argument("--encoder_num_layers", type=int, default=8)
+    parser.add_argument("--decoder_num_layers", type=int, default=8)
+    parser.add_argument("--encoder_num_heads", type=int, default=8)
+    parser.add_argument("--decoder_num_heads", type=int, default=8)
+    parser.add_argument("--proj_dim", type=int, default=256)
+    parser.add_argument("--num_seeds", type=int, default=32)
+    parser.add_argument("--seed_dim", type=int, default=128)
+    parser.add_argument("--model_embed_dim", type=int, default=8)
+    parser.add_argument("--time_embedding_dim", type=int, default=32)
+    parser.add_argument("--pos_embedding_dim", type=int, default=32)
+
+    # Optimizer
+    parser.add_argument("--lr", type=float, default=1e-4)
+    parser.add_argument("--dropout", type=float, default=0.05)
+    parser.add_argument("--layer_dropout", type=float, default=0.05)
+
+    # Training schedule
+    parser.add_argument("--min_num_obs", type=int, default=200)
+    parser.add_argument("--max_num_obs", type=int, default=500)
+    parser.add_argument("--val_num_obs", type=int, default=500)
+    parser.add_argument("--train_batch_size", type=int, default=64)
+    parser.add_argument("--val_batch_size", type=int, default=100)
+    parser.add_argument("--epochs", type=int, default=5000)
+    parser.add_argument("--steps_per_epoch", type=int, default=100)
+
+    # Flow matching
+    parser.add_argument("--fm_sample_steps", type=int, default=200)
+    parser.add_argument("--fm_num_samples", type=int, default=100)
+
+    # Design space
+    parser.add_argument("--max_num_regressors", type=int, default=5)
+    parser.add_argument("--max_num_categories", type=int, default=5)
+    parser.add_argument("--keep_intercept", action="store_true", default=True)
+    parser.add_argument("--add_interaction", action="store_true", default=True)
+
+    return parser.parse_args()
+
+
+if __name__ == "__main__":
+    args = parse_args()
+
+    logging.basicConfig(level=logging.INFO)
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
+    max_num_regressors = args.max_num_regressors
+    max_num_categories = args.max_num_categories
+    keep_intercept = args.keep_intercept
+    num_models = 4
+
+    model_family_config = {
+        "max_num_regressors": max_num_regressors,
+        "max_num_categories": max_num_categories,
+        "keep_intercept": keep_intercept,
+        "add_interaction": args.add_interaction,
+    }
+
+    train_sample_config = {
+        "min_num_regressors": 0,
+        "min_num_obs": args.min_num_obs,
+        "max_num_obs": args.max_num_obs,
+        "fixed_config": False,
+    }
+
+    encoder_input_dim = build_encoder_input_dim(max_num_regressors, max_num_categories, keep_intercept)
+
+    train_config = {
+        "epochs": args.epochs,
+        "batch_size": args.train_batch_size,
+        "steps_per_epoch": args.steps_per_epoch,
+        "learning_rate": args.lr,
+        "gradient_clip_norm": 5.0,
+        "device": device,
+        "model_family_config": model_family_config,
+        "train_sample_config": train_sample_config,
+    }
+
+    val_config = {
+        "fm_sample_steps": args.fm_sample_steps,
+        "fm_num_samples": args.fm_num_samples,
+        "batch_size": args.val_batch_size,
+        "num_obs": args.val_num_obs,
+        "model_family_config": model_family_config,
+    }
+
+    cogformer_config = {
+        "encoder_input_dim": encoder_input_dim,
+        "encoder_num_layers": args.encoder_num_layers,
+        "decoder_num_layers": args.decoder_num_layers,
+        "encoder_num_heads": args.encoder_num_heads,
+        "decoder_num_heads": args.decoder_num_heads,
+        "num_seeds": args.num_seeds,
+        "seed_dim": args.seed_dim,
+        "proj_dim": args.proj_dim,
+        "dropout": args.dropout,
+        "layer_dropout": args.layer_dropout,
+        "time_embedding_dim": args.time_embedding_dim,
+        "pos_embedding_dim": args.pos_embedding_dim,
+        "num_models": num_models,
+        "model_embed_dim": args.model_embed_dim,
+        "decoder_layer_design": "mixed_attention",
+        "decoder_layer_kwargs": {"mab_first": True},
+    }
+
+    logging.info(
+        f"Training Encoder Rep CogFormer (DDM+RDM+CDM+LBA): {train_config['epochs']} epochs, "
+        f"{train_config['steps_per_epoch']} steps/epoch, "
+        f"batch_size={train_config['batch_size']}, device={device}"
+    )
+
+    model_families = {
+        "DDM": ModelFamily(
+            model=DDM(), name="DDM",
+            prior=ddm_priors(),
+            intrinsic_params=_MODELS_WITH_PI["ddm"]["intrinsic_params"],
+            mask_randomizer_kwargs={
+                "free_intrinsics": ["v", "a", "z", "tau"],
+                "fixed_intrinsics": ["s_v", "s_tau"], "fixed_values": {},
+                "global_params": GLOBAL_PARAMS,
+            },
+        ),
+        "RDM": ModelFamily(
+            model=RDM(), name="RDM",
+            prior=rdm_priors(),
+            intrinsic_params=_MODELS_WITH_PI["rdm"]["intrinsic_params"],
+            mask_randomizer_kwargs={
+                "free_intrinsics": ["v", "v_diff", "a", "tau"],
+                "fixed_intrinsics": ["s_v", "s_tau"], "fixed_values": {},
+                "global_params": GLOBAL_PARAMS,
+            },
+        ),
+        "CDM": ModelFamily(
+            model=CDM(), name="CDM",
+            prior=cdm_priors(),
+            intrinsic_params=_MODELS_WITH_PI["cdm"]["intrinsic_params"],
+            mask_randomizer_kwargs={
+                "free_intrinsics": ["v", "v_theta", "a", "tau"],
+                "fixed_intrinsics": ["s_v", "s_tau"], "fixed_values": {},
+                "global_params": GLOBAL_PARAMS,
+            },
+        ),
+        "LBA": ModelFamily(
+            model=LBA(), name="LBA",
+            prior=lba_priors(),
+            intrinsic_params=_MODELS_WITH_PI["lba"]["intrinsic_params"],
+            mask_randomizer_kwargs={
+                "free_intrinsics": ["v", "v_diff", "a", "tau"],
+                "fixed_intrinsics": ["s_v", "s_tau"], "fixed_values": {},
+                "global_params": GLOBAL_PARAMS,
+            },
+        ),
+    }
+
+    link_funs = {
+        "DDM": ddm_link_fun(),
+        "RDM": rdm_link_fun(),
+        "CDM": cdm_link_fun(),
+        "LBA": lba_link_fun(),
+    }
+
+    model_class = ModelClass(model_families=model_families, link_funs=link_funs)
+    adapter = Adapter()
+    cogformer = CogFormer(**cogformer_config).to(device).train()
+
+    if args.use_wandb:
+        wandb.init(
+            project="cogformer-encoder-rep",
+            tags=["CogFormer", "ModelClass", "DDM", "RDM", "CDM", "LBA"],
+            config={**train_config, "cogformer": cogformer_config},
+        )
+
+    checkpoint_path = (
+        f"cogformer_encoder_rep_fm"
+        f"_l{cogformer_config['decoder_num_layers']}"
+        f"_h{cogformer_config['decoder_num_heads']}"
+        f"_p{cogformer_config['proj_dim']}"
+        f"_s{cogformer_config['num_seeds']}"
+        f"_d{cogformer_config['seed_dim']}"
+        f"_b{train_config['batch_size']}"
+        f"_e{train_config['epochs']}"
+        f"_t{train_config['steps_per_epoch']}.pt"
+    )
+
+    fig_path = (
+        f"encoder_rep_fm"
+        f"_l{cogformer_config['decoder_num_layers']}"
+        f"_h{cogformer_config['decoder_num_heads']}"
+        f"_p{cogformer_config['proj_dim']}"
+    )
+
+    trainer = CogFormerTrainer(
+        net=cogformer,
+        model_class=model_class,
+        adapter=adapter,
+        use_wandb=args.use_wandb,
+    )
+
+    trainer.train(
+        train_config=train_config,
+        val_config=val_config,
+        checkpoint_path=checkpoint_path,
+        fig_path=fig_path,
+    )
+
+    if args.use_wandb:
+        trainer.finish()
