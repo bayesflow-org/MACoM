@@ -40,12 +40,13 @@ def rdm_link_fun():
 
 def lba_link_fun():
     return {
-        "v": exponential,
+        "v":     shifted_softplus,
         "v_diff": shifted_softplus,
-        "a": exponential,
-        "tau": exponential,
-        "s_v": exponential,
-        "s_tau": sigmoid
+        "a":     shifted_softplus,
+        "tau":   shifted_softplus,
+        "s_v":   shifted_softplus,
+        "s_tau": shifted_softplus,
+        "pi":    lambda x: x,  # identity — pi is sampled directly in [0, 1]
     }
 
 def lca_link_fun():
