@@ -14,9 +14,10 @@ utils.add_global_params() after importing.
 
 from cogformer.simulator.benchmarks.ssms.ddm import DDM
 from cogformer.simulator.benchmarks.ssms.cdm import CDM
+from cogformer.simulator.benchmarks.ssms.lba import LBA
 from cogformer.simulator.benchmarks.ssms.rdm import RDM
-from cogformer.simulator.benchmarks.ssms.priors import ddm_priors, cdm_priors, rdm_priors
-from cogformer.simulator.benchmarks.ssms.link_funs import ddm_link_fun, cdm_link_fun, rdm_link_fun
+from cogformer.simulator.benchmarks.ssms.priors import ddm_priors, cdm_priors, lba_priors, rdm_priors
+from cogformer.simulator.benchmarks.ssms.link_funs import ddm_link_fun, cdm_link_fun, lba_link_fun, rdm_link_fun
 
 
 # ── Global / nuisance parameters (used only in CF model-family scripts) ──────
@@ -182,12 +183,66 @@ RDM_CONFIG = {
 }
 
 
+# ── LBA ───────────────────────────────────────────────────────────────────────
+
+LBA_BENCHMARK_CONFIGS = {
+    "intercept_only": {
+        "1": ["v", "v_diff", "a", "tau", "s_v", "s_tau"],
+        "u_1": [], "u_2": [], "u_1:u_2": [],
+    },
+    "regressed": {
+        "1": ["v", "v_diff", "a", "tau", "s_v", "s_tau"],
+        "u_1": ["v_diff", "a"], "u_2": ["v_diff", "a"], "u_1:u_2": [],
+    },
+    "fixed": {
+        "1": ["v", "v_diff", "a", "tau"],
+        "u_1": [], "u_2": [], "u_1:u_2": [],
+    },
+    "fixed_regressed": {
+        "1": ["v", "v_diff", "a", "tau"],
+        "u_1": ["v_diff", "a"], "u_2": ["v_diff", "a"], "u_1:u_2": [],
+    },
+    "interaction": {
+        "1": ["v", "v_diff", "a", "tau", "s_v", "s_tau"],
+        "u_1": ["v", "v_diff", "a", "tau", "s_v"],
+        "u_2": ["v", "v_diff", "a", "tau"],
+        "u_1:u_2": ["v", "v_diff", "a"],
+    },
+    "full": {
+        "1": ["v", "v_diff", "a", "tau", "s_v", "s_tau"],
+        "u_1": ["v", "v_diff", "a", "tau", "s_v", "s_tau"],
+        "u_2": ["v", "v_diff", "a", "tau", "s_v", "s_tau"],
+        "u_1:u_2": ["v", "v_diff", "a", "tau", "s_v", "s_tau"],
+    },
+}
+
+LBA_CONFIG = {
+    "model_cls": LBA,
+    "prior_fn": lba_priors,
+    "link_fn": lba_link_fun,
+    "name": "LBA",
+    "intrinsic_params": ["v", "v_diff", "a", "tau", "s_v", "s_tau"],
+    "variable_names": [r"$v$", r"$v_{\mathrm{diff}}$", r"$a$", r"$\tau$", r"$s_v$", r"$s_\tau$"],
+    "free_params": ["v", "v_diff", "a", "tau"],
+    "fixed_params": ["s_v", "s_tau"],
+    "global_params": [],
+    "default_fixed_values": {"s_v": 0.0, "s_tau": 0.0},
+    "benchmark_configs": LBA_BENCHMARK_CONFIGS,
+    "val_scenarios": [
+        ("interaction", LBA_BENCHMARK_CONFIGS["interaction"]),
+        ("fixed", LBA_BENCHMARK_CONFIGS["fixed"]),
+    ],
+    "train_context": LBA.build_random_context,
+}
+
+
 # ── Registries ────────────────────────────────────────────────────────────────
 
 MODELS = {
     "ddm": DDM_CONFIG,
     "cdm": CDM_CONFIG,
     "rdm": RDM_CONFIG,
+    "lba": LBA_CONFIG,
 }
 
 # Union of all parameters across models in ModelClass insertion order

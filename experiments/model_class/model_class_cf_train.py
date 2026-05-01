@@ -23,8 +23,17 @@ from cogformer.diagnostics.plot.adaptive_recovery import adaptive_recovery
 from cogformer.utils.plot_utils import cogformer_fm_colors
 
 from ..configs import MODELS as _BASE_MODELS
-from ..utils import build_encoder_input_dim
+from ..utils import add_global_params, build_encoder_input_dim
 
+
+GLOBAL_PARAMS = ["pi"]
+GLOBAL_VARIABLE_NAMES = [r"$\pi$"]
+
+_MODELS_WITH_PI = {
+    m: add_global_params(cfg, GLOBAL_PARAMS, GLOBAL_VARIABLE_NAMES)
+    for m, cfg in _BASE_MODELS.items()
+    if m != "lba"  # lba is not part of the trained model class
+}
 
 # val_step uses the "interaction" benchmark config as the fixed validation design
 MODEL_CONFIGS = {
@@ -33,7 +42,7 @@ MODEL_CONFIGS = {
         "variable_names": cfg["variable_names"],
         "val_design_config": cfg["benchmark_configs"]["interaction"],
     }
-    for m, cfg in _BASE_MODELS.items()
+    for m, cfg in _MODELS_WITH_PI.items()
 }
 
 
@@ -320,45 +329,43 @@ if __name__ == "__main__":
         f"batch_size={train_config['batch_size']}, device={device}"
     )
 
-    # Build per-model families with their own mask randomizer kwargs.
-    # model_class does not estimate "pi", so strip it from priors and link funs.
-    def _no_pi(d: dict) -> dict:
-        return {k: v for k, v in d.items() if k != "pi"}
-
     model_families = {
         "DDM": ModelFamily(
             model=DDM(), name="DDM",
-            prior=_no_pi(ddm_priors()),
-            intrinsic_params=_BASE_MODELS["ddm"]["intrinsic_params"],
+            prior=ddm_priors(),
+            intrinsic_params=_MODELS_WITH_PI["ddm"]["intrinsic_params"],
             mask_randomizer_kwargs={
                 "free_intrinsics": ["v", "a", "z", "tau"],
                 "fixed_intrinsics": ["s_v", "s_tau"], "fixed_values": {},
+                "global_params": GLOBAL_PARAMS,
             },
         ),
         "RDM": ModelFamily(
             model=RDM(), name="RDM",
-            prior=_no_pi(rdm_priors()),
-            intrinsic_params=_BASE_MODELS["rdm"]["intrinsic_params"],
+            prior=rdm_priors(),
+            intrinsic_params=_MODELS_WITH_PI["rdm"]["intrinsic_params"],
             mask_randomizer_kwargs={
                 "free_intrinsics": ["v", "v_diff", "a", "tau"],
                 "fixed_intrinsics": ["s_v", "s_tau"], "fixed_values": {},
+                "global_params": GLOBAL_PARAMS,
             },
         ),
         "CDM": ModelFamily(
             model=CDM(), name="CDM",
-            prior=_no_pi(cdm_priors()),
-            intrinsic_params=_BASE_MODELS["cdm"]["intrinsic_params"],
+            prior=cdm_priors(),
+            intrinsic_params=_MODELS_WITH_PI["cdm"]["intrinsic_params"],
             mask_randomizer_kwargs={
                 "free_intrinsics": ["v", "v_theta", "a", "tau"],
                 "fixed_intrinsics": ["s_v", "s_tau"], "fixed_values": {},
+                "global_params": GLOBAL_PARAMS,
             },
         ),
     }
 
     link_funs = {
-        "DDM": _no_pi(ddm_link_fun()),
-        "RDM": _no_pi(rdm_link_fun()),
-        "CDM": _no_pi(cdm_link_fun()),
+        "DDM": ddm_link_fun(),
+        "RDM": rdm_link_fun(),
+        "CDM": cdm_link_fun(),
     }
 
     model_class = ModelClass(model_families=model_families, link_funs=link_funs)

@@ -23,7 +23,16 @@ from cogformer.diagnostics.metric.adaptive_metrics import adaptive_metrics as co
 from cogformer.utils.plot_utils import cogformer_mc_colors
 
 from ..configs import MODELS as _BASE_MODELS
-from ..utils import infer_free_fixed_intrinsics, build_encoder_input_dim
+from ..utils import add_global_params, infer_free_fixed_intrinsics, build_encoder_input_dim
+
+GLOBAL_PARAMS = ["pi"]
+GLOBAL_VARIABLE_NAMES = [r"$\pi$"]
+
+_MODELS_WITH_PI = {
+    m: add_global_params(cfg, GLOBAL_PARAMS, GLOBAL_VARIABLE_NAMES)
+    for m, cfg in _BASE_MODELS.items()
+    if m != "lba"
+}
 
 
 def load_bf_validation_data(
@@ -86,7 +95,7 @@ def get_benchmark_design_configs():
             "default_fixed_values": cfg["default_fixed_values"],
             "benchmarks": cfg["benchmark_configs"],
         }
-        for m, cfg in _BASE_MODELS.items()
+        for m, cfg in _MODELS_WITH_PI.items()
     }
 
 
@@ -141,26 +150,22 @@ def main():
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-    # Rebuild ModelClass to access model_index and n_global_params.
-    # model_class does not estimate "pi", so strip it from priors and link funs.
-    def _no_pi(d: dict) -> dict:
-        return {k: v for k, v in d.items() if k != "pi"}
-
+    # Rebuild ModelClass to access model_index, n_global_params, and local_to_global maps.
     model_families = {
         "DDM": ModelFamily(model=DDM(), name="DDM",
-                           prior=_no_pi(ddm_priors()),
-                           intrinsic_params=_BASE_MODELS["ddm"]["intrinsic_params"]),
+                           prior=ddm_priors(),
+                           intrinsic_params=_MODELS_WITH_PI["ddm"]["intrinsic_params"]),
         "RDM": ModelFamily(model=RDM(), name="RDM",
-                           prior=_no_pi(rdm_priors()),
-                           intrinsic_params=_BASE_MODELS["rdm"]["intrinsic_params"]),
+                           prior=rdm_priors(),
+                           intrinsic_params=_MODELS_WITH_PI["rdm"]["intrinsic_params"]),
         "CDM": ModelFamily(model=CDM(), name="CDM",
-                           prior=_no_pi(cdm_priors()),
-                           intrinsic_params=_BASE_MODELS["cdm"]["intrinsic_params"]),
+                           prior=cdm_priors(),
+                           intrinsic_params=_MODELS_WITH_PI["cdm"]["intrinsic_params"]),
     }
     link_funs = {
-        "DDM": _no_pi(ddm_link_fun()),
-        "RDM": _no_pi(rdm_link_fun()),
-        "CDM": _no_pi(cdm_link_fun()),
+        "DDM": ddm_link_fun(),
+        "RDM": rdm_link_fun(),
+        "CDM": cdm_link_fun(),
     }
     model_class = ModelClass(model_families=model_families, link_funs=link_funs)
     adapter = Adapter()
