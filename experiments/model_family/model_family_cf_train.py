@@ -46,7 +46,7 @@ MODELS = {
         val_epoch_interval=2000,
         wandb_project="cogformer-fm-ddm",
         checkpoint_dir="./outputs/checkpoints/model_family/cf/ddm/",
-        checkpoint_prefix="cogformer_mixed_attn",
+        checkpoint_prefix="cogformer_ddm_mf",
         fig_subdir="model_family/cf/ddm",
     ),
     "cdm": _build_train_config(
@@ -54,7 +54,7 @@ MODELS = {
         val_epoch_interval=2000,
         wandb_project="cogformer-fm-cdm",
         checkpoint_dir="./outputs/checkpoints/model_family/cf/cdm/",
-        checkpoint_prefix="cogformer_cdm_mixed_attn",
+        checkpoint_prefix="cogformer_cdm_mf",
         fig_subdir="model_family/cf/cdm",
     ),
     "rdm": _build_train_config(
@@ -62,7 +62,7 @@ MODELS = {
         val_epoch_interval=2000,
         wandb_project="cogformer-fm-rdm",
         checkpoint_dir="./outputs/checkpoints/model_family/cf/rdm/",
-        checkpoint_prefix="cogformer_rdm_mixed_attn",
+        checkpoint_prefix="cogformer_rdm_mf",
         fig_subdir="model_family/cf/rdm",
     ),
 }

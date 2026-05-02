@@ -8,9 +8,9 @@
 #   4. real_data apply (DDM mf/mc, CDM mf/mc)
 #   5. generalization_cf_train (DDM × 4 holdouts) → validate
 #   6. encoder_rep_cf_train → lca_bf_apply → ffi_bf_apply
-#   7. Ablations (A–F run_ablations.sh, then G scaling_study)
-#   8. model_family_bf_train (DDM, CDM, RDM) → validate
-#   9. model_family_c2st
+#   7. model_family_bf_train (DDM, CDM, RDM) → validate
+#   8. model_family_c2st
+#   9. Ablations (A–F run_ablations.sh, then G scaling_study)
 #
 # Requirements:
 #   - 1 GPU; all steps run sequentially
@@ -46,9 +46,9 @@ MF_BF_EPOCHS=1000   # BayesFlow training epochs
 # ── Derived checkpoint filenames (auto-constructed) ────────────────────────────
 
 # model_family_cf_train checkpoints
-ddm_mf_ckpt_name="cogformer_mixed_attn_l${DEC_LAYERS}_h${HEADS}_p${PROJ}_s${SEEDS}_d${DIM}_o${OBS}_b${BATCH}_e${EPOCHS}_t${STEPS}.pt"
-cdm_mf_ckpt_name="cogformer_cdm_mixed_attn_l${DEC_LAYERS}_h${HEADS}_p${PROJ}_s${SEEDS}_d${DIM}_o${OBS}_b${BATCH}_e${EPOCHS}_t${STEPS}.pt"
-rdm_mf_ckpt_name="cogformer_rdm_mixed_attn_l${DEC_LAYERS}_h${HEADS}_p${PROJ}_s${SEEDS}_d${DIM}_o${OBS}_b${BATCH}_e${EPOCHS}_t${STEPS}.pt"
+ddm_mf_ckpt_name="cogformer_ddm_mf_l${DEC_LAYERS}_h${HEADS}_p${PROJ}_s${SEEDS}_d${DIM}_o${OBS}_b${BATCH}_e${EPOCHS}_t${STEPS}.pt"
+cdm_mf_ckpt_name="cogformer_cdm_mf_l${DEC_LAYERS}_h${HEADS}_p${PROJ}_s${SEEDS}_d${DIM}_o${OBS}_b${BATCH}_e${EPOCHS}_t${STEPS}.pt"
+rdm_mf_ckpt_name="cogformer_rdm_mf_l${DEC_LAYERS}_h${HEADS}_p${PROJ}_s${SEEDS}_d${DIM}_o${OBS}_b${BATCH}_e${EPOCHS}_t${STEPS}.pt"
 DDM_MF_CKPT="./outputs/checkpoints/model_family/cf/ddm/${ddm_mf_ckpt_name}"
 CDM_MF_CKPT="./outputs/checkpoints/model_family/cf/cdm/${cdm_mf_ckpt_name}"
 RDM_MF_CKPT="./outputs/checkpoints/model_family/cf/rdm/${rdm_mf_ckpt_name}"
@@ -362,27 +362,8 @@ for case in intercept_only intercept_v; do
         --model_embed_dim 8
 done
 
-# ── Step 7: Ablations (A–F), then scaling study (G) ───────────────────────────
-echo "=== Step 7: Ablations ==="
-bash experiments/ablations/run_ablations.sh
-
-# G: scaling study — run after ablation training completes.
-# Replace <CKPT> with the actual DDM model-family checkpoint.
-# echo "  G: Dimensionality scaling study ..."
-# python -m experiments.ablations.scaling_study \
-#     --model ddm \
-#     --checkpoint_path "$DDM_MF_CKPT" \
-#     --output_dir ./outputs/evaluations/ablations/scaling_study/ddm/ \
-#     --regressor_counts 0 1 2 3 4 5 \
-#     --n_eval_batches 10 \
-#     --eval_batch_size 200 \
-#     --num_obs "$OBS" \
-#     --fm_sample_steps 50 \
-#     --fm_num_samples 200 \
-#     --fm_solver rk4
-
-# ── Step 8: ModelFamily BF train + validate ────────────────────────────────────
-echo "=== Step 8: ModelFamily BF (DDM, CDM, RDM) ==="
+# ── Step 7: ModelFamily BF train + validate ────────────────────────────────────
+echo "=== Step 7: ModelFamily BF (DDM, CDM, RDM) ==="
 BF_CASES=(intercept_only fixed regressed)
 for model in ddm cdm rdm; do
     for case in "${BF_CASES[@]}"; do
@@ -402,12 +383,31 @@ for model in ddm cdm rdm; do
         --model "$model"
 done
 
-# ── Step 9: C2ST ───────────────────────────────────────────────────────────────
-echo "=== Step 9: C2ST ==="
+# ── Step 8: C2ST ───────────────────────────────────────────────────────────────
+echo "=== Step 8: C2ST ==="
 for model in ddm cdm rdm; do
     python -m experiments.model_family.model_family_c2st \
         --model "$model"
 done
+
+# ── Step 9: Ablations (A–F), then scaling study (G) ───────────────────────────
+echo "=== Step 9: Ablations ==="
+bash experiments/ablations/run_ablations.sh
+
+# G: scaling study — run after ablation training completes.
+# Replace <CKPT> with the actual DDM model-family checkpoint.
+# echo "  G: Dimensionality scaling study ..."
+# python -m experiments.ablations.scaling_study \
+#     --model ddm \
+#     --checkpoint_path "$DDM_MF_CKPT" \
+#     --output_dir ./outputs/evaluations/ablations/scaling_study/ddm/ \
+#     --regressor_counts 0 1 2 3 4 5 \
+#     --n_eval_batches 10 \
+#     --eval_batch_size 200 \
+#     --num_obs "$OBS" \
+#     --fm_sample_steps 50 \
+#     --fm_num_samples 200 \
+#     --fm_solver rk4
 
 echo "=== All experiments complete. ==="
 python -m experiments.timing_report

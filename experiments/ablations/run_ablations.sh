@@ -83,12 +83,13 @@ run_mc() {
 }
 
 # -----------------------------------------------------------------------
-# A. PMA Bottleneck: num_seeds ∈ {1, 4, 8, 16, 32, 64}
+# A. PMA Bottleneck: num_seeds ∈ {8, 16, 64}
 #    Ablates the information capacity of the encoder's pooling bottleneck.
-#    Baseline: num_seeds=32.
+#    Baseline (num_seeds=32): reuse Step 1 DDM checkpoint from
+#      outputs/checkpoints/model_family/cf/ddm/
 # -----------------------------------------------------------------------
 echo "=== A. PMA Seeds ==="
-for seeds in 1 4 8 16 32 64; do
+for seeds in 8 16 64; do
     echo "  num_seeds=$seeds"
     run_mf \
         --num_seeds "$seeds" \
@@ -100,20 +101,13 @@ done
 # -----------------------------------------------------------------------
 # B. Decoder Attention Pattern
 #    Ablates the layer interleaving strategy in the decoder.
-#    Conditions:
-#      B1 mixed_attention, mab_first=True  (baseline)
-#      B2 mixed_attention, mab_first=False (SAB before MAB)
-#      B3 self_attention only              (no encoder cross-attention)
-#      B4 cross_attention only             (no intra-parameter self-attention)
+#    Baseline (B1: mixed, MAB-first): reuse Step 1 DDM checkpoint from
+#      outputs/checkpoints/model_family/cf/ddm/
+#    B2 mixed_attention, mab_first=False (SAB before MAB)
+#    B3 self_attention only              (no encoder cross-attention)
+#    B4 cross_attention only             (no intra-parameter self-attention)
 # -----------------------------------------------------------------------
 echo "=== B. Decoder Attention Pattern ==="
-
-echo "  B1: mixed, MAB-first (baseline)"
-run_mf \
-    --decoder_layer_design mixed_attention --mab_first \
-    --checkpoint_dir "./outputs/checkpoints/ablations/attn_pattern/ddm/" \
-    --checkpoint_prefix "abl_attn" \
-    --fig_subdir "ablations/attn_pattern/ddm"
 
 echo "  B2: mixed, SAB-first"
 run_mf \
@@ -140,16 +134,11 @@ run_mf \
 # C. Time Conditioning: Output-only FiLM vs. Block-level FiLM
 #    Ablates whether time modulation is applied only at the output head
 #    (current design) or after every attention block as well.
-#    C1 output-only FiLM  (baseline)
+#    Baseline (C1: output-only FiLM): reuse Step 1 DDM checkpoint from
+#      outputs/checkpoints/model_family/cf/ddm/
 #    C2 block-level FiLM  (FiLM at every layer + output)
 # -----------------------------------------------------------------------
 echo "=== C. Block-level FiLM ==="
-
-echo "  C1: output-only FiLM (baseline)"
-run_mf \
-    --checkpoint_dir "./outputs/checkpoints/ablations/block_film/ddm/" \
-    --checkpoint_prefix "abl_film" \
-    --fig_subdir "ablations/block_film/ddm"
 
 echo "  C2: block-level FiLM"
 run_mf \
@@ -162,17 +151,11 @@ run_mf \
 # D. Fourier Frequency Trainability
 #    Ablates whether the time embedding's Fourier frequencies are learned
 #    or fixed at initialisation.
-#    D1 trainable frequencies  (baseline)
+#    Baseline (D1: trainable frequencies): reuse Step 1 DDM checkpoint from
+#      outputs/checkpoints/model_family/cf/ddm/
 #    D2 fixed frequencies
 # -----------------------------------------------------------------------
 echo "=== D. Fourier Frequency Trainability ==="
-
-echo "  D1: trainable frequencies (baseline)"
-run_mf \
-    --time_freq_trainable \
-    --checkpoint_dir "./outputs/checkpoints/ablations/freq_trainable/ddm/" \
-    --checkpoint_prefix "abl_freq" \
-    --fig_subdir "ablations/freq_trainable/ddm"
 
 echo "  D2: fixed frequencies"
 run_mf \
@@ -182,27 +165,21 @@ run_mf \
     --fig_subdir "ablations/freq_trainable/ddm"
 
 # -----------------------------------------------------------------------
-# E. Encoder / Decoder Depth Split (total layers fixed at 16)
-#    Ablates how capacity is distributed between encoder and decoder.
-#    All conditions share the same total layer count as the baseline (8+8).
-#    E1  2 enc + 14 dec  (minimal encoder)
-#    E2  4 enc + 12 dec
-#    E3  8 enc +  8 dec  (baseline, symmetric)
-#    E4 12 enc +  4 dec
-#    E5 14 enc +  2 dec  (minimal decoder)
+# E. Encoder Depth (decoder fixed at 8)
+#    Ablates encoder capacity while keeping the decoder fixed.
+#    Baseline (enc=8, dec=8): reuse Step 1 DDM checkpoint from
+#      outputs/checkpoints/model_family/cf/ddm/
+#    E1  2 enc + 8 dec  (minimal encoder)
+#    E2  4 enc + 8 dec
+#    E4 16 enc + 8 dec  (deep encoder)
 # -----------------------------------------------------------------------
-echo "=== E. Encoder / Decoder Depth Split (total = 16) ==="
+echo "=== E. Encoder Depth (decoder fixed at 8) ==="
 
-declare -a ENC_LAYERS=(2  4  8  12 14)
-declare -a DEC_LAYERS=(14 12  8   4  2)
-
-for i in "${!ENC_LAYERS[@]}"; do
-    enc="${ENC_LAYERS[$i]}"
-    dec="${DEC_LAYERS[$i]}"
-    echo "  E$((i+1)): enc=$enc, dec=$dec"
+for enc in 2 4 16; do
+    echo "  enc=$enc, dec=8"
     run_mf \
         --encoder_num_layers "$enc" \
-        --decoder_num_layers "$dec" \
+        --decoder_num_layers 8 \
         --checkpoint_dir "./outputs/checkpoints/ablations/depth_split/ddm/" \
         --checkpoint_prefix "abl_depth" \
         --fig_subdir "ablations/depth_split/ddm"
@@ -212,15 +189,11 @@ done
 # F. Model Embedding (ModelClass: DDM + CDM + RDM)
 #    Ablates whether the network receives an explicit model-identity
 #    embedding when trained on multiple SSMs simultaneously.
-#    F1 with model embedding    (baseline, model_embed_dim=8)
+#    Baseline (F1: with model embedding, model_embed_dim=8): reuse Step 2
+#      MC checkpoint from outputs/checkpoints/model_class/cf/
 #    F2 without model embedding (num_models=None)
 # -----------------------------------------------------------------------
 echo "=== F. Model Embedding (ModelClass) ==="
-
-echo "  F1: with model embedding (baseline)"
-run_mc \
-    --checkpoint_dir "./outputs/checkpoints/ablations/model_embedding/" \
-    --checkpoint_prefix "abl_mc"
 
 echo "  F2: without model embedding"
 run_mc \

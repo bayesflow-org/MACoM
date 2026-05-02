@@ -10,9 +10,9 @@
 # this dry run — the checkpoint filename is computed from --epochs (the full
 # budget), not --dry_run_epochs, so the paths match automatically.
 #
-# There are ~53 training script invocations total. A good starting value for
+# There are ~34 training script invocations total. A good starting value for
 # DRY_EPOCHS can be estimated as:
-#   DRY_EPOCHS ≈ (target_hours × 3600) / (53 × steps_per_epoch × secs_per_step)
+#   DRY_EPOCHS ≈ (target_hours × 3600) / (34 × steps_per_epoch × secs_per_step)
 # where secs_per_step is measured from a short pilot (e.g. DRY_EPOCHS=2).
 #
 # Usage:
@@ -25,9 +25,11 @@
 set -euo pipefail
 mkdir -p outputs/logs outputs/timing
 
-# First positional argument overrides; default is 10.
+# First positional argument overrides; default is 1% of 5000 (CF + ablation budget).
 # Tune this so the total wall time is ~24 hours.
-export DRY_EPOCHS="${1:-10}"
+export DRY_EPOCHS="${1:-50}"      # 1% of 5000 — used for CF training and ablations
+MF_BF_DRY_EPOCHS=10              # 1% of 1000
+LCA_FFI_DRY_EPOCHS=5             # 1% of 500
 
 # ── Shared hyperparameters (must match run_all.sh) ─────────────────────────────
 ENC_LAYERS=8
@@ -50,9 +52,9 @@ MF_BF_EPOCHS=1000
 LCA_FFI_EPOCHS=500
 
 # ── Derived checkpoint paths (identical to run_all.sh) ────────────────────────
-ddm_mf_ckpt_name="cogformer_mixed_attn_l${DEC_LAYERS}_h${HEADS}_p${PROJ}_s${SEEDS}_d${DIM}_o${OBS}_b${BATCH}_e${EPOCHS}_t${STEPS}.pt"
-cdm_mf_ckpt_name="cogformer_cdm_mixed_attn_l${DEC_LAYERS}_h${HEADS}_p${PROJ}_s${SEEDS}_d${DIM}_o${OBS}_b${BATCH}_e${EPOCHS}_t${STEPS}.pt"
-rdm_mf_ckpt_name="cogformer_rdm_mixed_attn_l${DEC_LAYERS}_h${HEADS}_p${PROJ}_s${SEEDS}_d${DIM}_o${OBS}_b${BATCH}_e${EPOCHS}_t${STEPS}.pt"
+ddm_mf_ckpt_name="cogformer_ddm_mf_l${DEC_LAYERS}_h${HEADS}_p${PROJ}_s${SEEDS}_d${DIM}_o${OBS}_b${BATCH}_e${EPOCHS}_t${STEPS}.pt"
+cdm_mf_ckpt_name="cogformer_cdm_mf_l${DEC_LAYERS}_h${HEADS}_p${PROJ}_s${SEEDS}_d${DIM}_o${OBS}_b${BATCH}_e${EPOCHS}_t${STEPS}.pt"
+rdm_mf_ckpt_name="cogformer_rdm_mf_l${DEC_LAYERS}_h${HEADS}_p${PROJ}_s${SEEDS}_d${DIM}_o${OBS}_b${BATCH}_e${EPOCHS}_t${STEPS}.pt"
 DDM_MF_CKPT="./outputs/checkpoints/model_family/cf/ddm/${ddm_mf_ckpt_name}"
 CDM_MF_CKPT="./outputs/checkpoints/model_family/cf/cdm/${cdm_mf_ckpt_name}"
 RDM_MF_CKPT="./outputs/checkpoints/model_family/cf/rdm/${rdm_mf_ckpt_name}"
@@ -63,7 +65,7 @@ MC_CKPT="./outputs/checkpoints/model_class/cf/${mc_ckpt_name}"
 enc_rep_ckpt_name="cogformer_encoder_rep_fm_l${DEC_LAYERS}_h${HEADS}_p${PROJ}_s${SEEDS}_d${MC_DIM}_b${BATCH}_e${EPOCHS}_t${STEPS}.pt"
 ENC_REP_CKPT="./outputs/checkpoints/encoder_rep/cf/${enc_rep_ckpt_name}"
 
-echo "=== CogFormer end-to-end dry run: ${DRY_EPOCHS} epochs per training script (~53 invocations) ==="
+echo "=== CogFormer end-to-end dry run: ${DRY_EPOCHS} epochs per training script (~34 invocations) ==="
 echo "    Full-run budget: ${EPOCHS} epochs.  Extrapolation factor: $(echo "scale=1; $EPOCHS / $DRY_EPOCHS" | bc)×"
 echo ""
 
@@ -329,7 +331,7 @@ for case in intercept_only intercept_v; do
         --model_embed_dim 8 \
         --epochs "$LCA_FFI_EPOCHS" \
         --steps_per_epoch 100 \
-        --dry_run_epochs "$DRY_EPOCHS"
+        --dry_run_epochs "$LCA_FFI_DRY_EPOCHS"
 
     echo "  LCA BF $case validate ..."
     python -m experiments.encoder_rep.lca_bf_apply \
@@ -360,7 +362,7 @@ for case in intercept_only intercept_v; do
         --model_embed_dim 8 \
         --epochs "$LCA_FFI_EPOCHS" \
         --steps_per_epoch 100 \
-        --dry_run_epochs "$DRY_EPOCHS"
+        --dry_run_epochs "$LCA_FFI_DRY_EPOCHS"
 
     echo "  FFI BF $case validate ..."
     python -m experiments.encoder_rep.ffi_bf_apply \
@@ -377,8 +379,37 @@ for case in intercept_only intercept_v; do
         --model_embed_dim 8
 done
 
-# ── Step 7: Ablations (A–F) + scaling study (G) ───────────────────────────────
-echo "=== Step 7: Ablations ==="
+# ── Step 7: ModelFamily BF train + validate ────────────────────────────────────
+echo "=== Step 7: ModelFamily BF ==="
+BF_CASES=(intercept_only fixed regressed)
+for model in ddm cdm rdm; do
+    for case in "${BF_CASES[@]}"; do
+        echo "  BF train $model/$case (dry) ..."
+        python -m experiments.model_family.model_family_bf_train \
+            --model "$model" \
+            --case "$case" \
+            --epochs "$MF_BF_EPOCHS" \
+            --steps_per_epoch 100 \
+            --batch_size 64 \
+            --dry_run_epochs "$MF_BF_DRY_EPOCHS"
+    done
+done
+
+echo "  BF validate ..."
+for model in ddm cdm rdm; do
+    python -m experiments.model_family.model_family_bf_validate \
+        --model "$model"
+done
+
+# ── Step 8: C2ST ───────────────────────────────────────────────────────────────
+echo "=== Step 8: C2ST ==="
+for model in ddm cdm rdm; do
+    python -m experiments.model_family.model_family_c2st \
+        --model "$model"
+done
+
+# ── Step 9: Ablations (A–F) + scaling study (G) ───────────────────────────────
+echo "=== Step 9: Ablations ==="
 # DRY_EPOCHS is already exported; run_ablations.sh picks it up automatically.
 bash experiments/ablations/run_ablations.sh
 
@@ -394,35 +425,6 @@ python -m experiments.ablations.scaling_study \
     --fm_sample_steps 50 \
     --fm_num_samples 200 \
     --fm_solver midpoint
-
-# ── Step 8: ModelFamily BF train + validate ────────────────────────────────────
-echo "=== Step 8: ModelFamily BF ==="
-BF_CASES=(intercept_only fixed regressed)
-for model in ddm cdm rdm; do
-    for case in "${BF_CASES[@]}"; do
-        echo "  BF train $model/$case (dry) ..."
-        python -m experiments.model_family.model_family_bf_train \
-            --model "$model" \
-            --case "$case" \
-            --epochs "$MF_BF_EPOCHS" \
-            --steps_per_epoch 100 \
-            --batch_size 64 \
-            --dry_run_epochs "$DRY_EPOCHS"
-    done
-done
-
-echo "  BF validate ..."
-for model in ddm cdm rdm; do
-    python -m experiments.model_family.model_family_bf_validate \
-        --model "$model"
-done
-
-# ── Step 9: C2ST ───────────────────────────────────────────────────────────────
-echo "=== Step 9: C2ST ==="
-for model in ddm cdm rdm; do
-    python -m experiments.model_family.model_family_c2st \
-        --model "$model"
-done
 
 # ── Timing report ──────────────────────────────────────────────────────────────
 echo ""

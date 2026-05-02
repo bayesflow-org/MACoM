@@ -89,7 +89,7 @@ def main():
         # Hint: suggest DRY_EPOCHS for a ~24 h dry run
         dry_records = [r for r in records if r.get("dry_run") and r.get("dry_run_epochs")]
         if dry_records:
-            n_train_scripts = 53  # total training invocations in dry_run.sh
+            n_train_scripts = 34  # total training invocations in dry_run.sh
             sample = dry_records[0]
             secs_per_epoch = sample["elapsed_seconds"] / sample["dry_run_epochs"]
             target_secs = 86400  # 24 h
