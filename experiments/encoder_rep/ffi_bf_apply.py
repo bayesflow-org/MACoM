@@ -14,6 +14,7 @@ os.environ["KERAS_BACKEND"] = "torch"
 import argparse
 import logging
 import numpy as np
+import wandb
 import torch
 import keras
 import bayesflow as bf
@@ -275,6 +276,7 @@ def parse_args():
     p.add_argument("--num_obs", type=int, default=500)
     p.add_argument("--dry_run_epochs", type=int, default=None,
                    help="If set, train for this many epochs only and record extrapolated time.")
+    p.add_argument("--use_wandb", action="store_true")
 
     # Validation
     p.add_argument("--val_batch_size", type=int, default=200)
@@ -298,6 +300,18 @@ if __name__ == "__main__":
     logging.basicConfig(level=logging.INFO)
     args = parse_args()
     if args.mode == "train":
+        if args.use_wandb:
+            wandb.init(
+                project="cogformer-encoder-rep",
+                tags=["CogFormer", "FFI", "BF", "EncoderRep"],
+                config={
+                    "case": args.case,
+                    "epochs": args.epochs,
+                    "steps_per_epoch": args.steps_per_epoch,
+                    "batch_size": args.batch_size,
+                    "num_obs": args.num_obs,
+                },
+            )
         is_dry_run = args.dry_run_epochs is not None
         total_epochs = args.epochs
         if is_dry_run:
@@ -305,5 +319,7 @@ if __name__ == "__main__":
         with RunTimer(f"ffi_bf_{args.case}", dry_run=is_dry_run,
                       total_epochs=total_epochs, dry_run_epochs=args.dry_run_epochs):
             train(args)
+        if args.use_wandb:
+            wandb.finish()
     else:
         validate(args)

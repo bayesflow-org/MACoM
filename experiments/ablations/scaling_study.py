@@ -23,7 +23,7 @@ Usage
 python -m experiments.ablations.scaling_study \\
     --model ddm \\
     --checkpoint_path ./outputs/checkpoints/model_family/cf/ddm/<ckpt>.pt \\
-    --output_dir ./outputs/scaling_study/ddm/
+    --output_dir ./outputs/evaluations/ablations/scaling_study/ddm/
 """
 
 import argparse
@@ -198,7 +198,7 @@ def parse_args():
                         choices=["ddm", "cdm", "rdm"])
     parser.add_argument("--checkpoint_path", type=str, required=True,
                         help="Path to the trained CogFormer .pt checkpoint.")
-    parser.add_argument("--output_dir", type=str, default="./outputs/scaling_study/",
+    parser.add_argument("--output_dir", type=str, default="./outputs/evaluations/ablations/scaling_study/",
                         help="Directory to write CSV and figure outputs.")
 
     # Regressor sweep

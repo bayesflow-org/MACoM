@@ -240,7 +240,7 @@ run_mc \
 # python -m experiments.ablations.scaling_study \
 #     --model ddm \
 #     --checkpoint_path "$CKPT" \
-#     --output_dir ./outputs/scaling_study/ddm/ \
+#     --output_dir ./outputs/evaluations/ablations/scaling_study/ddm/ \
 #     --regressor_counts 0 1 2 3 4 5 \
 #     --n_eval_batches 10 \
 #     --eval_batch_size 200 \

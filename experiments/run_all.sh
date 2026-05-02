@@ -6,7 +6,7 @@
 #   2. model_class_cf_train → validate
 #   3. model_class_lba_cf_validate
 #   4. real_data apply (DDM mf/mc, CDM mf/mc)
-#   5. generalization_cf_train (3 models × 4 holdouts) → validate
+#   5. generalization_cf_train (DDM × 4 holdouts) → validate
 #   6. encoder_rep_cf_train → lca_bf_apply → ffi_bf_apply
 #   7. Ablations (A–F run_ablations.sh, then G scaling_study)
 #   8. model_family_bf_train (DDM, CDM, RDM) → validate
@@ -250,38 +250,30 @@ python -m experiments.real_data.cdm_mc_cf_apply \
     --model_embed_dim 8
 
 # ── Step 5: Generalization CF train + validate ─────────────────────────────────
-echo "=== Step 5: Generalization CF (3 models × 4 holdout types) ==="
-for model in ddm cdm rdm; do
-    for holdout in random variability interaction sparsity; do
-        echo "  gen $model/$holdout ..."
-        run_gen_train "$model" "$holdout"
-    done
+echo "=== Step 5: Generalization CF (DDM × 4 holdout types) ==="
+for holdout in random variability interaction sparsity; do
+    echo "  gen ddm/$holdout ..."
+    run_gen_train "ddm" "$holdout"
 done
 
 # Validation: construct gen checkpoint paths and validate each
 echo "  Validating generalization ..."
-for model in ddm cdm rdm; do
-    case "$model" in
-        ddm) prefix="cogformer_mixed_attn" ;;
-        cdm) prefix="cogformer_cdm_mixed_attn" ;;
-        rdm) prefix="cogformer_rdm_mixed_attn" ;;
-    esac
-    for holdout in random variability interaction sparsity; do
-        gen_ckpt="./outputs/checkpoints/generalization/cf/${model}/${prefix}_gen_${holdout}_l${DEC_LAYERS}_h${HEADS}_p${PROJ}_s${SEEDS}_d${DIM}_o${OBS}_b${BATCH}_e${EPOCHS}_t${STEPS}.pt"
-        python -m experiments.generalization.generalization_cf_validate \
-            --model "$model" \
-            --holdout_type "$holdout" \
-            --checkpoint "$gen_ckpt" \
-            --encoder_num_layers "$ENC_LAYERS" \
-            --decoder_num_layers "$DEC_LAYERS" \
-            --encoder_num_heads "$HEADS" \
-            --decoder_num_heads "$HEADS" \
-            --proj_dim "$PROJ" \
-            --num_seeds "$SEEDS" \
-            --seed_dim "$DIM" \
-            --batch_size 200 \
-            --num_obs "$OBS"
-    done
+prefix="cogformer_mixed_attn"
+for holdout in random variability interaction sparsity; do
+    gen_ckpt="./outputs/checkpoints/generalization/cf/ddm/${prefix}_gen_${holdout}_l${DEC_LAYERS}_h${HEADS}_p${PROJ}_s${SEEDS}_d${DIM}_o${OBS}_b${BATCH}_e${EPOCHS}_t${STEPS}.pt"
+    python -m experiments.generalization.generalization_cf_validate \
+        --model ddm \
+        --holdout_type "$holdout" \
+        --checkpoint "$gen_ckpt" \
+        --encoder_num_layers "$ENC_LAYERS" \
+        --decoder_num_layers "$DEC_LAYERS" \
+        --encoder_num_heads "$HEADS" \
+        --decoder_num_heads "$HEADS" \
+        --proj_dim "$PROJ" \
+        --num_seeds "$SEEDS" \
+        --seed_dim "$DIM" \
+        --batch_size 200 \
+        --num_obs "$OBS"
 done
 
 # ── Step 6: Encoder rep CF train → LCA/FFI BF apply ───────────────────────────
@@ -380,7 +372,7 @@ bash experiments/ablations/run_ablations.sh
 # python -m experiments.ablations.scaling_study \
 #     --model ddm \
 #     --checkpoint_path "$DDM_MF_CKPT" \
-#     --output_dir ./outputs/scaling_study/ddm/ \
+#     --output_dir ./outputs/evaluations/ablations/scaling_study/ddm/ \
 #     --regressor_counts 0 1 2 3 4 5 \
 #     --n_eval_batches 10 \
 #     --eval_batch_size 200 \

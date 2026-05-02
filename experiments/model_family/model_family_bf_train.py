@@ -3,6 +3,7 @@ os.environ["KERAS_BACKEND"] = "jax"
 
 import argparse
 import numpy as np
+import wandb
 import bayesflow as bf
 
 from pathlib import Path
@@ -182,12 +183,25 @@ if __name__ == "__main__":
     parser.add_argument("--batch_size", type=int, default=64)
     parser.add_argument("--dry_run_epochs", type=int, default=None,
                         help="If set, train for this many epochs only and record extrapolated time.")
+    parser.add_argument("--use_wandb", action="store_true")
     parser.add_argument("--test", action="store_true")
     args = parser.parse_args()
 
     if args.test:
         test(model_key=args.model, case=args.case)
     else:
+        if args.use_wandb:
+            wandb.init(
+                project=f"cogformer-bf-{args.model}",
+                tags=["CogFormer", args.model.upper(), "BF"],
+                config={
+                    "model": args.model,
+                    "case": args.case,
+                    "epochs": args.epochs,
+                    "steps_per_epoch": args.steps_per_epoch,
+                    "batch_size": args.batch_size,
+                },
+            )
         is_dry_run = args.dry_run_epochs is not None
         run_epochs = args.dry_run_epochs if is_dry_run else args.epochs
         with RunTimer(f"mf_bf_{args.model}_{args.case}", dry_run=is_dry_run,
@@ -199,3 +213,5 @@ if __name__ == "__main__":
                 steps_per_epoch=args.steps_per_epoch,
                 batch_size=args.batch_size,
             )
+        if args.use_wandb:
+            wandb.finish()
