@@ -211,9 +211,9 @@ def parse_args():
                         help="Number of random batches per regressor count. (default: 10)")
     parser.add_argument("--eval_batch_size", type=int, default=200)
     parser.add_argument("--num_obs", type=int, default=500)
-    parser.add_argument("--fm_sample_steps", type=int, default=200)
+    parser.add_argument("--fm_sample_steps", type=int, default=50)
     parser.add_argument("--fm_num_samples", type=int, default=200)
-    parser.add_argument("--fm_solver", type=str, default="rk4",
+    parser.add_argument("--fm_solver", type=str, default="midpoint",
                         choices=["euler", "midpoint", "rk4"])
 
     # Architecture (must match the checkpoint)

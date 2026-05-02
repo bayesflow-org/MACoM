@@ -14,6 +14,13 @@ set -euo pipefail
 MF=experiments.ablations.ablation_mf_train
 MC=experiments.ablations.ablation_mc_train
 
+# If DRY_EPOCHS is set in the environment (e.g. exported from dry_run.sh),
+# forward it to every training invocation as --dry_run_epochs.
+DRY_OPTS=()
+if [[ -n "${DRY_EPOCHS:-}" ]]; then
+    DRY_OPTS=(--dry_run_epochs "$DRY_EPOCHS")
+fi
+
 # -----------------------------------------------------------------------
 # Shared baseline hyperparameters (model-family ablations)
 # -----------------------------------------------------------------------
@@ -23,10 +30,10 @@ run_mf() {
         --epochs 5000 \
         --steps_per_epoch 100 \
         --train_batch_size 64 \
-        --val_batch_size 200 \
+        --val_batch_size 500 \
         --num_obs 500 \
         --min_num_obs 200 \
-        --max_num_obs 500 \
+        --max_num_obs 1000 \
         --encoder_num_layers 8 \
         --decoder_num_layers 8 \
         --encoder_num_heads 8 \
@@ -39,21 +46,23 @@ run_mf() {
         --dropout 0.05 \
         --layer_dropout 0.05 \
         --lr 1e-4 \
-        --fm_sample_steps 200 \
+        --fm_sample_steps 50 \
         --fm_num_samples 200 \
-        --fm_solver rk4 \
+        --fm_solver midpoint \
+        "${DRY_OPTS[@]}" \
         "$@"
 }
 
 # Shared baseline hyperparameters (model-class ablation)
 run_mc() {
     python -m "$MC" \
+        "${DRY_OPTS[@]}" \
         --epochs 5000 \
         --steps_per_epoch 100 \
         --train_batch_size 64 \
-        --val_batch_size 100 \
+        --val_batch_size 500 \
         --min_num_obs 200 \
-        --max_num_obs 500 \
+        --max_num_obs 1000 \
         --val_num_obs 500 \
         --encoder_num_layers 8 \
         --decoder_num_layers 8 \
@@ -68,7 +77,7 @@ run_mc() {
         --dropout 0.05 \
         --layer_dropout 0.05 \
         --lr 1e-4 \
-        --fm_sample_steps 200 \
+        --fm_sample_steps 50 \
         --fm_num_samples 100 \
         "$@"
 }
@@ -236,7 +245,7 @@ run_mc \
 #     --n_eval_batches 10 \
 #     --eval_batch_size 200 \
 #     --num_obs 500 \
-#     --fm_sample_steps 200 \
+#     --fm_sample_steps 50 \
 #     --fm_num_samples 200 \
 #     --fm_solver rk4
 

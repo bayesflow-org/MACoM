@@ -8,6 +8,7 @@ from cogformer.networks.transformers.cogformer import CogFormer
 from ..utils import add_global_params, strip_global_params, build_encoder_input_dim
 from ..configs import GLOBAL_PARAMS, GLOBAL_VARIABLE_NAMES
 from ..model_family.model_family_cf_train import CogFormerTrainer, MODELS
+from ..timing import RunTimer
 
 
 def parse_args():
@@ -68,7 +69,7 @@ def parse_args():
     parser.add_argument("--min_num_obs", type=int, default=200)
     parser.add_argument("--max_num_obs", type=int, default=500)
     parser.add_argument("--train_batch_size", type=int, default=64)
-    parser.add_argument("--val_batch_size", type=int, default=200)
+    parser.add_argument("--val_batch_size", type=int, default=500)
     parser.add_argument("--epochs", type=int, default=5000)
     parser.add_argument("--steps_per_epoch", type=int, default=100)
     parser.add_argument("--val_sample_chunk_size", type=int, default=100)
@@ -78,12 +79,14 @@ def parse_args():
         default=True,
     )
     parser.add_argument("--val_epoch_interval", type=int, default=None)
+    parser.add_argument("--dry_run_epochs", type=int, default=None,
+                        help="If set, train for this many epochs only and record extrapolated time.")
 
     # Inference
-    parser.add_argument("--fm_sample_steps", type=int, default=200)
+    parser.add_argument("--fm_sample_steps", type=int, default=50)
     parser.add_argument("--fm_num_samples", type=int, default=200)
     parser.add_argument(
-        "--fm_solver", type=str, default="rk4", choices=["euler", "midpoint", "rk4"]
+        "--fm_solver", type=str, default="midpoint", choices=["euler", "midpoint", "rk4"]
     )
 
     # Design space
@@ -270,10 +273,17 @@ if __name__ == "__main__":
     )
     fig_path = checkpoint_path.replace(".pt", "_test.pdf")
 
-    trainer.train(
-        train_config=train_config,
-        val_config=val_config,
-        checkpoint_path=checkpoint_path,
-        fig_path=fig_path,
-    )
+    is_dry_run = args.dry_run_epochs is not None
+    total_epochs = train_config["epochs"]
+    if is_dry_run:
+        train_config["epochs"] = args.dry_run_epochs
+
+    with RunTimer(f"abl_mf_{args.model}{variant_tag}", dry_run=is_dry_run,
+                  total_epochs=total_epochs, dry_run_epochs=args.dry_run_epochs):
+        trainer.train(
+            train_config=train_config,
+            val_config=val_config,
+            checkpoint_path=checkpoint_path,
+            fig_path=fig_path,
+        )
     trainer.finish()

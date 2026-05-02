@@ -120,7 +120,7 @@ def parse_args():
     p.add_argument("--add_interaction", action="store_true", default=True)
 
     # Inference
-    p.add_argument("--num_sample_steps", type=int, default=200)
+    p.add_argument("--num_sample_steps", type=int, default=50)
     p.add_argument("--num_samples", type=int, default=200)
     p.add_argument("--include_full", action="store_true", default=False, help="Include the 'full' benchmark case (skipped by default)")
     p.add_argument("--skip_posteriors", action="store_true", default=False, help="Skip posterior pairplots")

@@ -23,6 +23,7 @@ from cogformer.utils.plot_utils import cogformer_fm_colors
 
 from ..configs import MODELS as _BASE_MODELS, GLOBAL_PARAMS, GLOBAL_VARIABLE_NAMES
 from ..utils import add_global_params, strip_global_params, build_encoder_input_dim
+from ..timing import RunTimer
 
 
 # CF train uses global params (pi) and adds script-specific train keys
@@ -328,13 +329,13 @@ def parse_args():
     parser.add_argument("--min_num_obs", type=int, default=200)
     parser.add_argument("--max_num_obs", type=int, default=500)
     parser.add_argument("--train_batch_size", type=int, default=64)
-    parser.add_argument("--val_batch_size", type=int, default=200)
+    parser.add_argument("--val_batch_size", type=int, default=500)
     parser.add_argument("--epochs", type=int, default=5000)
     parser.add_argument("--steps_per_epoch", type=int, default=100)
     # Inference
-    parser.add_argument("--fm_sample_steps", type=int, default=200)
+    parser.add_argument("--fm_sample_steps", type=int, default=50)
     parser.add_argument("--fm_num_samples", type=int, default=200)
-    parser.add_argument("--fm_solver", type=str, default="rk4",
+    parser.add_argument("--fm_solver", type=str, default="midpoint",
                         choices=["euler", "midpoint", "rk4"],
                         help="ODE solver for flow matching sampling")
     parser.add_argument("--val_sample_chunk_size", type=int, default=100,
@@ -345,6 +346,8 @@ def parse_args():
                              "in estimation. Use --no-estimate-global-params to disable.")
     parser.add_argument("--val_epoch_interval", type=int, default=None,
                         help="Override the model-default validation interval (epochs between val steps).")
+    parser.add_argument("--dry_run_epochs", type=int, default=None,
+                        help="If set, train for this many epochs only and record extrapolated time.")
     # Design space
     parser.add_argument("--max_num_regressors", type=int, default=5)
     parser.add_argument("--max_num_categories", type=int, default=5)
@@ -502,10 +505,17 @@ if __name__ == "__main__":
         f"_t{train_config['steps_per_epoch']}_test.pdf"
     )
 
-    trainer.train(
-        train_config=train_config,
-        val_config=val_config,
-        checkpoint_path=checkpoint_path,
-        fig_path=fig_path,
-    )
+    is_dry_run = args.dry_run_epochs is not None
+    total_epochs = train_config["epochs"]
+    if is_dry_run:
+        train_config["epochs"] = args.dry_run_epochs
+
+    with RunTimer(f"mf_cf_{args.model}", dry_run=is_dry_run,
+                  total_epochs=total_epochs, dry_run_epochs=args.dry_run_epochs):
+        trainer.train(
+            train_config=train_config,
+            val_config=val_config,
+            checkpoint_path=checkpoint_path,
+            fig_path=fig_path,
+        )
     trainer.finish()

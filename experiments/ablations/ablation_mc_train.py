@@ -16,6 +16,7 @@ from cogformer.networks.transformers.cogformer import CogFormer
 from ..utils import add_global_params, build_encoder_input_dim
 from ..configs import MODELS as _BASE_MODELS
 from ..model_class.model_class_cf_train import CogFormerTrainer as ModelClassTrainer, MODEL_CONFIGS
+from ..timing import RunTimer
 
 GLOBAL_PARAMS = ["pi"]
 GLOBAL_VARIABLE_NAMES = [r"$\pi$"]
@@ -64,12 +65,12 @@ def parse_args():
     parser.add_argument("--max_num_obs", type=int, default=500)
     parser.add_argument("--val_num_obs", type=int, default=500)
     parser.add_argument("--train_batch_size", type=int, default=64)
-    parser.add_argument("--val_batch_size", type=int, default=100)
+    parser.add_argument("--val_batch_size", type=int, default=500)
     parser.add_argument("--epochs", type=int, default=5000)
     parser.add_argument("--steps_per_epoch", type=int, default=100)
 
     # Inference
-    parser.add_argument("--fm_sample_steps", type=int, default=200)
+    parser.add_argument("--fm_sample_steps", type=int, default=50)
     parser.add_argument("--fm_num_samples", type=int, default=100)
 
     # Design space
@@ -81,6 +82,9 @@ def parse_args():
     # Output path overrides
     parser.add_argument("--checkpoint_dir", type=str, default=None)
     parser.add_argument("--checkpoint_prefix", type=str, default=None)
+
+    parser.add_argument("--dry_run_epochs", type=int, default=None,
+                        help="If set, train for this many epochs only and record extrapolated time.")
 
     return parser.parse_args()
 
@@ -232,12 +236,20 @@ if __name__ == "__main__":
         use_wandb=args.use_wandb,
     )
 
-    trainer.train(
-        train_config=train_config,
-        val_config=val_config,
-        checkpoint_path=checkpoint_path,
-        fig_path=fig_path,
-    )
+    is_dry_run = args.dry_run_epochs is not None
+    total_epochs = train_config["epochs"]
+    if is_dry_run:
+        train_config["epochs"] = args.dry_run_epochs
+
+    emb_label = "no_emb" if args.no_model_embedding else f"emb{args.model_embed_dim}"
+    with RunTimer(f"abl_mc_{emb_label}", dry_run=is_dry_run,
+                  total_epochs=total_epochs, dry_run_epochs=args.dry_run_epochs):
+        trainer.train(
+            train_config=train_config,
+            val_config=val_config,
+            checkpoint_path=checkpoint_path,
+            fig_path=fig_path,
+        )
 
     if args.use_wandb:
         trainer.finish()

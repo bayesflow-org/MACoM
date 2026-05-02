@@ -10,6 +10,7 @@ from pathlib import Path
 from cogformer.simulator.model_family import ModelFamily
 
 from ..configs import MODELS as _BASE_MODELS
+from ..timing import RunTimer
 
 
 _BF_CKPT_PREFIXES = {"ddm": "ddm_families_bf", "cdm": "cdm_families_bf", "rdm": "rdm_families_bf"}
@@ -179,16 +180,22 @@ if __name__ == "__main__":
     parser.add_argument("--epochs", type=int, default=1000)
     parser.add_argument("--steps_per_epoch", type=int, default=100)
     parser.add_argument("--batch_size", type=int, default=64)
+    parser.add_argument("--dry_run_epochs", type=int, default=None,
+                        help="If set, train for this many epochs only and record extrapolated time.")
     parser.add_argument("--test", action="store_true")
     args = parser.parse_args()
 
     if args.test:
         test(model_key=args.model, case=args.case)
     else:
-        main(
-            model_key=args.model,
-            case=args.case,
-            epochs=args.epochs,
-            steps_per_epoch=args.steps_per_epoch,
-            batch_size=args.batch_size,
-        )
+        is_dry_run = args.dry_run_epochs is not None
+        run_epochs = args.dry_run_epochs if is_dry_run else args.epochs
+        with RunTimer(f"mf_bf_{args.model}_{args.case}", dry_run=is_dry_run,
+                      total_epochs=args.epochs, dry_run_epochs=args.dry_run_epochs):
+            main(
+                model_key=args.model,
+                case=args.case,
+                epochs=run_epochs,
+                steps_per_epoch=args.steps_per_epoch,
+                batch_size=args.batch_size,
+            )

@@ -63,9 +63,9 @@ def parse_args():
     p.add_argument("--max_num_categories", type=int, default=5)
     p.add_argument("--keep_intercept", action="store_true", default=True)
     p.add_argument("--add_interaction", action="store_true", default=True)
-    p.add_argument("--num_sample_steps", type=int, default=200)
+    p.add_argument("--num_sample_steps", type=int, default=50)
     p.add_argument("--num_samples", type=int, default=200)
-    p.add_argument("--solver", type=str, default="rk4",
+    p.add_argument("--solver", type=str, default="midpoint",
                    choices=["euler", "midpoint", "rk4"])
     p.add_argument("--include_full", action="store_true", default=False)
     p.add_argument("--skip_posteriors", action="store_true", default=False)

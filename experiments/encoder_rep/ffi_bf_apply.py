@@ -28,6 +28,7 @@ from cogformer.simulator.benchmarks.ssms.link_funs import ffi_link_fun
 from cogformer.networks.transformers.cogformer import CogFormer
 
 from ..utils import build_encoder_input_dim
+from ..timing import RunTimer
 
 
 INTRINSIC_PARAMS = ["v", "v_diff", "k", "beta", "a", "tau", "s_v", "s_tau"]
@@ -272,6 +273,8 @@ def parse_args():
     p.add_argument("--steps_per_epoch", type=int, default=100)
     p.add_argument("--batch_size", type=int, default=64)
     p.add_argument("--num_obs", type=int, default=500)
+    p.add_argument("--dry_run_epochs", type=int, default=None,
+                   help="If set, train for this many epochs only and record extrapolated time.")
 
     # Validation
     p.add_argument("--val_batch_size", type=int, default=200)
@@ -295,6 +298,12 @@ if __name__ == "__main__":
     logging.basicConfig(level=logging.INFO)
     args = parse_args()
     if args.mode == "train":
-        train(args)
+        is_dry_run = args.dry_run_epochs is not None
+        total_epochs = args.epochs
+        if is_dry_run:
+            args.epochs = args.dry_run_epochs
+        with RunTimer(f"ffi_bf_{args.case}", dry_run=is_dry_run,
+                      total_epochs=total_epochs, dry_run_epochs=args.dry_run_epochs):
+            train(args)
     else:
         validate(args)

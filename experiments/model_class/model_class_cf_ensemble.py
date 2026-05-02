@@ -42,7 +42,7 @@ def parse_args():
     p.add_argument("--max_num_categories", type=int, default=5)
     p.add_argument("--keep_intercept", action="store_true", default=True)
     p.add_argument("--add_interaction", action="store_true", default=True)
-    p.add_argument("--num_sample_steps", type=int, default=200)
+    p.add_argument("--num_sample_steps", type=int, default=50)
     p.add_argument("--num_samples", type=int, default=200)
     p.add_argument("--seed", type=int, default=0)
     p.add_argument("--free_prob", type=float, default=0.5)

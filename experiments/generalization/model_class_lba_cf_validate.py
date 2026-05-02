@@ -109,9 +109,9 @@ def parse_args():
     p.add_argument("--add_interaction", action="store_true", default=True)
 
     # Inference
-    p.add_argument("--num_sample_steps", type=int, default=200)
+    p.add_argument("--num_sample_steps", type=int, default=50)
     p.add_argument("--num_samples", type=int, default=200)
-    p.add_argument("--solver", type=str, default="rk4", choices=["euler", "midpoint", "rk4"])
+    p.add_argument("--solver", type=str, default="midpoint", choices=["euler", "midpoint", "rk4"])
     p.add_argument("--skip_log_gamma", action="store_true", default=True)
     p.add_argument("--include_log_gamma", dest="skip_log_gamma", action="store_false")
 

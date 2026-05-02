@@ -41,9 +41,9 @@ def parse_args():
                    help="Include pi (contamination) in inference.")
 
     # Inference
-    p.add_argument("--num_sample_steps", type=int, default=200)
+    p.add_argument("--num_sample_steps", type=int, default=50)
     p.add_argument("--num_samples", type=int, default=500)
-    p.add_argument("--solver", type=str, default="rk4", choices=["euler", "midpoint", "rk4"])
+    p.add_argument("--solver", type=str, default="midpoint", choices=["euler", "midpoint", "rk4"])
 
     # Architecture (must match training)
     p.add_argument("--encoder_num_layers", type=int, default=8)
