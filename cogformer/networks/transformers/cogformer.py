@@ -32,6 +32,8 @@ class CogFormer(nn.Module):
             pos_embedding_dim: int = 32,
             num_models: int | None = None,
             model_embed_dim: int = 8,
+            time_freq_trainable: bool = True,
+            block_film: bool = False,
     ):
         super().__init__()
 
@@ -66,6 +68,8 @@ class CogFormer(nn.Module):
             time_embedding_dim=time_embedding_dim,
             pos_embedding_dim=pos_embedding_dim,
             model_embedding_dim=self._model_embed_dim,
+            time_freq_trainable=time_freq_trainable,
+            block_film=block_film,
         )
 
     def forward(self, params, input_data, param_indices, regressor_indices, params_mask=None, model_ids=None):
