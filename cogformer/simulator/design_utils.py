@@ -576,7 +576,7 @@ def _discretize_column(
     """
     concentration = float(category_concentration) if category_concentration is not None else np.random.uniform(0.1, 2.0)
     p = np.random.dirichlet(concentration * np.ones(k))
-    cuts = np.cumsum(p)[:-1]
+    cuts = np.clip(np.cumsum(p)[:-1], 0.0, 1.0)
     boundaries = np.quantile(z, cuts)
     bin_ids = np.digitize(z, boundaries)
     one_hot = (bin_ids[:, None] == np.arange(k)[None, :]).astype(np.float32)

@@ -21,6 +21,11 @@ if [[ -n "${DRY_EPOCHS:-}" ]]; then
     DRY_OPTS=(--dry_run_epochs "$DRY_EPOCHS")
 fi
 
+WANDB_OPTS=()
+if [[ -n "${USE_WANDB:-}" ]]; then
+    WANDB_OPTS=(--use_wandb)
+fi
+
 # -----------------------------------------------------------------------
 # Shared baseline hyperparameters (model-family ablations)
 # -----------------------------------------------------------------------
@@ -50,6 +55,7 @@ run_mf() {
         --fm_num_samples 200 \
         --fm_solver midpoint \
         "${DRY_OPTS[@]}" \
+        "${WANDB_OPTS[@]}" \
         "$@"
 }
 
@@ -57,6 +63,7 @@ run_mf() {
 run_mc() {
     python -m "$MC" \
         "${DRY_OPTS[@]}" \
+        "${WANDB_OPTS[@]}" \
         --epochs 5000 \
         --steps_per_epoch 100 \
         --train_batch_size 64 \

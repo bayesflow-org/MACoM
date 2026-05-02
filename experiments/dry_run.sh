@@ -28,6 +28,7 @@ mkdir -p outputs/logs outputs/timing
 # First positional argument overrides; default is 1% of 5000 (CF + ablation budget).
 # Tune this so the total wall time is ~24 hours.
 export DRY_EPOCHS="${1:-50}"      # 1% of 5000 — used for CF training and ablations
+export USE_WANDB=1                # enable wandb logging for all training scripts
 MF_BF_DRY_EPOCHS=10              # 1% of 1000
 LCA_FFI_DRY_EPOCHS=5             # 1% of 500
 
@@ -96,7 +97,8 @@ for model in ddm cdm rdm; do
         --fm_sample_steps 50 \
         --fm_num_samples 200 \
         --fm_solver midpoint \
-        --dry_run_epochs "$DRY_EPOCHS"
+        --dry_run_epochs "$DRY_EPOCHS" \
+        --use_wandb
 done
 
 echo "  Validating DDM ..."
@@ -164,7 +166,8 @@ python -m experiments.model_class.model_class_cf_train \
     --layer_dropout 0.05 \
     --fm_sample_steps 50 \
     --fm_num_samples 100 \
-    --dry_run_epochs "$DRY_EPOCHS"
+    --dry_run_epochs "$DRY_EPOCHS" \
+    --use_wandb
 
 python -m experiments.model_class.model_class_cf_validate \
     --checkpoint "$MC_CKPT" \
@@ -268,7 +271,8 @@ for holdout in random variability interaction sparsity; do
         --fm_sample_steps 50 \
         --fm_num_samples 200 \
         --fm_solver midpoint \
-        --dry_run_epochs "$DRY_EPOCHS"
+        --dry_run_epochs "$DRY_EPOCHS" \
+        --use_wandb
 done
 
 echo "  Validating generalization ..."
@@ -313,7 +317,8 @@ python -m experiments.encoder_rep.encoder_rep_cf_train \
     --layer_dropout 0.05 \
     --fm_sample_steps 50 \
     --fm_num_samples 100 \
-    --dry_run_epochs "$DRY_EPOCHS"
+    --dry_run_epochs "$DRY_EPOCHS" \
+    --use_wandb
 
 for case in intercept_only intercept_v; do
     echo "  LCA BF $case (train dry) ..."
@@ -391,7 +396,8 @@ for model in ddm cdm rdm; do
             --epochs "$MF_BF_EPOCHS" \
             --steps_per_epoch 100 \
             --batch_size 64 \
-            --dry_run_epochs "$MF_BF_DRY_EPOCHS"
+            --dry_run_epochs "$MF_BF_DRY_EPOCHS" \
+        --use_wandb
     done
 done
 
