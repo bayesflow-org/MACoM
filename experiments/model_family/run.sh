@@ -50,7 +50,7 @@ cf_validate() {
         --proj_dim  "$PROJ" \
         --num_seeds "$SEEDS" \
         --seed_dim  "$DIM" \
-        --batch_size 500 --num_samples 500 --num_obs "$OBS"
+        --batch_size 500 --num_samples 500 --samples_chunk_size 50 --num_obs "$OBS"
 }
 
 # ── CF train ───────────────────────────────────────────────────────────────────
