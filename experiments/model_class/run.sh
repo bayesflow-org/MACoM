@@ -1,0 +1,64 @@
+#!/usr/bin/env bash
+# model_class/run.sh — ModelClass CF train/validate + LBA validate.
+#
+# Environment variables (optional):
+#   DRY_EPOCHS  — pass --dry_run_epochs to training
+#   USE_WANDB   — enable wandb logging
+
+set -euo pipefail
+source "$(dirname "${BASH_SOURCE[0]}")/../shared_config.sh"
+
+DRY=()
+[[ -n "${DRY_EPOCHS:-}" ]] && DRY=(--dry_run_epochs "$DRY_EPOCHS")
+
+WANDB=()
+[[ -n "${USE_WANDB:-}" ]] && WANDB=(--use_wandb)
+
+# ── CF train ───────────────────────────────────────────────────────────────────
+echo "=== ModelClass: CF train ==="
+python -m experiments.model_class.model_class_cf_train \
+    --encoder_num_layers "$ENC_LAYERS" \
+    --decoder_num_layers "$DEC_LAYERS" \
+    --encoder_num_heads  "$HEADS" \
+    --decoder_num_heads  "$HEADS" \
+    --proj_dim      "$PROJ" \
+    --num_seeds     "$SEEDS" \
+    --seed_dim      "$MC_DIM" \
+    --model_embed_dim 8 \
+    --min_num_obs   "$MIN_OBS" \
+    --max_num_obs   "$MAX_OBS" \
+    --train_batch_size "$MC_BATCH" \
+    --val_batch_size   "$VAL_BATCH" \
+    --epochs          "$EPOCHS" \
+    --steps_per_epoch "$STEPS" \
+    --lr 1e-4 --dropout 0.05 --layer_dropout 0.05 \
+    --fm_sample_steps 50 --fm_num_samples 100 \
+    "${DRY[@]}" "${WANDB[@]}"
+
+# ── CF validate ────────────────────────────────────────────────────────────────
+echo "=== ModelClass: CF validate ==="
+python -m experiments.model_class.model_class_cf_validate \
+    --checkpoint "$MC_CKPT" \
+    --encoder_num_layers "$ENC_LAYERS" \
+    --decoder_num_layers "$DEC_LAYERS" \
+    --encoder_num_heads  "$HEADS" \
+    --decoder_num_heads  "$HEADS" \
+    --proj_dim      "$PROJ" \
+    --num_seeds     "$SEEDS" \
+    --seed_dim      "$MC_DIM" \
+    --model_embed_dim 8 \
+    --batch_size 500 --num_samples 500 --num_obs "$OBS"
+
+# ── LBA validate ───────────────────────────────────────────────────────────────
+echo "=== ModelClass: LBA validate ==="
+python -m experiments.generalization.model_class_lba_cf_validate \
+    --checkpoint "$MC_CKPT" \
+    --encoder_num_layers "$ENC_LAYERS" \
+    --decoder_num_layers "$DEC_LAYERS" \
+    --encoder_num_heads  "$HEADS" \
+    --decoder_num_heads  "$HEADS" \
+    --proj_dim      "$PROJ" \
+    --num_seeds     "$SEEDS" \
+    --seed_dim      "$MC_DIM" \
+    --model_embed_dim 8 \
+    --batch_size 500 --num_samples 500 --num_obs "$OBS"
