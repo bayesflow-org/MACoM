@@ -103,16 +103,17 @@ class CogFormerTrainer:
 
         optimizer.zero_grad()
 
-        pred_velocity, target_velocity = self.net(
-            adapted["param_matrices"][..., None],
-            adapted["input_data"],
-            adapted["param_indices"],
-            adapted["regressor_indices"],
-            adapted["param_masks"],
-            model_ids=adapted["model_ids"],
-        )
-
-        L = self.net.compute_loss(pred_velocity, target_velocity, adapted["param_masks"])
+        device_type = config["device"].type
+        with torch.autocast(device_type=device_type, dtype=torch.bfloat16, enabled=(device_type == "cuda")):
+            pred_velocity, target_velocity = self.net(
+                adapted["param_matrices"][..., None],
+                adapted["input_data"],
+                adapted["param_indices"],
+                adapted["regressor_indices"],
+                adapted["param_masks"],
+                model_ids=adapted["model_ids"],
+            )
+            L = self.net.compute_loss(pred_velocity, target_velocity, adapted["param_masks"])
         L.backward()
 
         if config["gradient_clip_norm"] is not None:
