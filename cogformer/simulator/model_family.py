@@ -1,5 +1,7 @@
+import os
 import numpy as np
 from collections.abc import Callable
+from concurrent.futures import ThreadPoolExecutor
 
 from .model import Model
 from .design_utils import (
@@ -18,6 +20,14 @@ from .design_utils import (
 from ..utils.simulator_utils import softplus, inspect
 
 
+def _init_numba_threads(n: int) -> None:
+    try:
+        import numba
+        numba.set_num_threads(n)
+    except ImportError:
+        pass
+
+
 class ModelFamily:
     def __init__(
         self,
@@ -27,6 +37,7 @@ class ModelFamily:
         regressed_params: list[str] | None = None,
         mask_randomizer_kwargs: dict | None = None,
         name: str | None = None,
+        num_workers: int | None = None,
     ):
         self.name = name
         self.model = model
@@ -38,6 +49,30 @@ class ModelFamily:
         self.regressed_params = regressed_params
 
         self.mask_randomizer_kwargs = mask_randomizer_kwargs
+        # Optimal split: 6 numba threads per Python worker saturates simulation
+        # without over-fragmenting the thread pool. E.g. 24 cores → 4 workers × 6 numba threads.
+        default_workers = max(1, (os.cpu_count() or 1) // 6)
+        self._num_workers: int = num_workers if num_workers is not None else default_workers
+        self._executor: ThreadPoolExecutor | None = None
+
+    @property
+    def _pool(self) -> ThreadPoolExecutor:
+        if self._executor is None:
+            try:
+                import numba
+                threads_per_worker = max(1, numba.get_num_threads() // self._num_workers)
+            except ImportError:
+                threads_per_worker = 1
+            self._executor = ThreadPoolExecutor(
+                max_workers=self._num_workers,
+                initializer=_init_numba_threads,
+                initargs=(threads_per_worker,),
+            )
+        return self._executor
+
+    def __del__(self) -> None:
+        if self._executor is not None:
+            self._executor.shutdown(wait=False)
 
     @property
     def parameter_names(self) -> list[str]:
@@ -277,9 +312,7 @@ class ModelFamily:
         if mask_randomizer_kwargs is None:
             mask_randomizer_kwargs = self.mask_randomizer_kwargs
 
-        list_batch = []
-
-        for i in range(batch_size):
+        def _sample_one(i: int) -> dict:
             if context is None:
                 ctx_i = self.model.build_default_context(num_obs=num_obs) if hasattr(self.model, 'build_default_context') else None
             elif callable(context):
@@ -306,12 +339,16 @@ class ModelFamily:
                 category_concentration=category_concentration,
                 allowed_slope_patterns=allowed_slope_patterns,
             )
-
             sim_instance["num_obs"] = num_obs
             sim_instance["num_regressors"] = num_regressors_array[i]
             sim_instance["max_num_regressors"] = max_num_regressors
             sim_instance["max_num_categories"] = max_num_categories
-            list_batch.append(sim_instance)
+            return sim_instance
+
+        if self._num_workers == 1:
+            list_batch = [_sample_one(i) for i in range(batch_size)]
+        else:
+            list_batch = list(self._pool.map(_sample_one, range(batch_size)))
 
         return self.collate(
             list_batch,

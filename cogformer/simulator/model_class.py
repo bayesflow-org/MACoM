@@ -1,7 +1,9 @@
+import os
 import numpy as np
 from collections.abc import Callable
+from concurrent.futures import ThreadPoolExecutor
 
-from .model_family import ModelFamily
+from .model_family import ModelFamily, _init_numba_threads
 
 
 class ModelClass:
@@ -26,6 +28,7 @@ class ModelClass:
         model_families: dict[str, ModelFamily],
         link_funs: dict[str, dict | Callable],
         weights: list[float] | None = None,
+        num_workers: int | None = None,
     ):
         if set(model_families.keys()) != set(link_funs.keys()):
             raise ValueError("model_families and link_funs must have the same keys.")
@@ -59,6 +62,28 @@ class ModelClass:
             weights = np.array(weights, dtype=np.float64)
             weights /= weights.sum()
         self.weights = weights
+        default_workers = max(1, (os.cpu_count() or 1) // 6)
+        self._num_workers: int = num_workers if num_workers is not None else default_workers
+        self._executor: ThreadPoolExecutor | None = None
+
+    @property
+    def _pool(self) -> ThreadPoolExecutor:
+        if self._executor is None:
+            try:
+                import numba
+                threads_per_worker = max(1, numba.get_num_threads() // self._num_workers)
+            except ImportError:
+                threads_per_worker = 1
+            self._executor = ThreadPoolExecutor(
+                max_workers=self._num_workers,
+                initializer=_init_numba_threads,
+                initargs=(threads_per_worker,),
+            )
+        return self._executor
+
+    def __del__(self) -> None:
+        if self._executor is not None:
+            self._executor.shutdown(wait=False)
 
     def batch_sample(
         self,
@@ -93,8 +118,8 @@ class ModelClass:
             self.model_names, size=batch_size, p=self.weights
         )
 
-        list_batch = []
-        for i, model_name in enumerate(sampled_names):
+        def _sample_one(i: int) -> dict:
+            model_name = sampled_names[i]
             mf = self.model_families[model_name]
 
             ctx_i = None
@@ -110,18 +135,22 @@ class ModelClass:
                 max_num_categories=max_num_categories,
                 discrete_prob=discrete_prob,
                 keep_intercept=keep_intercept,
-                flatten_param_outputs=False,  # collate handles the final form
+                flatten_param_outputs=False,
                 fixed_config=fixed_config,
                 add_interaction=add_interaction,
                 link_fun=self.link_funs[model_name],
             )
-
             sim_instance["model_id"] = self.model_index[model_name]
             sim_instance["num_obs"] = num_obs
             sim_instance["num_regressors"] = int(num_regressors_array[i])
             sim_instance["max_num_regressors"] = max_num_regressors
             sim_instance["max_num_categories"] = max_num_categories
-            list_batch.append(sim_instance)
+            return sim_instance
+
+        if self._num_workers == 1:
+            list_batch = [_sample_one(i) for i in range(batch_size)]
+        else:
+            list_batch = list(self._pool.map(_sample_one, range(batch_size)))
 
         return self.collate(
             list_batch,
