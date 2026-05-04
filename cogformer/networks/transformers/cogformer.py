@@ -1,3 +1,5 @@
+import functools
+
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -6,7 +8,7 @@ from tqdm.auto import tqdm
 
 from cogformer.networks.transformers.encoder import Encoder
 from cogformer.networks.transformers.decoder import Decoder
-from cogformer.utils.ode_solver import ode_step, SOLVERS
+from cogformer.utils.ode_solver import ode_step
 
 
 class CogFormer(nn.Module):
@@ -94,6 +96,14 @@ class CogFormer(nn.Module):
 
         return pred_velocity, target_velocity
 
+    def _velocity(self, theta, t, enc_k, pos_q, mask_q, emb_q, amp_dtype, use_amp):
+        with torch.autocast(device_type=theta.device.type, dtype=amp_dtype, enabled=use_amp):
+            out = self.decoder.velocity(
+                theta_t=theta, query=pos_q, key=enc_k, t=t,
+                query_mask=mask_q, model_embedding=emb_q,
+            )
+        return out.float()
+
     @torch.no_grad()
     def sample(self, input_data, param_indices, regressor_indices, params_mask,
                steps=1000, num_samples=100, model_ids=None, solver="euler",
@@ -110,12 +120,8 @@ class CogFormer(nn.Module):
         num_tokens = param_indices.shape[1]
         device = input_data.device
 
-        if device.type == "cuda":
-            amp_dtype = torch.bfloat16 if torch.cuda.is_bf16_supported() else torch.float16
-            use_amp = True
-        else:
-            amp_dtype = torch.float32
-            use_amp = False
+        use_amp = device.type == "cuda"
+        amp_dtype = (torch.bfloat16 if torch.cuda.is_bf16_supported() else torch.float16) if use_amp else torch.float32
 
         # Encode once — shared across all sample chunks
         encoder_tokens = self.encoder(input_data)                               # (B, num_seeds, seed_dim)
@@ -141,22 +147,17 @@ class CogFormer(nn.Module):
             theta_t = torch.randn((batch_size * s_count, num_tokens, 1), device=device)
             t       = torch.zeros((batch_size * s_count, num_tokens, 1), device=device)
 
-            def _v(theta, time, _enc=enc_k, _pos=pos_q, _mask=mask_q, _emb=emb_q):
-                with torch.autocast(device_type=device.type, dtype=amp_dtype, enabled=use_amp):
-                    out = self.decoder.velocity(
-                        theta_t=theta, query=_pos, key=_enc, t=time,
-                        query_mask=_mask, model_embedding=_emb,
-                    )
-                return out.float()
+            v_fn = functools.partial(self._velocity, enc_k=enc_k, pos_q=pos_q, mask_q=mask_q,
+                                     emb_q=emb_q, amp_dtype=amp_dtype, use_amp=use_amp)
 
             for _ in tqdm(range(steps), desc="Sampling", unit="step", leave=(s_start == 0)):
-                theta_t = ode_step(_v, theta_t, t, dt, solver)
+                theta_t = ode_step(v_fn, theta_t, t, dt, solver)
                 t = t + dt
 
-            all_chunks.append(theta_t.reshape(batch_size, s_count, num_tokens, 1).cpu().numpy())
+            all_chunks.append(theta_t.reshape(batch_size, s_count, num_tokens, 1).cpu())
             del enc_k, pos_q, mask_q, emb_q, theta_t, t
 
-        return np.concatenate(all_chunks, axis=1)  # (B, num_samples, num_tokens, 1)
+        return torch.cat(all_chunks, dim=1).numpy()  # (B, num_samples, num_tokens, 1)
 
     def compute_loss(self, pred_velocity, target_velocity, param_masks) -> torch.Tensor:
 
