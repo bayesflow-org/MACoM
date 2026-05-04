@@ -50,37 +50,31 @@ cf_validate() {
         --proj_dim  "$PROJ" \
         --num_seeds "$SEEDS" \
         --seed_dim  "$DIM" \
-        --batch_size 500 --num_samples 500 --samples_chunk_size 50 --num_obs "$OBS"
+        --batch_size 500 --num_samples 200 --sample_chunk_size 50 --samples_chunk_size 100 --num_obs "$OBS"
 }
 
-# ── CF train ───────────────────────────────────────────────────────────────────
-echo "=== ModelFamily: CF train ==="
+declare -A MF_CKPTS=([ddm]="$DDM_MF_CKPT" [cdm]="$CDM_MF_CKPT" [rdm]="$RDM_MF_CKPT")
+
+# ── CF train → validate per model ─────────────────────────────────────────────
+echo "=== ModelFamily: CF ==="
 for model in ddm cdm rdm; do
-    echo "  $model ..."
+    echo "  $model: train ..."
     cf_train "$model"
+    echo "  $model: validate ..."
+    cf_validate "$model" "${MF_CKPTS[$model]}"
 done
 
-# ── CF validate ────────────────────────────────────────────────────────────────
-echo "=== ModelFamily: CF validate ==="
-cf_validate ddm "$DDM_MF_CKPT"
-cf_validate cdm "$CDM_MF_CKPT"
-cf_validate rdm "$RDM_MF_CKPT"
-
-# ── BF train ───────────────────────────────────────────────────────────────────
-echo "=== ModelFamily: BF train ==="
+# ── BF train → validate per model ─────────────────────────────────────────────
+echo "=== ModelFamily: BF ==="
 for model in ddm cdm rdm; do
     for case in intercept_only fixed regressed; do
-        echo "  $model / $case ..."
+        echo "  $model / $case: train ..."
         python -m experiments.model_family.model_family_bf_train \
             --model "$model" --case "$case" \
             --epochs "$MF_BF_EPOCHS" --steps_per_epoch 100 --batch_size 64 \
             "${BF_DRY[@]}" "${WANDB[@]}"
     done
-done
-
-# ── BF validate ────────────────────────────────────────────────────────────────
-echo "=== ModelFamily: BF validate ==="
-for model in ddm cdm rdm; do
+    echo "  $model: validate ..."
     python -m experiments.model_family.model_family_bf_validate --model "$model"
 done
 

@@ -208,6 +208,7 @@ class CogFormerTrainer:
             true_set = true_set.reshape(config["batch_size"], n_rows, n_cols)
 
             chunk_size = config.get("val_sample_chunk_size", config["batch_size"])
+            enc_tokens = self.net.encoder(adapted["input_data"])
             pred_chunks = []
             for c_start in range(0, config["batch_size"], chunk_size):
                 c_end = min(c_start + chunk_size, config["batch_size"])
@@ -219,6 +220,7 @@ class CogFormerTrainer:
                     steps=config["fm_sample_steps"],
                     num_samples=config["fm_num_samples"],
                     solver=config.get("fm_solver", "euler"),
+                    encoder_tokens=enc_tokens[c_start:c_end],
                 )
                 pred_chunks.append(chunk)
             pred_set = np.concatenate(pred_chunks, axis=0)

@@ -286,6 +286,7 @@ def main():
 
             adapted = adapter.adapt(test_samples)
 
+            enc_tokens = cogformer.encoder(adapted["input_data"])
             pred_chunks = []
             for c_start in range(0, args.batch_size, args.sample_chunk_size):
                 c_end = min(c_start + args.sample_chunk_size, args.batch_size)
@@ -298,6 +299,7 @@ def main():
                     num_samples=args.num_samples,
                     model_ids=adapted["model_ids"][c_start:c_end],
                     samples_chunk_size=args.samples_chunk_size,
+                    encoder_tokens=enc_tokens[c_start:c_end],
                 ))
             pred_set = np.concatenate(pred_chunks, axis=0)
 

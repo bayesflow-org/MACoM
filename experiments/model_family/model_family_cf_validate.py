@@ -67,7 +67,7 @@ def parse_args():
     p.add_argument("--num_samples", type=int, default=200)
     p.add_argument("--solver", type=str, default="midpoint",
                    choices=["euler", "midpoint", "rk4"])
-    p.add_argument("--sample_chunk_size", type=int, default=50,
+    p.add_argument("--sample_chunk_size", type=int, default=30,
                    help="Batch items per cogformer.sample() call; reduces peak GPU memory.")
     p.add_argument("--samples_chunk_size", type=int, default=None,
                    help="Samples per cogformer.sample() call; reduces peak GPU memory. "
@@ -226,6 +226,7 @@ def main():
         n_rows = true_set.shape[1] // n_cols
         true_set = true_set.reshape(args.batch_size, n_rows, n_cols)
 
+        enc_tokens = cogformer.encoder(adapted["input_data"])
         pred_chunks = []
         for c_start in range(0, args.batch_size, args.sample_chunk_size):
             c_end = min(c_start + args.sample_chunk_size, args.batch_size)
@@ -238,6 +239,7 @@ def main():
                 num_samples=args.num_samples,
                 solver=args.solver,
                 samples_chunk_size=args.samples_chunk_size,
+                encoder_tokens=enc_tokens[c_start:c_end],
             ))
         pred_set = np.concatenate(pred_chunks, axis=0)
         pred_set = pred_set.reshape(args.batch_size, args.num_samples, n_rows, n_cols)

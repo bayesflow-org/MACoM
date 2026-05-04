@@ -107,7 +107,7 @@ class CogFormer(nn.Module):
     @torch.no_grad()
     def sample(self, input_data, param_indices, regressor_indices, params_mask,
                steps=1000, num_samples=100, model_ids=None, solver="euler",
-               samples_chunk_size=None):
+               samples_chunk_size=None, encoder_tokens=None):
         """
         solver : "euler" | "midpoint" | "rk4"
             NFE per step: euler=1, midpoint=2, rk4=4.
@@ -115,6 +115,10 @@ class CogFormer(nn.Module):
             Process num_samples in chunks of this size. Peak GPU memory scales with
             batch_size * samples_chunk_size instead of batch_size * num_samples.
             The encoder runs once; only the ODE loop is repeated per chunk.
+        encoder_tokens : Tensor or None
+            Pre-computed encoder output (B, num_seeds, seed_dim). If provided the
+            encoder forward pass is skipped — useful when sampling multiple chunks
+            from one large batch that was encoded once externally.
         """
         batch_size = input_data.shape[0]
         num_tokens = param_indices.shape[1]
@@ -124,7 +128,8 @@ class CogFormer(nn.Module):
         amp_dtype = (torch.bfloat16 if torch.cuda.is_bf16_supported() else torch.float16) if use_amp else torch.float32
 
         # Encode once — shared across all sample chunks
-        encoder_tokens = self.encoder(input_data)                               # (B, num_seeds, seed_dim)
+        if encoder_tokens is None:
+            encoder_tokens = self.encoder(input_data)                           # (B, num_seeds, seed_dim)
         pos_embeddings = torch.cat([param_indices, regressor_indices], dim=-1)  # (B, num_tokens, 2)
 
         model_emb = None
