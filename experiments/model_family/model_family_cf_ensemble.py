@@ -40,7 +40,7 @@ _OUTDIRS = {
 }
 
 MODELS = {}
-for _key, _base in _BASE_MODELS.items():
+for _key, _base in {k: v for k, v in _BASE_MODELS.items() if k in _OUTDIRS}.items():
     _cfg = add_global_params(_base, GLOBAL_PARAMS, GLOBAL_VARIABLE_NAMES)
     # Ensemble only uses a subset of benchmark cases (no "full")
     _cfg["benchmark_configs"] = {

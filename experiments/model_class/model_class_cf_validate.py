@@ -122,6 +122,11 @@ def parse_args():
     # Inference
     p.add_argument("--num_sample_steps", type=int, default=50)
     p.add_argument("--num_samples", type=int, default=200)
+    p.add_argument("--sample_chunk_size", type=int, default=50,
+                   help="Batch items per cogformer.sample() call; reduces peak GPU memory.")
+    p.add_argument("--samples_chunk_size", type=int, default=None,
+                   help="Samples per cogformer.sample() call; reduces peak GPU memory. "
+                        "Peak scales with batch_chunk * samples_chunk instead of batch_chunk * num_samples.")
     p.add_argument("--include_full", action="store_true", default=False, help="Include the 'full' benchmark case (skipped by default)")
     p.add_argument("--skip_posteriors", action="store_true", default=False, help="Skip posterior pairplots")
     p.add_argument("--skip_log_gamma", action="store_true", default=True, help="Skip log gamma metric (slow, skipped by default)")
@@ -199,6 +204,7 @@ def main():
     state = torch.load(ckpt_path, map_location=device)
     cogformer.load_state_dict(state)
     cogformer.eval()
+    cogformer = torch.compile(cogformer, dynamic=True)
 
     colors = cogformer_mc_colors()
     all_model_configs = get_benchmark_design_configs()
@@ -280,15 +286,20 @@ def main():
 
             adapted = adapter.adapt(test_samples)
 
-            pred_set = cogformer.sample(
-                adapted["input_data"],
-                adapted["param_indices"],
-                adapted["regressor_indices"],
-                adapted["param_masks"],
-                steps=args.num_sample_steps,
-                num_samples=args.num_samples,
-                model_ids=adapted["model_ids"],
-            )
+            pred_chunks = []
+            for c_start in range(0, args.batch_size, args.sample_chunk_size):
+                c_end = min(c_start + args.sample_chunk_size, args.batch_size)
+                pred_chunks.append(cogformer.sample(
+                    adapted["input_data"][c_start:c_end],
+                    adapted["param_indices"][c_start:c_end],
+                    adapted["regressor_indices"][c_start:c_end],
+                    adapted["param_masks"][c_start:c_end],
+                    steps=args.num_sample_steps,
+                    num_samples=args.num_samples,
+                    model_ids=adapted["model_ids"][c_start:c_end],
+                    samples_chunk_size=args.samples_chunk_size,
+                ))
+            pred_set = np.concatenate(pred_chunks, axis=0)
 
             global_indices = model_class.local_to_global[model_name]
 

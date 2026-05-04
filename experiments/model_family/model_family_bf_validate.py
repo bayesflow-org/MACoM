@@ -31,7 +31,7 @@ _BF_DIRS = {
 }
 
 MODELS = {}
-for _key, _base in _BASE_MODELS.items():
+for _key, _base in {k: v for k, v in _BASE_MODELS.items() if k in _BF_DIRS}.items():
     _cfg = dict(_base)
     _cfg["case_configs"] = _cfg["bf_case_configs"]
     _cfg["ckpt_prefix"], _cfg["figures_dir"] = _BF_DIRS[_key]

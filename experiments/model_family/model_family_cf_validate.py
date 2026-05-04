@@ -29,7 +29,7 @@ _OUTDIR_MAP = {
 }
 
 MODELS = {}
-for _key, _base in _BASE_MODELS.items():
+for _key, _base in {k: v for k, v in _BASE_MODELS.items() if k in _OUTDIR_MAP}.items():
     _cfg = add_global_params(_base, GLOBAL_PARAMS, GLOBAL_VARIABLE_NAMES)
     _cfg["outdir"], _cfg["pred_filename_template"] = _OUTDIR_MAP[_key]
     MODELS[_key] = _cfg
@@ -67,6 +67,11 @@ def parse_args():
     p.add_argument("--num_samples", type=int, default=200)
     p.add_argument("--solver", type=str, default="midpoint",
                    choices=["euler", "midpoint", "rk4"])
+    p.add_argument("--sample_chunk_size", type=int, default=50,
+                   help="Batch items per cogformer.sample() call; reduces peak GPU memory.")
+    p.add_argument("--samples_chunk_size", type=int, default=None,
+                   help="Samples per cogformer.sample() call; reduces peak GPU memory. "
+                        "Peak scales with batch_chunk * samples_chunk instead of batch_chunk * num_samples.")
     p.add_argument("--include_full", action="store_true", default=False)
     p.add_argument("--skip_posteriors", action="store_true", default=False)
     p.add_argument("--skip_log_gamma", action="store_true", default=True)
@@ -148,6 +153,7 @@ def main():
     state = torch.load(Path(args.checkpoint), map_location=device)
     cogformer.load_state_dict(state)
     cogformer.eval()
+    cogformer = torch.compile(cogformer, dynamic=True)
 
     colors = cogformer_fm_colors()
     benchmark = dict(model_cfg["benchmark_configs"])
@@ -220,15 +226,20 @@ def main():
         n_rows = true_set.shape[1] // n_cols
         true_set = true_set.reshape(args.batch_size, n_rows, n_cols)
 
-        pred_set = cogformer.sample(
-            adapted["input_data"],
-            adapted["param_indices"],
-            adapted["regressor_indices"],
-            adapted["param_masks"],
-            steps=args.num_sample_steps,
-            num_samples=args.num_samples,
-            solver=args.solver,
-        )
+        pred_chunks = []
+        for c_start in range(0, args.batch_size, args.sample_chunk_size):
+            c_end = min(c_start + args.sample_chunk_size, args.batch_size)
+            pred_chunks.append(cogformer.sample(
+                adapted["input_data"][c_start:c_end],
+                adapted["param_indices"][c_start:c_end],
+                adapted["regressor_indices"][c_start:c_end],
+                adapted["param_masks"][c_start:c_end],
+                steps=args.num_sample_steps,
+                num_samples=args.num_samples,
+                solver=args.solver,
+                samples_chunk_size=args.samples_chunk_size,
+            ))
+        pred_set = np.concatenate(pred_chunks, axis=0)
         pred_set = pred_set.reshape(args.batch_size, args.num_samples, n_rows, n_cols)
 
         params_mask = adapted["param_masks"].detach().cpu().numpy()

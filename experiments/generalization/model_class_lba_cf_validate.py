@@ -112,6 +112,11 @@ def parse_args():
     p.add_argument("--num_sample_steps", type=int, default=50)
     p.add_argument("--num_samples", type=int, default=200)
     p.add_argument("--solver", type=str, default="midpoint", choices=["euler", "midpoint", "rk4"])
+    p.add_argument("--sample_chunk_size", type=int, default=50,
+                   help="Batch items per cogformer.sample() call; reduces peak GPU memory.")
+    p.add_argument("--samples_chunk_size", type=int, default=None,
+                   help="Samples per cogformer.sample() call; reduces peak GPU memory. "
+                        "Peak scales with batch_chunk * samples_chunk instead of batch_chunk * num_samples.")
     p.add_argument("--skip_log_gamma", action="store_true", default=True)
     p.add_argument("--include_log_gamma", dest="skip_log_gamma", action="store_false")
 
@@ -205,6 +210,7 @@ def main():
     state = torch.load(Path(args.checkpoint), map_location=device)
     cogformer.load_state_dict(state)
     cogformer.eval()
+    cogformer = torch.compile(cogformer, dynamic=True)
 
     colors = cogformer_mc_colors()
 
@@ -276,16 +282,21 @@ def main():
 
             adapted = adapter.adapt(test_samples_copy, device=device)
 
-            pred_set = cogformer.sample(
-                adapted["input_data"],
-                adapted["param_indices"],
-                adapted["regressor_indices"],
-                adapted["param_masks"],
-                steps=args.num_sample_steps,
-                num_samples=args.num_samples,
-                solver=args.solver,
-                model_ids=adapted["model_ids"],
-            )
+            pred_chunks = []
+            for c_start in range(0, args.batch_size, args.sample_chunk_size):
+                c_end = min(c_start + args.sample_chunk_size, args.batch_size)
+                pred_chunks.append(cogformer.sample(
+                    adapted["input_data"][c_start:c_end],
+                    adapted["param_indices"][c_start:c_end],
+                    adapted["regressor_indices"][c_start:c_end],
+                    adapted["param_masks"][c_start:c_end],
+                    steps=args.num_sample_steps,
+                    num_samples=args.num_samples,
+                    solver=args.solver,
+                    model_ids=adapted["model_ids"][c_start:c_end],
+                    samples_chunk_size=args.samples_chunk_size,
+                ))
+            pred_set = np.concatenate(pred_chunks, axis=0)
             pred_set = pred_set.reshape(
                 args.batch_size, args.num_samples, n_rows, N_GLOBAL_PARAMS
             )[:, :, :, LBA_TO_GLOBAL]

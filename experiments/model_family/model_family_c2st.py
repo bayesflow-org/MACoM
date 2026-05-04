@@ -25,7 +25,7 @@ _C2ST_OUTDIRS = {
 }
 
 MODELS = {}
-for _key, _base in _BASE_MODELS.items():
+for _key, _base in {k: v for k, v in _BASE_MODELS.items() if k in _CF_PRED_FILENAMES}.items():
     _cfg = {
         "intrinsic_params": _base["intrinsic_params"],
         "variable_names": _base["variable_names"],

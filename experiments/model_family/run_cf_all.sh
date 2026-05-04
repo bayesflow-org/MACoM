@@ -51,7 +51,9 @@ MAX_NUM_OBS=500
 
 # Inference
 FM_STEPS=200
-FM_SAMPLES=500
+FM_SAMPLES=200       # fm_num_samples for training val_step
+CF_BATCH=500         # batch_size for cf_validate / ensemble
+CF_FM_SAMPLES=500    # num_samples for cf_validate / ensemble
 FM_SOLVER="midpoint"   # euler | midpoint | rk4  (rk4: same quality as euler at ~quarter the steps)
 
 # ============================================================
@@ -161,10 +163,10 @@ for model in "${MODELS[@]}"; do
             --model      "$model" \
             --checkpoint "$CKPT_PATH" \
             "${ARCH_ARGS[@]}" \
-            --batch_size       "$VAL_BATCH" \
+            --batch_size       "$CF_BATCH" \
             --num_obs          "$NUM_OBS" \
             --num_sample_steps "$FM_STEPS" \
-            --num_samples      "$FM_SAMPLES" \
+            --num_samples      "$CF_FM_SAMPLES" \
             --solver           "$FM_SOLVER"; then
         echo "  [FAIL] Validation failed — $model"
         FAILED+=("${model}/validate")
@@ -179,10 +181,10 @@ for model in "${MODELS[@]}"; do
             --model      "$model" \
             --checkpoint "$CKPT_PATH" \
             "${ARCH_ARGS[@]}" \
-            --batch_size       "$VAL_BATCH" \
+            --batch_size       "$CF_BATCH" \
             --num_obs          "$NUM_OBS" \
             --num_sample_steps "$FM_STEPS" \
-            --num_samples      "$FM_SAMPLES" \
+            --num_samples      "$CF_FM_SAMPLES" \
             --solver           "$FM_SOLVER"; then
         echo "  [FAIL] Ensemble failed — $model"
         FAILED+=("${model}/ensemble")

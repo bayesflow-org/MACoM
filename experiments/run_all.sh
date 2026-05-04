@@ -37,7 +37,7 @@ MIN_OBS=200
 MAX_OBS=1000
 BATCH=64
 MC_BATCH=64
-VAL_BATCH=500
+VAL_BATCH=200
 EPOCHS=5000
 STEPS=100
 
@@ -102,7 +102,8 @@ run_mf_validate() {
         --proj_dim "$PROJ" \
         --num_seeds "$SEEDS" \
         --seed_dim "$DIM" \
-        --batch_size 200 \
+        --batch_size 500 \
+        --num_samples 500 \
         --num_obs "$OBS"
 }
 
@@ -187,7 +188,8 @@ python -m experiments.model_class.model_class_cf_validate \
     --num_seeds "$SEEDS" \
     --seed_dim "$MC_DIM" \
     --model_embed_dim 8 \
-    --batch_size 200 \
+    --batch_size 500 \
+    --num_samples 500 \
     --num_obs "$OBS"
 
 # ── Step 3: ModelClass LBA validate ───────────────────────────────────────────
@@ -202,7 +204,8 @@ python -m experiments.generalization.model_class_lba_cf_validate \
     --num_seeds "$SEEDS" \
     --seed_dim "$MC_DIM" \
     --model_embed_dim 8 \
-    --batch_size 200 \
+    --batch_size 500 \
+    --num_samples 500 \
     --num_obs "$OBS"
 
 # ── Step 4: Real data apply (DDM mf/mc, CDM mf/mc) ───────────────────────────
@@ -272,7 +275,8 @@ for holdout in random variability interaction sparsity; do
         --proj_dim "$PROJ" \
         --num_seeds "$SEEDS" \
         --seed_dim "$DIM" \
-        --batch_size 200 \
+        --batch_size 500 \
+        --num_samples 500 \
         --num_obs "$OBS"
 done
 
