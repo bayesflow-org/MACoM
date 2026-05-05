@@ -24,7 +24,6 @@ class Encoder(nn.Module):
         layer_dropout: float = 0.0,
         layer_design: str = None,
         layer_kwargs: dict = None,
-        use_rope: bool = True,
     ):
         super().__init__()
         assert num_layers >= 1, "num_layers must be >= 1"
@@ -41,7 +40,6 @@ class Encoder(nn.Module):
                         num_layers=num_layers,
                         layer_norm=layer_norm,
                         dropout=dropout,
-                        use_rope=use_rope,
                         **layer_kwargs
                     )
                 case "mixed_attention":
@@ -71,7 +69,6 @@ class Encoder(nn.Module):
                     num_heads=num_heads,
                     layer_norm=layer_norm,
                     dropout=dropout,
-                    use_rope=use_rope,
                 ) for _ in range(num_layers)]
             )
 

@@ -1,67 +1,7 @@
 import torch
 import torch.nn as nn
-import torch.nn.functional as F
 
 from ..mlp.ffn import FFN
-from .embeddings import RoPE, apply_rope
-
-
-class RoPEAttention(nn.Module):
-    """Self-attention with RoPE applied to Q and K.
-
-    Implements the same forward interface as nn.MultiheadAttention so it can
-    be used as a drop-in replacement inside MultiheadAttentionBlock.
-    """
-
-    def __init__(self, embed_dim: int, num_heads: int, dropout: float = 0.0):
-        super().__init__()
-        assert embed_dim % num_heads == 0, "embed_dim must be divisible by num_heads"
-        self.embed_dim = embed_dim
-        self.num_heads = num_heads
-        self.head_dim = embed_dim // num_heads
-
-        self.q_proj = nn.Linear(embed_dim, embed_dim, bias=False)
-        self.k_proj = nn.Linear(embed_dim, embed_dim, bias=False)
-        self.v_proj = nn.Linear(embed_dim, embed_dim, bias=False)
-        self.out_proj = nn.Linear(embed_dim, embed_dim, bias=False)
-
-        self.rope = RoPE(head_dim=self.head_dim)
-        self._dropout = dropout
-
-    def forward(
-        self,
-        query: torch.Tensor,
-        key: torch.Tensor,
-        value: torch.Tensor,
-        attn_mask: torch.Tensor = None,
-        key_padding_mask: torch.Tensor = None,
-        need_weights: bool = False,
-    ) -> tuple[torch.Tensor, None]:
-        B, T_q, _ = query.shape
-        T_k = key.shape[1]
-
-        q = self.q_proj(query).view(B, T_q, self.num_heads, self.head_dim).transpose(1, 2)
-        k = self.k_proj(key).view(B, T_k, self.num_heads, self.head_dim).transpose(1, 2)
-        v = self.v_proj(value).view(B, T_k, self.num_heads, self.head_dim).transpose(1, 2)
-
-        cos, sin = self.rope(max(T_q, T_k))
-        q = apply_rope(q, cos[:T_q], sin[:T_q])
-        k = apply_rope(k, cos[:T_k], sin[:T_k])
-
-        merged_mask = None
-        if attn_mask is not None:
-            merged_mask = attn_mask.float() if attn_mask.dtype == torch.bool else attn_mask
-        if key_padding_mask is not None:
-            kpm = key_padding_mask[:, None, None, :].float() * -1e9
-            merged_mask = kpm if merged_mask is None else merged_mask + kpm
-
-        out = F.scaled_dot_product_attention(
-            q, k, v,
-            attn_mask=merged_mask,
-            dropout_p=self._dropout if self.training else 0.0,
-        )
-        out = out.transpose(1, 2).reshape(B, T_q, self.embed_dim)
-        return self.out_proj(out), None
 
 
 class MultiheadAttentionBlock(nn.Module):
@@ -81,7 +21,6 @@ class MultiheadAttentionBlock(nn.Module):
         expansion_factor: FFN intermediate width multiplier (before 2/3 GLU scaling)
         glu_variant:      gated activation for the FFN sublayer; one of
                           "swiglu", "geglu", "reglu", "liglu"
-        use_rope:         use RoPEAttention instead of nn.MultiheadAttention
     """
     def __init__(
         self,
@@ -92,25 +31,21 @@ class MultiheadAttentionBlock(nn.Module):
         dropout: float = 0.0,
         expansion_factor: float = 4.0,
         glu_variant: str = "swiglu",
-        use_rope: bool = False,
     ):
         super().__init__()
 
         if key_dim is None:
             key_dim = query_dim
 
-        if use_rope:
-            self.attn = RoPEAttention(embed_dim=query_dim, num_heads=num_heads, dropout=dropout)
-        else:
-            self.attn = nn.MultiheadAttention(
-                embed_dim=query_dim,
-                kdim=key_dim,
-                vdim=key_dim,
-                num_heads=num_heads,
-                dropout=dropout,
-                bias=False,
-                batch_first=True,
-            )
+        self.attn = nn.MultiheadAttention(
+            embed_dim=query_dim,
+            kdim=key_dim,
+            vdim=key_dim,
+            num_heads=num_heads,
+            dropout=dropout,
+            bias=False,
+            batch_first=True,
+        )
 
         if layer_norm:
             self.norm_q   = nn.RMSNorm(query_dim)

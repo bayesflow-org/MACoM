@@ -9,7 +9,6 @@ class SelfAttentionBlock(nn.Module):
         num_heads: int = 4,
         layer_norm: bool = False,
         dropout: float = 0.1,
-        use_rope: bool = False,
     ):
         super().__init__()
         self.mab = MultiheadAttentionBlock(
@@ -17,7 +16,6 @@ class SelfAttentionBlock(nn.Module):
             num_heads=num_heads,
             layer_norm=layer_norm,
             dropout=dropout,
-            use_rope=use_rope,
         )
 
     def forward(self, query, attn_mask=None, key_padding_mask=None):
