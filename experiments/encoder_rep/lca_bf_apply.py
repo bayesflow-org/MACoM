@@ -14,7 +14,10 @@ os.environ["KERAS_BACKEND"] = "torch"
 import argparse
 import logging
 import numpy as np
-import wandb
+try:
+    import wandb
+except Exception:
+    wandb = None
 import torch
 import keras
 import bayesflow as bf

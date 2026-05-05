@@ -3,7 +3,10 @@ os.environ["KERAS_BACKEND"] = "jax"
 
 import argparse
 import numpy as np
-import wandb
+try:
+    import wandb
+except Exception:
+    wandb = None
 import bayesflow as bf
 
 from pathlib import Path

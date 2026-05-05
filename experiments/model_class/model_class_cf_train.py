@@ -1,5 +1,8 @@
 import torch
-import wandb
+try:
+    import wandb
+except Exception:
+    wandb = None
 import logging
 import argparse
 from pathlib import Path
