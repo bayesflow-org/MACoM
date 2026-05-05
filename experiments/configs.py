@@ -51,6 +51,15 @@ DDM_BENCHMARK_CONFIGS = {
         "u_2": ["v", "a", "z", "tau"],
         "u_1:u_2": ["v", "a", "z"],
     },
+    "three_reg_interaction": {
+        "1": ["v", "a", "z", "tau", "s_v", "s_tau"],
+        "u_1": ["v", "a", "z", "tau", "s_v"],
+        "u_2": ["v", "a", "z", "tau"],
+        "u_3": ["v", "a", "z"],
+        "u_1:u_2": ["v", "a", "z"],
+        "u_1:u_3": ["v", "a"],
+        "u_2:u_3": ["v", "a"],
+    },
     "full": {
         "1": ["v", "a", "z", "tau", "s_v", "s_tau"],
         "u_1": ["v", "a", "z", "tau", "s_v", "s_tau"],
@@ -102,6 +111,15 @@ CDM_BENCHMARK_CONFIGS = {
         "u_1": ["v", "v_theta", "a", "tau", "s_v"],
         "u_2": ["v", "v_theta", "a", "tau"],
         "u_1:u_2": ["v", "v_theta", "a"],
+    },
+    "three_reg_interaction": {
+        "1": ["v", "v_theta", "a", "tau", "s_v", "s_tau"],
+        "u_1": ["v", "v_theta", "a", "tau", "s_v"],
+        "u_2": ["v", "v_theta", "a", "tau"],
+        "u_3": ["v", "v_theta", "a"],
+        "u_1:u_2": ["v", "v_theta", "a"],
+        "u_1:u_3": ["v", "v_theta"],
+        "u_2:u_3": ["v", "v_theta"],
     },
     "full": {
         "1": ["v", "v_theta", "a", "tau", "s_v", "s_tau"],
@@ -155,6 +173,15 @@ RDM_BENCHMARK_CONFIGS = {
         "u_2": ["v", "v_diff", "a", "tau"],
         "u_1:u_2": ["v", "v_diff", "a"],
     },
+    "three_reg_interaction": {
+        "1": ["v", "v_diff", "a", "tau", "s_v", "s_tau"],
+        "u_1": ["v", "v_diff", "a", "tau", "s_v"],
+        "u_2": ["v", "v_diff", "a", "tau"],
+        "u_3": ["v", "v_diff", "a"],
+        "u_1:u_2": ["v", "v_diff", "a"],
+        "u_1:u_3": ["v", "v_diff"],
+        "u_2:u_3": ["v", "v_diff"],
+    },
     "full": {
         "1": ["v", "v_diff", "a", "tau", "s_v", "s_tau"],
         "u_1": ["v", "v_diff", "a", "tau", "s_v", "s_tau"],
@@ -207,6 +234,15 @@ LBA_BENCHMARK_CONFIGS = {
         "u_1": ["v", "v_diff", "a", "tau", "s_v"],
         "u_2": ["v", "v_diff", "a", "tau"],
         "u_1:u_2": ["v", "v_diff", "a"],
+    },
+    "three_reg_interaction": {
+        "1": ["v", "v_diff", "a", "tau", "s_v", "s_tau"],
+        "u_1": ["v", "v_diff", "a", "tau", "s_v"],
+        "u_2": ["v", "v_diff", "a", "tau"],
+        "u_3": ["v", "v_diff", "a"],
+        "u_1:u_2": ["v", "v_diff", "a"],
+        "u_1:u_3": ["v", "v_diff"],
+        "u_2:u_3": ["v", "v_diff"],
     },
     "full": {
         "1": ["v", "v_diff", "a", "tau", "s_v", "s_tau"],

@@ -5,6 +5,7 @@ except Exception:
     wandb = None
 import logging
 import argparse
+from concurrent.futures import ThreadPoolExecutor
 
 from pathlib import Path
 from tqdm.auto import tqdm
@@ -18,10 +19,7 @@ np.set_printoptions(suppress=True)
 from cogformer.simulator import ModelFamily
 from cogformer.adapter import Adapter
 from cogformer.networks.transformers.cogformer import CogFormer
-from cogformer.diagnostics.plot.adaptive_recovery import adaptive_recovery
-from cogformer.diagnostics.plot.adaptive_posterior import adaptive_posterior
-from cogformer.diagnostics.plot.adaptive_coverage import adaptive_coverage
-from cogformer.diagnostics.plot.adaptive_metrics import adaptive_metrics as plot_adaptive_metrics
+from cogformer.diagnostics.plot.adaptive_correlation import adaptive_correlation
 from cogformer.utils.plot_utils import cogformer_fm_colors
 
 from ..configs import MODELS as _BASE_MODELS, GLOBAL_PARAMS, GLOBAL_VARIABLE_NAMES
@@ -105,40 +103,48 @@ class CogFormerTrainer:
         scheduler = CosineAnnealingLR(optimizer, T_max=train_config["epochs"])
         val_interval = self.model_cfg["val_epoch_interval"]
 
-        for epoch in range(train_config["epochs"]):
-            pbar = tqdm(
-                total=train_config["steps_per_epoch"],
-                desc=f"Epoch {epoch + 1}/{train_config['epochs']}",
-                miniters=100,
-            )
-            for _ in range(train_config["steps_per_epoch"]):
-                loss, current_lr = self.train_step(
-                    config=train_config,
-                    optimizer=optimizer,
-                    scheduler=scheduler,
+        # Persistent single-thread executor: simulate + adapt in background while
+        # the GPU processes the current step. Avoids per-step thread-creation overhead.
+        with ThreadPoolExecutor(max_workers=1) as executor:
+            future = executor.submit(self._simulate_and_adapt, train_config)
+
+            for epoch in range(train_config["epochs"]):
+                pbar = tqdm(
+                    total=train_config["steps_per_epoch"],
+                    desc=f"Epoch {epoch + 1}/{train_config['epochs']}",
+                    miniters=100,
                 )
-                if self.use_wandb:
-                    wandb.log(
-                        {"train/loss": loss, "opt/lr": current_lr, "epoch": epoch + 1},
-                        step=global_step,
+                for _ in range(train_config["steps_per_epoch"]):
+                    adapted = future.result()
+                    future = executor.submit(self._simulate_and_adapt, train_config)
+                    loss, current_lr = self._train_step_from_adapted(
+                        adapted=adapted,
+                        config=train_config,
+                        optimizer=optimizer,
+                        scheduler=scheduler,
                     )
-                global_step += 1
-                pbar.set_postfix(loss=f"{loss:.4f}", lr=f"{current_lr:.2e}")
-                pbar.update(1)
+                    if self.use_wandb:
+                        wandb.log(
+                            {"train/loss": loss, "opt/lr": current_lr, "epoch": epoch + 1},
+                            step=global_step,
+                        )
+                    global_step += 1
+                    pbar.set_postfix(loss=f"{loss:.4f}", lr=f"{current_lr:.2e}")
+                    pbar.update(1)
 
-            if (epoch + 1) % val_interval == 0:
-                self.val_step(val_config, global_step, fig_path)
+                if (epoch + 1) % val_interval == 0:
+                    self.val_step(val_config, global_step, fig_path)
 
-            scheduler.step()
-            pbar.close()
+                scheduler.step()
+                pbar.close()
 
         checkpoint_dir = Path(self.model_cfg["checkpoint_dir"])
         checkpoint_dir.mkdir(parents=True, exist_ok=True)
         torch.save(self.net.state_dict(), checkpoint_dir / checkpoint_path)
 
-    def train_step(self, config, optimizer, scheduler):
+    def _simulate_and_adapt(self, config):
         link_fn = self.model_cfg["link_fn"]
-        train_samples = self.model_family.batch_sample(
+        samples = self.model_family.batch_sample(
             **config["model_family_config"],
             **config["train_sample_config"],
             prior=self.model_family.prior,
@@ -147,10 +153,9 @@ class CogFormerTrainer:
             link_fun=link_fn(),
             context=self.model_cfg.get("train_context"),
         )
-        adapted = self.adapter.adapt(
-            train_samples,
-            device=config["device"],
-        )
+        return self.adapter.adapt(samples, device=config["device"])
+
+    def _train_step_from_adapted(self, adapted, config, optimizer, scheduler):
         optimizer.zero_grad()
         device_type = config["device"].type
         with torch.autocast(device_type=device_type, dtype=torch.bfloat16, enabled=(device_type == "cuda")):
@@ -180,12 +185,8 @@ class CogFormerTrainer:
         max_num_categories = config["model_family_config"]["max_num_categories"]
         base = Path(f"./outputs/figures/{fig_subdir}")
 
-        recovery_dir = base / "recovery"
-        posterior_dir = base / "test_posterior"
-        coverage_dir = base / "coverage"
-        metrics_dir = base / "metrics"
-        for d in (recovery_dir, posterior_dir, coverage_dir, metrics_dir):
-            d.mkdir(parents=True, exist_ok=True)
+        corr_dir = base / "correlation"
+        corr_dir.mkdir(parents=True, exist_ok=True)
 
         self.net.eval()
 
@@ -232,49 +233,7 @@ class CogFormerTrainer:
             )
             params_mask = params_mask.reshape((config["batch_size"], n_rows, n_cols))[0]
 
-            recovery = adaptive_recovery(
-                true_set, pred_set,
-                design_config=design_config,
-                intrinsic_params=params,
-                max_num_categories=max_num_categories,
-                parameter_mask=params_mask,
-                variable_names=param_names,
-                intercept_color=colors["intercept"],
-                main_effect_color=colors["main_effect"],
-                interaction_color=colors["interaction"],
-            )
-            out_recovery = recovery_dir / Path(fig_path).with_stem(f"{Path(fig_path).stem}_{tag}")
-            recovery.savefig(out_recovery, bbox_inches="tight")
-
-            posterior = adaptive_posterior(
-                samples=pred_set[0],
-                design_config=design_config,
-                intrinsic_params=params,
-                max_num_categories=max_num_categories,
-                parameter_mask=params_mask,
-                intercept_color=colors["intercept"],
-                main_effect_color=colors["main_effect"],
-                interaction_color=colors["interaction"],
-                unfold=False,
-            )
-            out_posterior = posterior_dir / f"{model_name}_benchmark_test_posterior_{tag}.pdf"
-            posterior.savefig(out_posterior, bbox_inches="tight")
-
-            coverage = adaptive_coverage(
-                true=true_set,
-                pred=pred_set,
-                design_config=design_config,
-                intrinsic_params=params,
-                variable_names=param_names,
-                max_num_categories=max_num_categories,
-                intercept_color=colors["intercept"],
-                main_effect_color=colors["main_effect"],
-                interaction_color=colors["interaction"],
-            )
-            out_coverage = coverage_dir / f"{model_name}_benchmark_test_coverage_{tag}.pdf"
-            coverage.savefig(out_coverage, bbox_inches="tight")
-
-            metrics_fig = plot_adaptive_metrics(
+            corr_fig = adaptive_correlation(
                 true=true_set,
                 pred=pred_set,
                 design_config=design_config,
@@ -286,23 +245,15 @@ class CogFormerTrainer:
                 main_effect_color=colors["main_effect"],
                 interaction_color=colors["interaction"],
             )
-            out_metrics = metrics_dir / f"{model_name}_benchmark_test_metrics_{tag}.pdf"
-            metrics_fig.savefig(out_metrics, bbox_inches="tight")
+            out_corr = corr_dir / f"{model_name}_val_correlation_{tag}.pdf"
+            corr_fig.savefig(out_corr, bbox_inches="tight")
 
             if self.use_wandb:
                 wandb.log(
-                    {
-                        f"val/recovery_{tag}": wandb.Image(recovery),
-                        f"val/posterior_{tag}": wandb.Image(posterior.fig),
-                        f"val/coverage_{tag}": wandb.Image(coverage),
-                        f"val/metrics_{tag}": wandb.Image(metrics_fig),
-                    },
+                    {f"val/correlation_{tag}": wandb.Image(corr_fig)},
                     step=global_step,
                 )
-                plt.close(recovery)
-                plt.close(posterior.fig)
-                plt.close(coverage)
-                plt.close(metrics_fig)
+            plt.close(corr_fig)
 
         self.net.train()
 
@@ -468,6 +419,8 @@ if __name__ == "__main__":
             config={**train_config, **{"cogformer": cogformer_config}},
         )
 
+    torch.set_float32_matmul_precision("high")
+
     model_family = ModelFamily(
         model=model_cfg["model_cls"](),
         name=model_cfg["name"],
@@ -476,6 +429,7 @@ if __name__ == "__main__":
     )
     adapter = Adapter()
     cogformer = CogFormer(**cogformer_config).to(device).train()
+    cogformer = torch.compile(cogformer, dynamic=True)
 
     trainer = CogFormerTrainer(
         model_family=model_family,
