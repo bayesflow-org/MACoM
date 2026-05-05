@@ -248,7 +248,7 @@ def parse_args():
     parser.add_argument("--steps_per_epoch", type=int, default=100)
 
     # Flow matching
-    parser.add_argument("--fm_sample_steps", type=int, default=50)
+    parser.add_argument("--fm_sample_steps", type=int, default=100)
     parser.add_argument("--fm_num_samples", type=int, default=100)
 
     parser.add_argument("--dry_run_epochs", type=int, default=None,

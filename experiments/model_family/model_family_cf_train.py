@@ -337,9 +337,9 @@ def parse_args():
     parser.add_argument("--epochs", type=int, default=5000)
     parser.add_argument("--steps_per_epoch", type=int, default=100)
     # Inference
-    parser.add_argument("--fm_sample_steps", type=int, default=50)
+    parser.add_argument("--fm_sample_steps", type=int, default=100)
     parser.add_argument("--fm_num_samples", type=int, default=200)
-    parser.add_argument("--fm_solver", type=str, default="midpoint",
+    parser.add_argument("--fm_solver", type=str, default="euler",
                         choices=["euler", "midpoint", "rk4"],
                         help="ODE solver for flow matching sampling")
     parser.add_argument("--val_sample_chunk_size", type=int, default=100,
