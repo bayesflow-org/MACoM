@@ -34,6 +34,7 @@ def self_attention_layers(
     query_dim: int = 128,
     skip_first: bool = False,
     skip_last: bool = False,
+    use_rope: bool = False,
 ):
     layers = []
 
@@ -51,6 +52,7 @@ def self_attention_layers(
             num_heads=num_heads,
             dropout=dropout,
             layer_norm=layer_norm,
+            use_rope=use_rope,
         )
     layers.append(l)
 
@@ -61,6 +63,7 @@ def self_attention_layers(
                 num_heads=num_heads,
                 dropout=dropout,
                 layer_norm=layer_norm,
+                use_rope=use_rope,
             )
         )
 
@@ -78,6 +81,7 @@ def self_attention_layers(
             num_heads=num_heads,
             dropout=dropout,
             layer_norm=layer_norm,
+            use_rope=use_rope,
         )
     layers.append(l)
 

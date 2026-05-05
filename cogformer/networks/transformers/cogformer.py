@@ -37,6 +37,7 @@ class CogFormer(nn.Module):
             model_embed_dim: int = 8,
             time_freq_trainable: bool = True,
             block_film: bool = False,
+            use_rope: bool = True,
     ):
         super().__init__()
 
@@ -56,6 +57,7 @@ class CogFormer(nn.Module):
             layer_dropout=layer_dropout,
             layer_design=encoder_layer_design,
             layer_kwargs=encoder_layer_kwargs,
+            use_rope=use_rope,
         )
 
         self.decoder = Decoder(
