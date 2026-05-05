@@ -154,9 +154,6 @@ def main():
     adapter = Adapter()
 
     # Build local param mask then lift to global space (shared across all subjects)
-    max_num_cols = args.max_num_regressors * (args.max_num_regressors + 1) // 2 * (args.max_num_categories - 1) + 1
-    n_rows = max_num_cols
-
     local_mask_flat = build_real_param_mask(
         design_config=design_config,
         intrinsic_params=ddm_cfg["intrinsic_params"],
@@ -167,6 +164,7 @@ def main():
     local_pm = local_mask_flat[np.newaxis]  # (1, max_num_cols * local_n_params)
     _, param_mask_global = model_class.lift_to_global_space("DDM", local_pm, local_pm)
     param_mask_global = param_mask_global[0]  # (max_num_cols * n_global_params,)
+    n_rows = len(local_mask_flat) // local_n_params
 
     subject_data, subject_ids = load_ddm_data(args.data)
     logging.info(f"Loaded {len(subject_ids)} subjects from {args.data}")

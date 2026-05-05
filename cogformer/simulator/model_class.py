@@ -173,8 +173,12 @@ class ModelClass:
 
         block_width = max_num_categories - 1
         max_total_regressors = max_num_regressors * (max_num_regressors + 1) // 2
-        max_num_cols = max_total_regressors * block_width + (
-            1 if list_batch[0]["keep_intercept"] else 0
+        n_main = max_num_regressors
+        n_inter = max_num_regressors * (max_num_regressors - 1) // 2
+        max_num_cols = (
+            n_main * block_width
+            + n_inter * block_width ** 2
+            + (1 if list_batch[0]["keep_intercept"] else 0)
         )
         n_global = self.n_global_params
 

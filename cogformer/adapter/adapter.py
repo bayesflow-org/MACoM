@@ -8,12 +8,9 @@ class Adapter:
     @staticmethod
     def _build_position_indices(
         n_params: int,
-        max_num_regressors: int,
-        max_num_categories: int,
+        n_tokens: int,
     ) -> tuple[np.ndarray, np.ndarray]:
-        """Return (parameter_indices, regressor_indices), each shape (num_tokens, 1)."""
-        n_total = max_num_regressors * (max_num_regressors + 1) // 2
-        n_tokens = n_total * (max_num_categories - 1) + 1
+        """Return (parameter_indices, regressor_indices), each shape (n_tokens * n_params, 1)."""
         param_idx = np.tile(np.linspace(0.0, 1.0, n_params), n_tokens)[..., None]
         reg_idx = np.repeat(np.linspace(0.0, 1.0, n_tokens), n_params)[..., None]
         return param_idx, reg_idx
@@ -61,10 +58,10 @@ class Adapter:
             np.concatenate([design_matrices, rts, choices_normalized, alt_col], axis=-1)
         ).to(torch.float32)
 
+        n_tokens = samples["param_masks"].shape[-1] // n_params
         param_idx, reg_idx = Adapter._build_position_indices(
             n_params=n_params,
-            max_num_regressors=samples["max_num_regressors"],
-            max_num_categories=samples["max_num_categories"],
+            n_tokens=n_tokens,
         )
 
         parameter_indices = Adapter.to_torch(

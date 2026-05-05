@@ -6,16 +6,18 @@ converts them to the padded design-matrix / param-mask format expected by
 Adapter.adapt, processing one subject at a time (batch_size=1).
 
 Design matrix column layout (keep_intercept=True, max_num_categories=C,
-max_num_regressors=R, block_width = C-1, n_total = R*(R+1)//2):
+max_num_regressors=R, block_width = C-1, inter_block_width = (C-1)²):
 
-  col 0        : intercept (1.0)
-  cols 1..bw   : u_1 block  (first col = regressor value, rest zero)
-  cols bw+1..2bw: u_2 block
+  col 0              : intercept (1.0)
+  cols 1..bw         : u_1 block  (first col = regressor value, rest zero for continuous)
+  cols bw+1..2bw     : u_2 block
   ...
-  cols n_main*bw+1..(n_main+1)*bw : u_1:u_2 block
-  ... (interactions follow all main effects in the same order as build_design_config)
+  cols R*bw+1..R*bw+ibw : u_1:u_2 block  (ibw = inter_block_width)
+  ... (interactions follow all main effects)
 
-Continuous (real-valued) regressors always occupy the FIRST column of their block.
+Continuous regressors occupy the FIRST column of their block.
+Categorical regressors (dummy-coded) occupy columns 0..(n_dummies-1) of their block.
+Interaction blocks hold the outer product of each pair of parent blocks.
 """
 import numpy as np
 from cogformer.simulator.design_utils import build_parameter_mask
@@ -24,6 +26,17 @@ from cogformer.simulator.design_utils import build_parameter_mask
 def _regressor_keys(design_config: dict) -> list[str]:
     """Return non-intercept keys in design_config order."""
     return [k for k in design_config if k != "1"]
+
+
+def _compute_max_num_cols(
+    max_num_regressors: int,
+    max_num_categories: int,
+    keep_intercept: bool,
+) -> int:
+    block_width = max_num_categories - 1
+    n_main = max_num_regressors
+    n_inter = max_num_regressors * (max_num_regressors - 1) // 2
+    return n_main * block_width + n_inter * block_width ** 2 + (1 if keep_intercept else 0)
 
 
 def build_real_design_matrix(
@@ -38,16 +51,18 @@ def build_real_design_matrix(
 
     Parameters
     ----------
-    regressors : dict mapping design_config key → 1-D float array (num_obs,)
-        e.g. {"u_1": stim_type, "u_2": truth, "u_1:u_2": interaction}
+    regressors : dict mapping design_config key → array of shape (num_obs,) or (num_obs, n_cols)
+        Continuous regressors: 1-D array → placed in first column of block.
+        Categorical / interaction regressors: 2-D array → placed in first n_cols columns of block.
+        e.g. {"u_1": speed_cond, "u_2": difficulty_dummies, "u_1:u_2": interaction_dummies}
     design_config : dict
         Same format as CogFormer design configs.
     max_num_regressors, max_num_categories : ints
         Must match the trained CogFormer.
     """
     block_width = max_num_categories - 1
-    n_total = max_num_regressors * (max_num_regressors + 1) // 2
-    max_num_cols = n_total * block_width + (1 if keep_intercept else 0)
+    inter_block_width = block_width ** 2
+    max_num_cols = _compute_max_num_cols(max_num_regressors, max_num_categories, keep_intercept)
 
     num_obs = next(iter(regressors.values())).shape[0]
     dm = np.zeros((num_obs, max_num_cols), dtype=np.float32)
@@ -58,10 +73,23 @@ def build_real_design_matrix(
         col_offset = 1
 
     keys = _regressor_keys(design_config)
-    for j, key in enumerate(keys):
-        if key in regressors:
-            col = col_offset + j * block_width
-            dm[:, col] = np.asarray(regressors[key], dtype=np.float32)
+    cur = col_offset
+    start_pos = {}
+    for key in keys:
+        start_pos[key] = cur
+        cur += inter_block_width if ":" in key else block_width
+
+    for key in keys:
+        if key not in regressors:
+            continue
+        arr = np.asarray(regressors[key], dtype=np.float32)
+        start = start_pos[key]
+        width = inter_block_width if ":" in key else block_width
+        if arr.ndim == 1:
+            dm[:, start] = arr
+        else:
+            n_cols = min(arr.shape[1], width)
+            dm[:, start:start + n_cols] = arr[:, :n_cols]
 
     return dm
 
@@ -78,9 +106,7 @@ def build_real_param_mask(
 
     Returns shape (max_num_cols * n_params,) — flat, matching Adapter expectations.
     """
-    block_width = max_num_categories - 1
-    n_total = max_num_regressors * (max_num_regressors + 1) // 2
-    max_num_cols = n_total * block_width + (1 if keep_intercept else 0)
+    max_num_cols = _compute_max_num_cols(max_num_regressors, max_num_categories, keep_intercept)
     n_params = len(intrinsic_params)
 
     local_mask = build_parameter_mask(
@@ -140,57 +166,66 @@ def build_subject_batch(
 
 def load_ddm_data(csv_path: str) -> tuple[dict, list[int]]:
     """
-    Load DDM CSV data.
+    Load DDM CSV data (Stump et al., 2026).
 
-    Returns
-    -------
-    data : dict mapping subject_id → dict with rts, choices, stim_type, truth
-    subject_ids : list of int
+    Regressors:
+      u_1  : stim_type,  effect coded ±0.5  (continuous)
+      u_2  : truth,      effect coded ±0.5  (continuous)
+      u_1:u_2 : stim_type × truth           (continuous × continuous → 1 column)
     """
     import pandas as pd
     df = pd.read_csv(csv_path)
-    # Drop subjects with fewer than 100 trials (same filter as notebook)
     counts = df.groupby("id")["id"].transform("size")
     df = df[counts >= 100].copy()
 
     data = {}
     for sid in sorted(df["id"].unique()):
         sdf = df[df["id"] == sid].reset_index(drop=True)
-        stim_type   = sdf["stim_type"].values * 1.0 - 0.5   # effect coding
-        truth       = sdf["factual_truth"].values * 1.0 - 0.5
-        interaction = stim_type * truth
+        stim_type   = (sdf["stim_type"].values * 1.0 - 0.5).astype(np.float32)
+        truth       = (sdf["factual_truth"].values * 1.0 - 0.5).astype(np.float32)
+        interaction = (stim_type * truth).astype(np.float32)
         data[int(sid)] = {
             "rts":         sdf["rt"].values.astype(np.float32),
             "choices":     sdf["resp"].values.astype(np.float32),
-            "u_1":         stim_type.astype(np.float32),
-            "u_2":         truth.astype(np.float32),
-            "u_1:u_2":     interaction.astype(np.float32),
+            "u_1":         stim_type,
+            "u_2":         truth,
+            "u_1:u_2":     interaction,
         }
     return data, sorted(data.keys())
 
 
 def load_cdm_data(csv_path: str) -> tuple[dict, list[int]]:
     """
-    Load CDM CSV data (Kvam 2019).
+    Load CDM CSV data (Kvam, 2019).
 
-    choices = deviation = response - targetOrientation (in radians, ∈ (-π, π))
-    Regressors: isSpeed (u_1) and isCued (u_2), effect-coded as ±0.5.
+    Regressors:
+      u_1     : speed_condition, effect coded ±0.5      (continuous, 1 column)
+      u_2     : difficulty (3 levels: 1,2,3), dummy coded to (d2, d3)
+                reference category = 1                  (categorical, 2 columns)
+      u_1:u_2 : speed_condition × (d2, d3)             (cat×cont → 2 columns)
     """
     import pandas as pd
     df = pd.read_csv(csv_path)
 
     data = {}
-    for sid in sorted(df["Participant"].unique()):
-        sdf = df[df["Participant"] == sid].reset_index(drop=True)
-        is_speed    = sdf["isSpeed"].values * 1.0 - 0.5   # effect coding
-        is_cued     = sdf["isCued"].values * 1.0 - 0.5
-        interaction = is_speed * is_cued
-        deviation   = (sdf["response"].values - sdf["targetOrientation"].values).astype(np.float32)
+    for sid in sorted(df["id"].unique()):
+        sdf = df[df["id"] == sid].reset_index(drop=True)
+        speed = (sdf["speed_condition"].values * 1.0 - 0.5).astype(np.float32)
+        difficulty = sdf["difficulty"].values
+
+        # Dummy coding: reference category = 1
+        d2 = (difficulty == 2).astype(np.float32)
+        d3 = (difficulty == 3).astype(np.float32)
+
+        # cat × cont interaction: each dummy × speed_condition
+        inter_d2 = d2 * speed
+        inter_d3 = d3 * speed
+
         data[int(sid)] = {
-            "rts":     sdf["RT"].values.astype(np.float32),
-            "choices": deviation,
-            "u_1":     is_speed.astype(np.float32),
-            "u_2":     is_cued.astype(np.float32),
-            "u_1:u_2": interaction.astype(np.float32),
+            "rts":     sdf["rt"].values.astype(np.float32),
+            "choices": sdf["resp_deviation"].values.astype(np.float32),
+            "u_1":     speed,
+            "u_2":     np.column_stack([d2, d3]),          # (num_obs, 2)
+            "u_1:u_2": np.column_stack([inter_d2, inter_d3]),  # (num_obs, 2)
         }
     return data, sorted(data.keys())

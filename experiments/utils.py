@@ -25,8 +25,11 @@ def build_encoder_input_dim(
     keep_intercept: bool,
 ) -> int:
     """Compute the encoder input dimension for a CogFormer model."""
-    n_total = max_num_regressors * (max_num_regressors + 1) // 2
-    return n_total * (max_num_categories - 1) + (4 if keep_intercept else 3)
+    block_width = max_num_categories - 1
+    n_main = max_num_regressors
+    n_inter = max_num_regressors * (max_num_regressors - 1) // 2
+    design_cols = n_main * block_width + n_inter * block_width ** 2 + (1 if keep_intercept else 0)
+    return design_cols + 3  # +3 for sim_data features (rt, choice, and one auxiliary)
 
 
 def add_global_params(

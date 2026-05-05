@@ -109,8 +109,7 @@ def main():
         max_num_categories=args.max_num_categories,
         keep_intercept=args.keep_intercept,
     )
-    max_num_cols = args.max_num_regressors * (args.max_num_regressors + 1) // 2 * (args.max_num_categories - 1) + 1
-    n_rows = max_num_cols
+    n_rows = len(param_mask) // n_params
 
     subject_data, subject_ids = load_cdm_data(args.data)
     logging.info(f"Loaded {len(subject_ids)} subjects from {args.data}")

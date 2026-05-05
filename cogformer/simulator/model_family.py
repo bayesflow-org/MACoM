@@ -201,7 +201,6 @@ class ModelFamily:
             kwargs=kwargs,
         )
 
-        num_regressors_total = len([k for k in design_config if k != "1"])
         _, discrete_mask = build_discrete_mask(design_config=design_config, discrete_prob=discrete_prob)
 
         if context is None and hasattr(self.model, 'build_default_context'):
@@ -244,7 +243,7 @@ class ModelFamily:
 
         has_intercept_col = "1" in design_config
         regressor_mask = build_regressor_mask(
-            num_regressors=num_regressors_total,
+            design_config=design_config,
             max_num_categories=max_num_categories,
             keep_intercept=has_intercept_col,
         )
@@ -371,7 +370,13 @@ class ModelFamily:
 
         block_width = max_num_categories - 1
         max_total_regressors = max_num_regressors * (max_num_regressors + 1) // 2
-        max_num_cols = max_total_regressors * block_width + (1 if list_batch[0]["keep_intercept"] else 0)
+        n_main = max_num_regressors
+        n_inter = max_num_regressors * (max_num_regressors - 1) // 2
+        max_num_cols = (
+            n_main * block_width
+            + n_inter * block_width ** 2
+            + (1 if list_batch[0]["keep_intercept"] else 0)
+        )
 
         if flatten_param_outputs:
             param_outputs_shape = (batch_size, max_num_cols * num_params)

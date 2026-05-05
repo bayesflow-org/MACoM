@@ -196,37 +196,51 @@ def build_parameter_mask(
     """
     Convert a design_config dict into a binary parameter mask mapping
     regressors (rows) to intrinsic parameters (columns).
+
+    Main-effect blocks occupy block_width rows each.
+    Interaction blocks occupy block_width² rows each (one per cross-product of dummy columns).
     """
     regressor_keys = list(design_config.keys())
     has_intercept = "1" in regressor_keys
     regressor_keys = [k for k in regressor_keys if k != "1"]
 
-    num_regressors = len(regressor_keys)
+    main_keys = [k for k in regressor_keys if ":" not in k]
+    inter_keys = [k for k in regressor_keys if ":" in k]
+
     block_width = max_num_categories - 1
+    inter_block_width = block_width ** 2
     num_intrinsic_params = len(intrinsic_params)
-    num_cols = num_regressors * block_width + (1 if has_intercept else 0)
+    num_cols = (
+        len(main_keys) * block_width
+        + len(inter_keys) * inter_block_width
+        + (1 if has_intercept else 0)
+    )
 
     mask = np.zeros((num_cols, num_intrinsic_params), dtype=np.float32)
+    fixed_set = set(fixed_params) if fixed_params is not None else set()
 
     row_idx = 0
     if has_intercept:
-        fixed_set = set(fixed_params) if fixed_params is not None else set()
         for name in design_config.get("1", []):
             if name in intrinsic_params and name not in fixed_set:
-                j = intrinsic_params.index(name)
-                mask[row_idx, j] = 1.0
+                mask[row_idx, intrinsic_params.index(name)] = 1.0
         row_idx = 1
 
-    for design_index, key in enumerate(regressor_keys):
-        start = row_idx + design_index * block_width
-        rows = list(range(start, start + block_width))
+    for key in main_keys:
         for intrinsic in design_config[key]:
-            if intrinsic in intrinsic_params:
+            if intrinsic in intrinsic_params and intrinsic not in fixed_set:
                 param_index = intrinsic_params.index(intrinsic)
-                if fixed_params is not None and intrinsic in fixed_params:
-                    continue
-                for r in rows:
+                for r in range(row_idx, row_idx + block_width):
                     mask[r, param_index] = 1.0
+        row_idx += block_width
+
+    for key in inter_keys:
+        for intrinsic in design_config[key]:
+            if intrinsic in intrinsic_params and intrinsic not in fixed_set:
+                param_index = intrinsic_params.index(intrinsic)
+                for r in range(row_idx, row_idx + inter_block_width):
+                    mask[r, param_index] = 1.0
+        row_idx += inter_block_width
 
     return mask
 
@@ -343,12 +357,16 @@ def build_random_discrete_mask(
 
 
 def build_regressor_mask(
-    num_regressors: int,
+    design_config: dict[str, list[str]],
     max_num_categories: int = 4,
     keep_intercept: bool = False,
 ) -> np.ndarray:
     block_width = max_num_categories - 1
-    num_cols = num_regressors * block_width + (1 if keep_intercept else 0)
+    inter_block_width = block_width ** 2
+    regressor_keys = [k for k in design_config if k != "1"]
+    n_main = sum(1 for k in regressor_keys if ":" not in k)
+    n_inter = sum(1 for k in regressor_keys if ":" in k)
+    num_cols = n_main * block_width + n_inter * inter_block_width + (1 if keep_intercept else 0)
     return np.ones(num_cols, dtype=np.float32)
 
 
@@ -383,7 +401,10 @@ def build_design_matrix(
     interaction_keys = [k for k in regressor_keys if ":" in k]
 
     block_width = max_num_categories - 1
-    num_cols = len(regressor_keys) * block_width + (1 if has_intercept else 0)
+    inter_block_width = block_width ** 2
+    n_main = len(main_effect_keys)
+    n_inter = len(interaction_keys)
+    num_cols = n_main * block_width + n_inter * inter_block_width + (1 if has_intercept else 0)
     design_matrix = np.zeros((num_obs, num_cols))
 
     if main_discrete_mask is None:
@@ -412,7 +433,15 @@ def build_design_matrix(
         design_matrix[:, 0] = 1.0
         col_idx = 1
 
-    start_col = {k: col_idx + j * block_width for j, k in enumerate(regressor_keys)}
+    # Cumulative start positions: main effects get block_width cols, interactions get block_width² cols.
+    start_col = {}
+    cur = col_idx
+    for k in main_effect_keys:
+        start_col[k] = cur
+        cur += block_width
+    for k in interaction_keys:
+        start_col[k] = cur
+        cur += inter_block_width
 
     for j, key in enumerate(main_effect_keys):
         start = start_col[key]
@@ -451,7 +480,11 @@ def build_design_matrix(
         if a0 is None or b0 is None:
             continue
 
-        design_matrix[:, start] = design_matrix[:, a0] * design_matrix[:, b0]
+        # Full outer product of dummy-code blocks: (num_obs, bw) x (num_obs, bw) → (num_obs, bw²)
+        a_cols = design_matrix[:, a0:a0 + block_width]
+        b_cols = design_matrix[:, b0:b0 + block_width]
+        interaction = (a_cols[:, :, None] * b_cols[:, None, :]).reshape(num_obs, inter_block_width)
+        design_matrix[:, start:start + inter_block_width] = interaction
 
     return design_matrix
 
@@ -547,6 +580,8 @@ def build_column_labels(
     regressor_keys = list(design_config.keys())
     has_intercept = "1" in regressor_keys
     regressor_keys = [k for k in regressor_keys if k != "1"]
+    main_keys = [k for k in regressor_keys if ":" not in k]
+    inter_keys = [k for k in regressor_keys if ":" in k]
 
     block_width = max_num_categories - 1
     labels: list[str] = []
@@ -554,10 +589,16 @@ def build_column_labels(
     if has_intercept:
         labels.append("1")
 
-    for key in regressor_keys:
+    for key in main_keys:
         labels.append(key)
         for j in range(1, block_width):
             labels.append(f"{key}[{j+1}]")
+
+    for key in inter_keys:
+        for i in range(block_width):
+            for j in range(block_width):
+                idx = i * block_width + j
+                labels.append(key if idx == 0 else f"{key}[{i+1},{j+1}]")
 
     return labels
 
