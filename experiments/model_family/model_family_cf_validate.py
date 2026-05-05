@@ -73,6 +73,9 @@ def parse_args():
                    help="Samples per cogformer.sample() call; reduces peak GPU memory. "
                         "Peak scales with batch_chunk * samples_chunk instead of batch_chunk * num_samples.")
     p.add_argument("--include_full", action="store_true", default=False)
+    p.add_argument("--configs", nargs="+", default=None,
+                   help="Subset of benchmark configs to run (e.g. --configs intercept_only regressed)."
+                        " Runs all configs by default.")
     p.add_argument("--skip_posteriors", action="store_true", default=False)
     p.add_argument("--skip_log_gamma", action="store_true", default=True)
     p.add_argument("--include_log_gamma", dest="skip_log_gamma", action="store_false")
@@ -159,6 +162,8 @@ def main():
     benchmark = dict(model_cfg["benchmark_configs"])
     if not args.include_full:
         benchmark.pop("full", None)
+    if args.configs is not None:
+        benchmark = {k: v for k, v in benchmark.items() if k in args.configs}
 
     pred_filename_template = model_cfg["pred_filename_template"]
 

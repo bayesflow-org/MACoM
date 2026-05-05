@@ -215,6 +215,15 @@ def adaptive_posterior(
     if parameter_mask.ndim == 3:
         parameter_mask = parameter_mask[0]
 
+    # collate() pads the grid to max dims; cap to rows the design_config covers.
+    _regressor_keys = list(design_config.keys())
+    _n_design_rows = 1 + (len(_regressor_keys) - 1) * (max_num_categories - 1)
+    parameter_mask = parameter_mask[:_n_design_rows]
+    if not isinstance(samples, pd.DataFrame):
+        _s = np.asarray(samples)
+        if _s.ndim == 3:
+            samples = _s[:, :_n_design_rows, :]
+
     df_post, active_cols, patched_cols = samples_to_unfolded_df(
         samples=samples,
         design_config=design_config,

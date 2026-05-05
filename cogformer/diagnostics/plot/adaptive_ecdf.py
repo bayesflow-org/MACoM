@@ -122,6 +122,11 @@ def adaptive_ecdf(
 
     num_datasets, num_draws, num_rows, num_cols = pred.shape
 
+    regressor_keys = list(design_config.keys())
+    # collate() pads the grid to max dims; cap to rows the design_config covers.
+    n_design_rows = 1 + (len(regressor_keys) - 1) * (max_num_categories - 1)
+    num_rows = min(num_rows, n_design_rows)
+
     if figsize is None:
         figsize = (3.2 * num_cols, 2.9 * num_rows)
 
@@ -132,8 +137,6 @@ def adaptive_ecdf(
         num_datasets=num_datasets,
         prob=prob,
     )
-
-    regressor_keys = list(design_config.keys())
     legend_handles = None
 
     for r in range(num_rows):

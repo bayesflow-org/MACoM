@@ -223,6 +223,12 @@ def adaptive_metrics(
     regressor_keys = list(design_config.keys())
 
     batch_size, num_draws, num_rows, num_cols = pred.shape
+    # collate() pads the grid to max dims; cap to rows the design_config covers.
+    n_design_rows = 1 + (len(regressor_keys) - 1) * (max_num_categories - 1)
+    num_rows = min(num_rows, n_design_rows)
+    parameter_mask = parameter_mask[:num_rows]
+    true = true[:, :num_rows, :]
+    pred = pred[:, :, :num_rows, :]
 
     # Determine RMSE column name
     rmse_col = "RMSE" if normalize is None else "NRMSE"
