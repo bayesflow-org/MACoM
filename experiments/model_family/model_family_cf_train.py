@@ -44,7 +44,7 @@ def _build_train_config(base: dict, val_epoch_interval: int, wandb_project: str,
 MODELS = {
     "ddm": _build_train_config(
         _BASE_MODELS["ddm"],
-        val_epoch_interval=2000,
+        val_epoch_interval=2500,
         wandb_project="cogformer-fm-ddm",
         checkpoint_dir="./outputs/checkpoints/model_family/cf/ddm/",
         checkpoint_prefix="cogformer_ddm_mf",
@@ -52,7 +52,7 @@ MODELS = {
     ),
     "cdm": _build_train_config(
         _BASE_MODELS["cdm"],
-        val_epoch_interval=2000,
+        val_epoch_interval=2500,
         wandb_project="cogformer-fm-cdm",
         checkpoint_dir="./outputs/checkpoints/model_family/cf/cdm/",
         checkpoint_prefix="cogformer_cdm_mf",
@@ -60,7 +60,7 @@ MODELS = {
     ),
     "rdm": _build_train_config(
         _BASE_MODELS["rdm"],
-        val_epoch_interval=2000,
+        val_epoch_interval=2500,
         wandb_project="cogformer-fm-rdm",
         checkpoint_dir="./outputs/checkpoints/model_family/cf/rdm/",
         checkpoint_prefix="cogformer_rdm_mf",
@@ -189,6 +189,7 @@ class CogFormerTrainer:
         corr_dir.mkdir(parents=True, exist_ok=True)
 
         self.net.eval()
+        torch.cuda.empty_cache()
 
         for tag, design_config in self.model_cfg["val_scenarios"]:
             test_samples = self.model_family.batch_sample(
@@ -224,6 +225,7 @@ class CogFormerTrainer:
                     steps=config["fm_sample_steps"],
                     num_samples=config["fm_num_samples"],
                     solver=config.get("fm_solver", "euler"),
+                    samples_chunk_size=config.get("val_fm_sample_chunk_size"),
                     encoder_tokens=enc_tokens[c_start:c_end],
                 )
                 pred_chunks.append(chunk)
@@ -298,6 +300,10 @@ def parse_args():
                         help="ODE solver for flow matching sampling")
     parser.add_argument("--val_sample_chunk_size", type=int, default=100,
                         help="Batch chunk size for val sampling to avoid GPU OOM")
+    parser.add_argument("--val_fm_sample_chunk_size", type=int, default=20,
+                        help="Flow-sample chunk size inside net.sample() during validation "
+                             "(reduces peak GPU memory; total per-ODE-step batch = "
+                             "val_sample_chunk_size × val_fm_sample_chunk_size)")
     parser.add_argument("--estimate_global_params", action=argparse.BooleanOptionalAction,
                         default=True,
                         help="Include global parameters (e.g. contamination probability pi) "
@@ -384,6 +390,7 @@ if __name__ == "__main__":
         "fm_solver": args.fm_solver,
         "batch_size": args.val_batch_size,
         "val_sample_chunk_size": args.val_sample_chunk_size,
+        "val_fm_sample_chunk_size": args.val_fm_sample_chunk_size,
         "model_family_config": model_family_config,
         "val_sample_config": val_sample_config,
         "device": device,
