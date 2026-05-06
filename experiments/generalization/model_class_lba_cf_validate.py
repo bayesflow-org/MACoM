@@ -232,13 +232,16 @@ def main():
     pred_dir = Path(args.pred_dir)
     pred_dir.mkdir(parents=True, exist_ok=True)
 
-    for cfg_name, design_config in benchmarks.items():
-        print(f"Generating LBA data: {cfg_name}")
+    variable_names   = _LBA_WITH_PI["variable_names"]
+    intrinsic_params = LBA_LOCAL_PARAMS
 
+    # Phase 1: prepare all data (one dataset per config, shared across eval_ids)
+    config_data = []
+    for cfg_name, design_config in benchmarks.items():
+        print(f"Preparing LBA data: {cfg_name}")
         free_intr, fixed_intr, fixed_vals = infer_free_fixed_intrinsics(
             design_config, LBA_LOCAL_PARAMS, _LBA_WITH_PI["default_fixed_values"]
         )
-
         test_samples = lba_family.batch_sample(
             design_config=design_config,
             batch_size=args.batch_size,
@@ -254,126 +257,137 @@ def main():
             link_fun=lba_link_fn,
             **model_family_config,
         )
-
         pm_global, mask_global = lift_lba_to_global(
             test_samples["param_matrices"],
             test_samples["param_masks"],
         )
         test_samples["param_matrices"] = pm_global
-        test_samples["param_masks"] = mask_global
-        test_samples["n_params"] = N_GLOBAL_PARAMS
+        test_samples["param_masks"]    = mask_global
+        test_samples["n_params"]       = N_GLOBAL_PARAMS
 
         n_rows = pm_global.shape[1] // N_GLOBAL_PARAMS
-        true_set_full = pm_global.reshape(args.batch_size, n_rows, N_GLOBAL_PARAMS)
-        mask_full = mask_global.reshape(args.batch_size, n_rows, N_GLOBAL_PARAMS)
+        true_set   = pm_global.reshape(args.batch_size, n_rows, N_GLOBAL_PARAMS)[:, :, LBA_TO_GLOBAL]
+        params_mask = mask_global.reshape(args.batch_size, n_rows, N_GLOBAL_PARAMS)[0][:, LBA_TO_GLOBAL]
+        config_data.append({
+            "cfg_name": cfg_name, "design_config": design_config,
+            "test_samples": test_samples, "true_set": true_set,
+            "params_mask": params_mask, "n_rows": n_rows,
+        })
 
-        true_set = true_set_full[:, :, LBA_TO_GLOBAL]
-        params_mask = mask_full[0][:, LBA_TO_GLOBAL]
-
+    # Phase 2: run all ODE integrations (config × eval_id)
+    cases = []
+    for cd in config_data:
         for model_id in eval_ids:
             id_label = id_to_name[model_id]
-            print(f"  Running inference with model_id={model_id} ({id_label})")
-
-            test_samples_copy = dict(test_samples)
-            test_samples_copy["model_ids"] = np.full(args.batch_size, model_id, dtype=np.int64)
-
-            adapted = adapter.adapt(test_samples_copy, device=device)
-
-            pred_set = chunked_sample(
+            samples_copy = dict(cd["test_samples"])
+            samples_copy["model_ids"] = np.full(args.batch_size, model_id, dtype=np.int64)
+            adapted = adapter.adapt(samples_copy, device=device)
+            print(f"Sampling: {cd['cfg_name']} / model_id={model_id} ({id_label})")
+            raw = chunked_sample(
                 cogformer, adapted,
                 num_samples=args.num_samples,
                 steps=args.num_sample_steps,
                 solver=args.solver,
                 samples_chunk_size=args.samples_chunk_size,
             )
-            pred_set = pred_set.reshape(
-                args.batch_size, args.num_samples, n_rows, N_GLOBAL_PARAMS
+            pred_set = raw.reshape(
+                args.batch_size, args.num_samples, cd["n_rows"], N_GLOBAL_PARAMS
             )[:, :, :, LBA_TO_GLOBAL]
-
-            tag = f"lba_{cfg_name}_mid{model_id}"
-            np.savez(
-                pred_dir / f"{tag}_cf_pred.npz",
-                pred_set=pred_set,
-                true_set=true_set,
-                params_mask=params_mask,
-            )
-            logging.info(f"[saved] {pred_dir / f'{tag}_cf_pred.npz'}")
-
-            outdir = Path(args.outdir) / cfg_name / f"mid_{id_label.lower()}"
+            outdir = Path(args.outdir) / cd["cfg_name"] / f"mid_{id_label.lower()}"
             outdir.mkdir(parents=True, exist_ok=True)
+            cases.append({
+                "cfg_name": cd["cfg_name"], "design_config": cd["design_config"],
+                "model_id": model_id, "id_label": id_label,
+                "true_set": cd["true_set"], "pred_set": pred_set,
+                "params_mask": cd["params_mask"], "outdir": outdir,
+            })
 
-            variable_names = _LBA_WITH_PI["variable_names"]
-            intrinsic_params = LBA_LOCAL_PARAMS
+    # Phase 3: save predictions and generate figures
+    for case in cases:
+        cfg_name      = case["cfg_name"]
+        design_config = case["design_config"]
+        model_id      = case["model_id"]
+        true_set      = case["true_set"]
+        pred_set      = case["pred_set"]
+        params_mask   = case["params_mask"]
+        outdir        = case["outdir"]
+        tag = f"lba_{cfg_name}_mid{model_id}"
 
-            fig = adaptive_recovery(
-                true=true_set, pred=pred_set,
-                design_config=design_config,
-                intrinsic_params=intrinsic_params,
-                max_num_categories=args.max_num_categories,
-                parameter_mask=params_mask,
-                variable_names=variable_names,
-                intercept_color=colors["intercept"],
-                main_effect_color=colors["main_effect"],
-                interaction_color=colors["interaction"],
-            )
-            fig.savefig(outdir / f"{tag}_recovery.pdf", bbox_inches="tight")
-            plt.close(fig)
+        np.savez(
+            pred_dir / f"{tag}_cf_pred.npz",
+            pred_set=pred_set, true_set=true_set, params_mask=params_mask,
+        )
+        logging.info(f"[saved] {pred_dir / f'{tag}_cf_pred.npz'}")
 
-            coverage_fig = adaptive_coverage(
-                true=true_set, pred=pred_set,
-                design_config=design_config,
-                intrinsic_params=intrinsic_params,
-                max_num_categories=args.max_num_categories,
-                parameter_mask=params_mask,
-                variable_names=variable_names,
-                intercept_color=colors["intercept"],
-                main_effect_color=colors["main_effect"],
-                interaction_color=colors["interaction"],
-            )
-            coverage_fig.savefig(outdir / f"{tag}_coverage.pdf", bbox_inches="tight")
-            plt.close(coverage_fig)
+        fig = adaptive_recovery(
+            true=true_set, pred=pred_set,
+            design_config=design_config,
+            intrinsic_params=intrinsic_params,
+            max_num_categories=args.max_num_categories,
+            parameter_mask=params_mask,
+            variable_names=variable_names,
+            intercept_color=colors["intercept"],
+            main_effect_color=colors["main_effect"],
+            interaction_color=colors["interaction"],
+        )
+        fig.savefig(outdir / f"{tag}_recovery.pdf", bbox_inches="tight")
+        plt.close(fig)
 
-            ecdf_fig = adaptive_ecdf(
-                true=true_set, pred=pred_set,
-                design_config=design_config,
-                intrinsic_params=intrinsic_params,
-                max_num_categories=args.max_num_categories,
-                parameter_mask=params_mask,
-                variable_names=variable_names,
-                intercept_color=colors["intercept"],
-                main_effect_color=colors["main_effect"],
-                interaction_color=colors["interaction"],
-                difference=True,
-            )
-            ecdf_fig.savefig(outdir / f"{tag}_ecdf.pdf", bbox_inches="tight")
-            plt.close(ecdf_fig)
+        coverage_fig = adaptive_coverage(
+            true=true_set, pred=pred_set,
+            design_config=design_config,
+            intrinsic_params=intrinsic_params,
+            max_num_categories=args.max_num_categories,
+            parameter_mask=params_mask,
+            variable_names=variable_names,
+            intercept_color=colors["intercept"],
+            main_effect_color=colors["main_effect"],
+            interaction_color=colors["interaction"],
+        )
+        coverage_fig.savefig(outdir / f"{tag}_coverage.pdf", bbox_inches="tight")
+        plt.close(coverage_fig)
 
-            metrics_fig = plot_adaptive_metrics(
-                true=true_set, pred=pred_set,
-                design_config=design_config,
-                intrinsic_params=intrinsic_params,
-                max_num_categories=args.max_num_categories,
-                parameter_mask=params_mask,
-                variable_names=variable_names,
-                intercept_color=colors["intercept"],
-                main_effect_color=colors["main_effect"],
-                interaction_color=colors["interaction"],
-                skip_log_gamma=args.skip_log_gamma,
-            )
-            metrics_fig.savefig(outdir / f"{tag}_metrics.pdf", bbox_inches="tight")
-            plt.close(metrics_fig)
+        ecdf_fig = adaptive_ecdf(
+            true=true_set, pred=pred_set,
+            design_config=design_config,
+            intrinsic_params=intrinsic_params,
+            max_num_categories=args.max_num_categories,
+            parameter_mask=params_mask,
+            variable_names=variable_names,
+            intercept_color=colors["intercept"],
+            main_effect_color=colors["main_effect"],
+            interaction_color=colors["interaction"],
+            difference=True,
+        )
+        ecdf_fig.savefig(outdir / f"{tag}_ecdf.pdf", bbox_inches="tight")
+        plt.close(ecdf_fig)
 
-            metrics_df = compute_adaptive_metrics(
-                true=true_set, pred=pred_set,
-                design_config=design_config,
-                intrinsic_params=intrinsic_params,
-                max_num_categories=args.max_num_categories,
-                parameter_mask=params_mask,
-                variable_names=variable_names,
-                skip_log_gamma=args.skip_log_gamma,
-            )
-            metrics_df.to_csv(outdir / f"{tag}_metrics.csv")
-            logging.info(f"[saved] {outdir / f'{tag}_metrics.csv'}")
+        metrics_fig = plot_adaptive_metrics(
+            true=true_set, pred=pred_set,
+            design_config=design_config,
+            intrinsic_params=intrinsic_params,
+            max_num_categories=args.max_num_categories,
+            parameter_mask=params_mask,
+            variable_names=variable_names,
+            intercept_color=colors["intercept"],
+            main_effect_color=colors["main_effect"],
+            interaction_color=colors["interaction"],
+            skip_log_gamma=args.skip_log_gamma,
+        )
+        metrics_fig.savefig(outdir / f"{tag}_metrics.pdf", bbox_inches="tight")
+        plt.close(metrics_fig)
+
+        metrics_df = compute_adaptive_metrics(
+            true=true_set, pred=pred_set,
+            design_config=design_config,
+            intrinsic_params=intrinsic_params,
+            max_num_categories=args.max_num_categories,
+            parameter_mask=params_mask,
+            variable_names=variable_names,
+            skip_log_gamma=args.skip_log_gamma,
+        )
+        metrics_df.to_csv(outdir / f"{tag}_metrics.csv")
+        logging.info(f"[saved] {outdir / f'{tag}_metrics.csv'}")
 
     logging.info("Done.")
 
