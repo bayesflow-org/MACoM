@@ -53,12 +53,12 @@ DDM_BENCHMARK_CONFIGS = {
     },
     "three_reg_interaction": {
         "1": ["v", "a", "z", "tau", "s_v", "s_tau"],
-        "u_1": ["v", "a", "z", "tau", "s_v"],
-        "u_2": ["v", "a", "z", "tau"],
-        "u_3": ["v", "a", "z"],
+        "u_1": ["v", "a", "z", "tau", "s_v", "s_tau"],
+        "u_2": ["v", "a", "z", "tau", "s_v"],
+        "u_3": ["v", "a", "z", "tau"],
         "u_1:u_2": ["v", "a", "z"],
         "u_1:u_3": ["v", "a"],
-        "u_2:u_3": ["v", "a"],
+        "u_2:u_3": ["v"],
     },
     "full": {
         "1": ["v", "a", "z", "tau", "s_v", "s_tau"],
@@ -81,8 +81,8 @@ DDM_CONFIG = {
     "default_fixed_values": {"s_v": 0.0, "s_tau": 0.0},
     "benchmark_configs": DDM_BENCHMARK_CONFIGS,
     "val_scenarios": [
-        ("interaction", DDM_BENCHMARK_CONFIGS["interaction"]),
-        ("fixed", DDM_BENCHMARK_CONFIGS["fixed"]),
+        ("interaction", DDM_BENCHMARK_CONFIGS["three_reg_interaction"], {"max_num_categories": 3}),
+        ("fixed", DDM_BENCHMARK_CONFIGS["fixed"], {"skip_global": True}),
     ],
 }
 
@@ -114,12 +114,12 @@ CDM_BENCHMARK_CONFIGS = {
     },
     "three_reg_interaction": {
         "1": ["v", "v_theta", "a", "tau", "s_v", "s_tau"],
-        "u_1": ["v", "v_theta", "a", "tau", "s_v"],
-        "u_2": ["v", "v_theta", "a", "tau"],
-        "u_3": ["v", "v_theta", "a"],
+        "u_1": ["v", "v_theta", "a", "tau", "s_v", "s_tau"],
+        "u_2": ["v", "v_theta", "a", "tau", "s_v"],
+        "u_3": ["v", "v_theta", "a", "tau"],
         "u_1:u_2": ["v", "v_theta", "a"],
         "u_1:u_3": ["v", "v_theta"],
-        "u_2:u_3": ["v", "v_theta"],
+        "u_2:u_3": ["v"],
     },
     "full": {
         "1": ["v", "v_theta", "a", "tau", "s_v", "s_tau"],
@@ -142,8 +142,8 @@ CDM_CONFIG = {
     "default_fixed_values": {"s_v": 0.0, "s_tau": 0.0},
     "benchmark_configs": CDM_BENCHMARK_CONFIGS,
     "val_scenarios": [
-        ("interaction", CDM_BENCHMARK_CONFIGS["interaction"]),
-        ("fixed", CDM_BENCHMARK_CONFIGS["fixed"]),
+        ("interaction", CDM_BENCHMARK_CONFIGS["three_reg_interaction"], {"max_num_categories": 3}),
+        ("fixed", CDM_BENCHMARK_CONFIGS["fixed"], {"skip_global": True}),
     ],
 }
 
@@ -175,12 +175,12 @@ RDM_BENCHMARK_CONFIGS = {
     },
     "three_reg_interaction": {
         "1": ["v", "v_diff", "a", "tau", "s_v", "s_tau"],
-        "u_1": ["v", "v_diff", "a", "tau", "s_v"],
-        "u_2": ["v", "v_diff", "a", "tau"],
-        "u_3": ["v", "v_diff", "a"],
+        "u_1": ["v", "v_diff", "a", "tau", "s_v", "s_tau"],
+        "u_2": ["v", "v_diff", "a", "tau", "s_v"],
+        "u_3": ["v", "v_diff", "a", "tau"],
         "u_1:u_2": ["v", "v_diff", "a"],
         "u_1:u_3": ["v", "v_diff"],
-        "u_2:u_3": ["v", "v_diff"],
+        "u_2:u_3": ["v"],
     },
     "full": {
         "1": ["v", "v_diff", "a", "tau", "s_v", "s_tau"],
@@ -203,8 +203,8 @@ RDM_CONFIG = {
     "default_fixed_values": {"s_v": 0.0, "s_tau": 0.0},
     "benchmark_configs": RDM_BENCHMARK_CONFIGS,
     "val_scenarios": [
-        ("interaction", RDM_BENCHMARK_CONFIGS["interaction"]),
-        ("fixed", RDM_BENCHMARK_CONFIGS["fixed"]),
+        ("interaction", RDM_BENCHMARK_CONFIGS["three_reg_interaction"], {"max_num_categories": 3}),
+        ("fixed", RDM_BENCHMARK_CONFIGS["fixed"], {"skip_global": True}),
     ],
     "train_context": RDM.build_random_context,
 }
@@ -237,12 +237,12 @@ LBA_BENCHMARK_CONFIGS = {
     },
     "three_reg_interaction": {
         "1": ["v", "v_diff", "a", "tau", "s_v", "s_tau"],
-        "u_1": ["v", "v_diff", "a", "tau", "s_v"],
-        "u_2": ["v", "v_diff", "a", "tau"],
-        "u_3": ["v", "v_diff", "a"],
+        "u_1": ["v", "v_diff", "a", "tau", "s_v", "s_tau"],
+        "u_2": ["v", "v_diff", "a", "tau", "s_v"],
+        "u_3": ["v", "v_diff", "a", "tau"],
         "u_1:u_2": ["v", "v_diff", "a"],
         "u_1:u_3": ["v", "v_diff"],
-        "u_2:u_3": ["v", "v_diff"],
+        "u_2:u_3": ["v"],
     },
     "full": {
         "1": ["v", "v_diff", "a", "tau", "s_v", "s_tau"],
@@ -265,8 +265,8 @@ LBA_CONFIG = {
     "default_fixed_values": {"s_v": 0.0, "s_tau": 0.0},
     "benchmark_configs": LBA_BENCHMARK_CONFIGS,
     "val_scenarios": [
-        ("interaction", LBA_BENCHMARK_CONFIGS["interaction"]),
-        ("fixed", LBA_BENCHMARK_CONFIGS["fixed"]),
+        ("interaction", LBA_BENCHMARK_CONFIGS["three_reg_interaction"], {"max_num_categories": 3}),
+        ("fixed", LBA_BENCHMARK_CONFIGS["fixed"], {"skip_global": True}),
     ],
     "train_context": LBA.build_random_context,
 }
