@@ -107,14 +107,21 @@ class Decoder(nn.Module):
                 for _ in range(num_layers)
             ])
 
-    def velocity(self, theta_t, query, key, t, query_mask=None, model_embedding=None):
-
+    def velocity(self, theta_t, query, key, t, query_mask=None, model_embedding=None,
+                 param_embedding=None, regressor_embedding=None):
+        """
+        param_embedding, regressor_embedding : optional pre-computed positional embeddings.
+            If provided (e.g. pre-computed once before an ODE loop), the sinusoidal embedding
+            forward passes are skipped.
+        """
         # key_padding_mask for self-attention: True = inactive token, should be ignored
         key_padding_mask = (query_mask <= 0) if query_mask is not None else None
 
-        # Sinusoidal embeddings for positional indices and time
-        param_embedding = self.pos_embedding(query[..., :1])         # (B, T, pos_embedding_dim)
-        regressor_embedding = self.pos_embedding(query[..., 1:])     # (B, T, pos_embedding_dim)
+        # Sinusoidal embeddings for positional indices (skip if pre-computed)
+        if param_embedding is None:
+            param_embedding = self.pos_embedding(query[..., :1])     # (B, T, pos_embedding_dim)
+        if regressor_embedding is None:
+            regressor_embedding = self.pos_embedding(query[..., 1:]) # (B, T, pos_embedding_dim)
         time_embedding = self.time_embedding(t)                      # (B, T, time_embedding_dim)
 
         components = [theta_t, param_embedding, regressor_embedding, time_embedding]

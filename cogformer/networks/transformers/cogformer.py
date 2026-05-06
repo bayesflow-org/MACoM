@@ -96,11 +96,12 @@ class CogFormer(nn.Module):
 
         return pred_velocity, target_velocity
 
-    def _velocity(self, theta, t, enc_k, pos_q, mask_q, emb_q, amp_dtype, use_amp):
+    def _velocity(self, theta, t, enc_k, mask_q, emb_q, param_emb, reg_emb, amp_dtype, use_amp):
         with torch.autocast(device_type=theta.device.type, dtype=amp_dtype, enabled=use_amp):
-            out = self.decoder.velocity(
-                theta_t=theta, query=pos_q, key=enc_k, t=t,
+            out = self._compiled_vel(
+                theta_t=theta, query=None, key=enc_k, t=t,
                 query_mask=mask_q, model_embedding=emb_q,
+                param_embedding=param_emb, regressor_embedding=reg_emb,
             )
         return out.float()
 
@@ -131,16 +132,25 @@ class CogFormer(nn.Module):
         mask_q = params_mask.repeat_interleave(num_samples, dim=0) if params_mask is not None else None
         emb_q  = model_emb.repeat_interleave(num_samples, dim=0) if model_emb is not None else None
 
+        # Pre-compute positional embeddings — constant across all ODE steps
+        param_emb = self.decoder.pos_embedding(pos_q[..., :1])  # (B*S, num_tokens, pos_embedding_dim)
+        reg_emb   = self.decoder.pos_embedding(pos_q[..., 1:])  # (B*S, num_tokens, pos_embedding_dim)
+
+        # Lazily compile decoder.velocity (torch.compile(cogformer) only wraps forward())
+        if not hasattr(self, '_compiled_vel'):
+            self._compiled_vel = torch.compile(self.decoder.velocity, dynamic=True)
+
         theta_t = torch.randn((batch_size * num_samples, num_tokens, 1), device=device)
         t       = torch.zeros((batch_size * num_samples, num_tokens, 1), device=device)
         dt      = 1.0 / steps
 
-        v_fn = functools.partial(self._velocity, enc_k=enc_k, pos_q=pos_q, mask_q=mask_q,
-                                 emb_q=emb_q, amp_dtype=amp_dtype, use_amp=use_amp)
+        v_fn = functools.partial(self._velocity, enc_k=enc_k, mask_q=mask_q,
+                                 emb_q=emb_q, param_emb=param_emb, reg_emb=reg_emb,
+                                 amp_dtype=amp_dtype, use_amp=use_amp)
 
         for _ in tqdm(range(steps), desc="Sampling", unit="step", leave=True):
             theta_t = ode_step(v_fn, theta_t, t, dt, solver)
-            t = t + dt
+            t.add_(dt)
 
         return theta_t.reshape(batch_size, num_samples, num_tokens, 1).cpu().numpy()  # (B, S, T, 1)
 
