@@ -23,7 +23,7 @@ from cogformer.diagnostics.plot.adaptive_recovery import adaptive_recovery
 from cogformer.utils.plot_utils import cogformer_fm_colors
 
 from ..configs import MODELS as _BASE_MODELS, GLOBAL_PARAMS, GLOBAL_VARIABLE_NAMES
-from ..utils import add_global_params, strip_global_params, build_encoder_input_dim
+from ..utils import add_global_params, strip_global_params, build_encoder_input_dim, chunked_sample
 from ..timing import RunTimer
 
 HOLDOUT_TYPES = ["random", "variability", "interaction", "sparsity"]
@@ -157,14 +157,12 @@ class CogFormerTrainer:
             n_rows = true_set.shape[1] // n_cols
             true_set = true_set.reshape(config["batch_size"], n_rows, n_cols)
 
-            pred_set = self.net.sample(
-                adapted["input_data"],
-                adapted["param_indices"],
-                adapted["regressor_indices"],
-                adapted["param_masks"],
-                steps=config["fm_sample_steps"],
+            pred_set = chunked_sample(
+                self.net, adapted,
                 num_samples=config["fm_num_samples"],
+                steps=config["fm_sample_steps"],
                 solver=config.get("fm_solver", "euler"),
+                samples_chunk_size=config.get("val_samples_chunk_size"),
             )
             pred_set = pred_set.reshape(
                 config["batch_size"], config["fm_num_samples"], n_rows, n_cols
@@ -240,7 +238,9 @@ def parse_args():
     parser.add_argument("--fm_sample_steps", type=int, default=50)
     parser.add_argument("--fm_num_samples", type=int, default=200)
     parser.add_argument("--fm_solver", type=str, default="midpoint", choices=["euler", "midpoint", "rk4"])
-    parser.add_argument("--val_sample_chunk_size", type=int, default=100)
+    parser.add_argument("--val_samples_chunk_size", type=int, default=None,
+                        help="Samples per ODE loop during validation; peak GPU memory scales with "
+                             "batch_size * val_samples_chunk_size.")
 
     # Holdout-specific
     parser.add_argument("--split_seed", type=int, default=0,
@@ -362,7 +362,7 @@ if __name__ == "__main__":
         "fm_num_samples": args.fm_num_samples,
         "fm_solver": args.fm_solver,
         "batch_size": args.val_batch_size,
-        "val_sample_chunk_size": args.val_sample_chunk_size,
+        "val_samples_chunk_size": args.val_samples_chunk_size,
         "model_family_config": model_family_config,
         "val_sample_config": val_sample_config,
         "device": device,

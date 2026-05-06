@@ -18,7 +18,7 @@ from cogformer.diagnostics.metric.adaptive_metrics import adaptive_metrics as co
 from cogformer.utils.plot_utils import cogformer_fm_colors
 
 from ..configs import MODELS as _BASE_MODELS, GLOBAL_PARAMS, GLOBAL_VARIABLE_NAMES
-from ..utils import add_global_params, strip_global_params, infer_free_fixed_intrinsics, build_encoder_input_dim
+from ..utils import add_global_params, strip_global_params, infer_free_fixed_intrinsics, build_encoder_input_dim, chunked_sample
 
 
 # CF validate uses global params (pi) and adds script-specific output keys
@@ -67,11 +67,8 @@ def parse_args():
     p.add_argument("--num_samples", type=int, default=200)
     p.add_argument("--solver", type=str, default="midpoint",
                    choices=["euler", "midpoint", "rk4"])
-    p.add_argument("--sample_chunk_size", type=int, default=30,
-                   help="Batch items per cogformer.sample() call; reduces peak GPU memory.")
     p.add_argument("--samples_chunk_size", type=int, default=None,
-                   help="Samples per cogformer.sample() call; reduces peak GPU memory. "
-                        "Peak scales with batch_chunk * samples_chunk instead of batch_chunk * num_samples.")
+                   help="Samples per ODE loop; peak GPU memory scales with batch_size * samples_chunk_size.")
     p.add_argument("--include_full", action="store_true", default=False)
     p.add_argument("--configs", nargs="+", default=None,
                    help="Subset of benchmark configs to run (e.g. --configs intercept_only regressed)."
@@ -231,22 +228,13 @@ def main():
         n_rows = true_set.shape[1] // n_cols
         true_set = true_set.reshape(args.batch_size, n_rows, n_cols)
 
-        enc_tokens = cogformer.encoder(adapted["input_data"])
-        pred_chunks = []
-        for c_start in range(0, args.batch_size, args.sample_chunk_size):
-            c_end = min(c_start + args.sample_chunk_size, args.batch_size)
-            pred_chunks.append(cogformer.sample(
-                adapted["input_data"][c_start:c_end],
-                adapted["param_indices"][c_start:c_end],
-                adapted["regressor_indices"][c_start:c_end],
-                adapted["param_masks"][c_start:c_end],
-                steps=args.num_sample_steps,
-                num_samples=args.num_samples,
-                solver=args.solver,
-                samples_chunk_size=args.samples_chunk_size,
-                encoder_tokens=enc_tokens[c_start:c_end],
-            ))
-        pred_set = np.concatenate(pred_chunks, axis=0)
+        pred_set = chunked_sample(
+            cogformer, adapted,
+            num_samples=args.num_samples,
+            steps=args.num_sample_steps,
+            solver=args.solver,
+            samples_chunk_size=args.samples_chunk_size,
+        )
         pred_set = pred_set.reshape(args.batch_size, args.num_samples, n_rows, n_cols)
 
         params_mask = adapted["param_masks"].detach().cpu().numpy()

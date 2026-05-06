@@ -106,19 +106,10 @@ class CogFormer(nn.Module):
 
     @torch.no_grad()
     def sample(self, input_data, param_indices, regressor_indices, params_mask,
-               steps=1000, num_samples=100, model_ids=None, solver="euler",
-               samples_chunk_size=None, encoder_tokens=None):
+               steps=1000, num_samples=100, model_ids=None, solver="euler"):
         """
         solver : "euler" | "midpoint" | "rk4"
             NFE per step: euler=1, midpoint=2, rk4=4.
-        samples_chunk_size : int or None
-            Process num_samples in chunks of this size. Peak GPU memory scales with
-            batch_size * samples_chunk_size instead of batch_size * num_samples.
-            The encoder runs once; only the ODE loop is repeated per chunk.
-        encoder_tokens : Tensor or None
-            Pre-computed encoder output (B, num_seeds, seed_dim). If provided the
-            encoder forward pass is skipped — useful when sampling multiple chunks
-            from one large batch that was encoded once externally.
         """
         batch_size = input_data.shape[0]
         num_tokens = param_indices.shape[1]
@@ -127,9 +118,7 @@ class CogFormer(nn.Module):
         use_amp = device.type == "cuda"
         amp_dtype = (torch.bfloat16 if torch.cuda.is_bf16_supported() else torch.float16) if use_amp else torch.float32
 
-        # Encode once — shared across all sample chunks
-        if encoder_tokens is None:
-            encoder_tokens = self.encoder(input_data)                           # (B, num_seeds, seed_dim)
+        encoder_tokens = self.encoder(input_data)                               # (B, num_seeds, seed_dim)
         pos_embeddings = torch.cat([param_indices, regressor_indices], dim=-1)  # (B, num_tokens, 2)
 
         model_emb = None
@@ -137,32 +126,23 @@ class CogFormer(nn.Module):
             model_emb = self.model_embedding(model_ids)
             model_emb = model_emb.unsqueeze(1).expand(-1, num_tokens, -1)       # (B, num_tokens, embed_dim)
 
-        s_chunk = samples_chunk_size if samples_chunk_size is not None else num_samples
-        dt = 1.0 / steps
-        all_chunks = []
+        enc_k  = encoder_tokens.repeat_interleave(num_samples, dim=0)           # (B*S, num_seeds, seed_dim)
+        pos_q  = pos_embeddings.repeat_interleave(num_samples, dim=0)           # (B*S, num_tokens, 2)
+        mask_q = params_mask.repeat_interleave(num_samples, dim=0) if params_mask is not None else None
+        emb_q  = model_emb.repeat_interleave(num_samples, dim=0) if model_emb is not None else None
 
-        for s_start in range(0, num_samples, s_chunk):
-            s_count = min(s_chunk, num_samples - s_start)
+        theta_t = torch.randn((batch_size * num_samples, num_tokens, 1), device=device)
+        t       = torch.zeros((batch_size * num_samples, num_tokens, 1), device=device)
+        dt      = 1.0 / steps
 
-            enc_k  = encoder_tokens.repeat_interleave(s_count, dim=0)           # (B*s, num_seeds, seed_dim)
-            pos_q  = pos_embeddings.repeat_interleave(s_count, dim=0)           # (B*s, num_tokens, 2)
-            mask_q = params_mask.repeat_interleave(s_count, dim=0) if params_mask is not None else None
-            emb_q  = model_emb.repeat_interleave(s_count, dim=0) if model_emb is not None else None
+        v_fn = functools.partial(self._velocity, enc_k=enc_k, pos_q=pos_q, mask_q=mask_q,
+                                 emb_q=emb_q, amp_dtype=amp_dtype, use_amp=use_amp)
 
-            theta_t = torch.randn((batch_size * s_count, num_tokens, 1), device=device)
-            t       = torch.zeros((batch_size * s_count, num_tokens, 1), device=device)
+        for _ in tqdm(range(steps), desc="Sampling", unit="step", leave=True):
+            theta_t = ode_step(v_fn, theta_t, t, dt, solver)
+            t = t + dt
 
-            v_fn = functools.partial(self._velocity, enc_k=enc_k, pos_q=pos_q, mask_q=mask_q,
-                                     emb_q=emb_q, amp_dtype=amp_dtype, use_amp=use_amp)
-
-            for _ in tqdm(range(steps), desc="Sampling", unit="step", leave=(s_start == 0)):
-                theta_t = ode_step(v_fn, theta_t, t, dt, solver)
-                t = t + dt
-
-            all_chunks.append(theta_t.reshape(batch_size, s_count, num_tokens, 1).cpu())
-            del enc_k, pos_q, mask_q, emb_q, theta_t, t
-
-        return torch.cat(all_chunks, dim=1).numpy()  # (B, num_samples, num_tokens, 1)
+        return theta_t.reshape(batch_size, num_samples, num_tokens, 1).cpu().numpy()  # (B, S, T, 1)
 
     def compute_loss(self, pred_velocity, target_velocity, param_masks) -> torch.Tensor:
 

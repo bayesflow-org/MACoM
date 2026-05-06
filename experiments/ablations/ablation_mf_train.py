@@ -75,7 +75,9 @@ def parse_args():
     parser.add_argument("--val_batch_size", type=int, default=500)
     parser.add_argument("--epochs", type=int, default=5000)
     parser.add_argument("--steps_per_epoch", type=int, default=100)
-    parser.add_argument("--val_sample_chunk_size", type=int, default=100)
+    parser.add_argument("--val_samples_chunk_size", type=int, default=None,
+                        help="Samples per ODE loop during validation; peak GPU memory scales with "
+                             "batch_size * val_samples_chunk_size.")
     parser.add_argument(
         "--estimate_global_params",
         action=argparse.BooleanOptionalAction,
@@ -205,7 +207,7 @@ if __name__ == "__main__":
         "fm_num_samples": args.fm_num_samples,
         "fm_solver": args.fm_solver,
         "batch_size": args.val_batch_size,
-        "val_sample_chunk_size": args.val_sample_chunk_size,
+        "val_samples_chunk_size": args.val_samples_chunk_size,
         "model_family_config": model_family_config,
         "val_sample_config": val_sample_config,
         "device": device,

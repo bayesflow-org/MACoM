@@ -23,7 +23,7 @@ from cogformer.diagnostics.plot.adaptive_correlation import adaptive_correlation
 from cogformer.utils.plot_utils import cogformer_fm_colors
 
 from ..configs import MODELS as _BASE_MODELS, GLOBAL_PARAMS, GLOBAL_VARIABLE_NAMES
-from ..utils import add_global_params, strip_global_params, build_encoder_input_dim
+from ..utils import add_global_params, strip_global_params, build_encoder_input_dim, chunked_sample
 from ..timing import RunTimer
 
 
@@ -212,24 +212,13 @@ class CogFormerTrainer:
             n_rows = true_set.shape[1] // n_cols
             true_set = true_set.reshape(config["batch_size"], n_rows, n_cols)
 
-            chunk_size = config.get("val_sample_chunk_size", config["batch_size"])
-            enc_tokens = self.net.encoder(adapted["input_data"])
-            pred_chunks = []
-            for c_start in range(0, config["batch_size"], chunk_size):
-                c_end = min(c_start + chunk_size, config["batch_size"])
-                chunk = self.net.sample(
-                    adapted["input_data"][c_start:c_end],
-                    adapted["param_indices"][c_start:c_end],
-                    adapted["regressor_indices"][c_start:c_end],
-                    adapted["param_masks"][c_start:c_end],
-                    steps=config["fm_sample_steps"],
-                    num_samples=config["fm_num_samples"],
-                    solver=config.get("fm_solver", "euler"),
-                    samples_chunk_size=config.get("val_fm_sample_chunk_size"),
-                    encoder_tokens=enc_tokens[c_start:c_end],
-                )
-                pred_chunks.append(chunk)
-            pred_set = np.concatenate(pred_chunks, axis=0)
+            pred_set = chunked_sample(
+                self.net, adapted,
+                num_samples=config["fm_num_samples"],
+                steps=config["fm_sample_steps"],
+                solver=config.get("fm_solver", "euler"),
+                samples_chunk_size=config.get("val_samples_chunk_size"),
+            )
             pred_set = pred_set.reshape(
                 config["batch_size"], config["fm_num_samples"], n_rows, n_cols
             )
@@ -298,12 +287,9 @@ def parse_args():
     parser.add_argument("--fm_solver", type=str, default="euler",
                         choices=["euler", "midpoint", "rk4"],
                         help="ODE solver for flow matching sampling")
-    parser.add_argument("--val_sample_chunk_size", type=int, default=100,
-                        help="Batch chunk size for val sampling to avoid GPU OOM")
-    parser.add_argument("--val_fm_sample_chunk_size", type=int, default=20,
-                        help="Flow-sample chunk size inside net.sample() during validation "
-                             "(reduces peak GPU memory; total per-ODE-step batch = "
-                             "val_sample_chunk_size × val_fm_sample_chunk_size)")
+    parser.add_argument("--val_samples_chunk_size", type=int, default=20,
+                        help="Samples per ODE loop during validation; peak GPU memory scales with "
+                             "batch_size * val_samples_chunk_size.")
     parser.add_argument("--estimate_global_params", action=argparse.BooleanOptionalAction,
                         default=True,
                         help="Include global parameters (e.g. contamination probability pi) "
@@ -389,8 +375,7 @@ if __name__ == "__main__":
         "fm_num_samples": args.fm_num_samples,
         "fm_solver": args.fm_solver,
         "batch_size": args.val_batch_size,
-        "val_sample_chunk_size": args.val_sample_chunk_size,
-        "val_fm_sample_chunk_size": args.val_fm_sample_chunk_size,
+        "val_samples_chunk_size": args.val_samples_chunk_size,
         "model_family_config": model_family_config,
         "val_sample_config": val_sample_config,
         "device": device,

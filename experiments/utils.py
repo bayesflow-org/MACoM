@@ -3,6 +3,37 @@
 import numpy as np
 
 
+def chunked_sample(model, adapted, num_samples, steps, solver="euler",
+                   samples_chunk_size=None):
+    """Call model.sample() in chunks of samples_chunk_size to limit peak GPU memory.
+
+    Peak memory scales with batch_size * samples_chunk_size * num_tokens.
+    If samples_chunk_size is None the full num_samples are drawn in one pass.
+    """
+    input_data      = adapted["input_data"]
+    param_indices   = adapted["param_indices"]
+    regressor_idx   = adapted["regressor_indices"]
+    params_mask     = adapted["param_masks"]
+    model_ids       = adapted.get("model_ids")
+
+    if samples_chunk_size is None or samples_chunk_size >= num_samples:
+        return model.sample(
+            input_data, param_indices, regressor_idx, params_mask,
+            num_samples=num_samples, steps=steps, solver=solver,
+            model_ids=model_ids,
+        )
+
+    chunks = []
+    for s_start in range(0, num_samples, samples_chunk_size):
+        s_count = min(samples_chunk_size, num_samples - s_start)
+        chunks.append(model.sample(
+            input_data, param_indices, regressor_idx, params_mask,
+            num_samples=s_count, steps=steps, solver=solver,
+            model_ids=model_ids,
+        ))
+    return np.concatenate(chunks, axis=1)
+
+
 def infer_free_fixed_intrinsics(
     design_config: dict,
     all_intrinsics: list[str],
