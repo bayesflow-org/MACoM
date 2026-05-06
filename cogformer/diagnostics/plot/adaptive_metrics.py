@@ -4,7 +4,7 @@ import matplotlib.colors as mcolors
 from matplotlib.patches import Rectangle
 import seaborn as sns
 
-from cogformer.simulator.design_utils import build_parameter_mask, build_design_matrix, build_random_design_config
+from cogformer.simulator.design_utils import build_parameter_mask, expand_design_config_to_mask
 from cogformer.diagnostics.metric.adaptive_metrics import (
     _rmse,
     _contraction,
@@ -91,12 +91,19 @@ def adaptive_metrics(
     if parameter_mask.ndim == 3:
         parameter_mask = parameter_mask[0]
 
+    design_config = expand_design_config_to_mask(design_config, parameter_mask, max_num_categories)
     col_labels = variable_names if variable_names is not None else intrinsic_params
     regressor_keys = list(design_config.keys())
+    block_width = max_num_categories - 1
+    main_keys = [k for k in regressor_keys if k != "1" and ":" not in k]
+    inter_keys_dc = [k for k in regressor_keys if ":" in k]
 
     batch_size, num_draws, num_rows, num_cols = pred.shape
-    # collate() pads the grid to max dims; cap to rows the design_config covers.
-    n_design_rows = 1 + (len(regressor_keys) - 1) * (max_num_categories - 1)
+    n_design_rows = (
+        (1 if "1" in regressor_keys else 0)
+        + len(main_keys) * block_width
+        + len(inter_keys_dc) * block_width ** 2
+    )
     num_rows = min(num_rows, n_design_rows)
     parameter_mask = parameter_mask[:num_rows]
     true = true[:, :num_rows, :]
@@ -142,21 +149,45 @@ def adaptive_metrics(
                 grids["Log Gamma"][r, c] = _log_gamma(estimates, targets, null_quantile)
 
     # ------------------------------------------------------------------
-    # Row / column axis labels
+    # Row / column axis labels (built before compact filtering)
     # ------------------------------------------------------------------
     row_labels = []
     row_colors = []
-    for r in range(num_rows):
-        if r == 0:
-            row_labels.append(r"$1$")
-            row_colors.append(intercept_color)
-        else:
-            regressor_id = (r - 1) // (max_num_categories - 1) + 1
-            regressor_key = regressor_keys[regressor_id]
-            row_labels.append(fr"${regressor_key}$")
-            row_colors.append(
-                interaction_color if ":" in regressor_key else main_effect_color
-            )
+    _r = 0
+    if "1" in regressor_keys:
+        row_labels.append(r"$1$")
+        row_colors.append(intercept_color)
+        _r += 1
+    for key in main_keys:
+        for _ in range(block_width):
+            row_labels.append(fr"${key}$")
+            row_colors.append(main_effect_color)
+            _r += 1
+            if _r >= num_rows:
+                break
+        if _r >= num_rows:
+            break
+    for key in inter_keys_dc:
+        for _ in range(block_width ** 2):
+            row_labels.append(fr"${key}$")
+            row_colors.append(interaction_color)
+            _r += 1
+            if _r >= num_rows:
+                break
+        if _r >= num_rows:
+            break
+
+    # Compact: drop rows and columns that are entirely N/A
+    row_idx = np.where(np.any(parameter_mask, axis=1))[0]
+    col_idx = np.where(np.any(parameter_mask, axis=0))[0]
+    parameter_mask = parameter_mask[np.ix_(row_idx, col_idx)]
+    for key in grids:
+        grids[key] = grids[key][np.ix_(row_idx, col_idx)]
+    row_labels = [row_labels[i] for i in row_idx]
+    row_colors = [row_colors[i] for i in row_idx]
+    col_labels = [col_labels[i] for i in col_idx]
+    num_rows   = len(row_idx)
+    num_cols   = len(col_idx)
 
     # ------------------------------------------------------------------
     # Colormap specs  (seaborn palette name)

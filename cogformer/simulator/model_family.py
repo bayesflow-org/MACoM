@@ -15,6 +15,7 @@ from .design_utils import (
     build_link_functions,
     build_regressor_mask,
     sample_parameter_matrix,
+    normalize_design_config,
 )
 
 from ..utils.simulator_utils import softplus, inspect
@@ -187,6 +188,9 @@ class ModelFamily:
         if prior is None:
             prior = self.prior
         kwargs = mask_randomizer_kwargs if mask_randomizer_kwargs is not None else (self.mask_randomizer_kwargs or {})
+
+        if design_config is not None:
+            design_config = normalize_design_config(design_config, max_num_regressors)
 
         design_config, parameter_mask, intrinsic_prior = self._resolve_design(
             design_config=design_config,

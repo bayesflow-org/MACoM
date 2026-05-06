@@ -1,7 +1,7 @@
 import numpy as np
 from scipy.stats import beta
 import matplotlib.pyplot as plt
-from cogformer.simulator.design_utils import build_parameter_mask, build_design_matrix, build_random_design_config
+from cogformer.simulator.design_utils import build_parameter_mask, expand_design_config_to_mask
 from cogformer.utils.plot_utils import cogformer_cm_colors
 
 
@@ -135,12 +135,57 @@ def adaptive_coverage(
     elif parameter_mask.ndim == 3:
         parameter_mask = parameter_mask[0]
 
+    design_config = expand_design_config_to_mask(design_config, parameter_mask, max_num_categories)
     batch_size, num_draws, num_rows, num_cols = pred.shape
-
     regressor_keys = list(design_config.keys())
-    # collate() pads the grid to max dims; cap to rows the design_config covers.
-    n_design_rows = 1 + (len(regressor_keys) - 1) * (max_num_categories - 1)
+    block_width = max_num_categories - 1
+    main_keys = [k for k in regressor_keys if k != "1" and ":" not in k]
+    inter_keys = [k for k in regressor_keys if ":" in k]
+    n_design_rows = (
+        (1 if "1" in regressor_keys else 0)
+        + len(main_keys) * block_width
+        + len(inter_keys) * block_width ** 2
+    )
     num_rows = min(num_rows, n_design_rows)
+
+    # Pre-generate labels before compact filtering
+    row_ylabels = []
+    row_tints   = []
+    _r = 0
+    if "1" in regressor_keys:
+        row_ylabels.append(r"$1$")
+        row_tints.append(intercept_color)
+        _r += 1
+    for key in main_keys:
+        for cat_id in range(1, block_width + 1):
+            row_ylabels.append(fr"${key}$" + (fr"$ | c_{cat_id}$" if max_num_categories > 2 else ""))
+            row_tints.append(main_effect_color)
+            _r += 1
+            if _r >= num_rows:
+                break
+        if _r >= num_rows:
+            break
+    for key in inter_keys:
+        for cat_id in range(1, block_width ** 2 + 1):
+            row_ylabels.append(fr"${key}$" + (fr"$ | c_{cat_id}$" if max_num_categories > 2 else ""))
+            row_tints.append(interaction_color)
+            _r += 1
+            if _r >= num_rows:
+                break
+        if _r >= num_rows:
+            break
+
+    # Compact: drop rows and columns that are entirely N/A
+    row_idx = np.where(np.any(parameter_mask[:num_rows], axis=1))[0]
+    col_idx = np.where(np.any(parameter_mask[:num_rows], axis=0))[0]
+    parameter_mask = parameter_mask[np.ix_(row_idx, col_idx)]
+    true = true[:, row_idx, :][:, :, col_idx]
+    pred = pred[:, :, row_idx, :][:, :, :, col_idx]
+    row_ylabels = [row_ylabels[i] for i in row_idx]
+    row_tints   = [row_tints[i]   for i in row_idx]
+    col_labels  = [variable_names[i] for i in col_idx]
+    num_rows    = len(row_idx)
+    num_cols    = len(col_idx)
 
     if figsize is None:
         figsize = (3.2 * num_cols, 2.9 * num_rows)
@@ -151,27 +196,18 @@ def adaptive_coverage(
 
     legend_handles = None
 
-    for r in range(num_rows):
-        # Match adaptive_recovery styling: intercept row vs regressor rows
-        if r > 0:
-            category_id = (r - 1) % (max_num_categories - 1) + 1
-            regressor_id = (r - 1) // (max_num_categories - 1) + 1
-            regressor_key = regressor_keys[regressor_id]
-            ylabel = fr"${regressor_key}$" + (fr"$ | c_{category_id}$" if max_num_categories > 2 else "")
-            tint = interaction_color if ":" in regressor_key else main_effect_color
-        else:
-            ylabel = r"$1$"
-            tint = intercept_color
+    for r_f in range(num_rows):
+        ylabel = row_ylabels[r_f]
+        tint   = row_tints[r_f]
 
-        for c in range(num_cols):
-            ax = axarr[r, c]
+        for c_f in range(num_cols):
+            ax = axarr[r_f, c_f]
 
             # Masked cell -> N/A tile
-            if parameter_mask[r, c] != 1.0:
+            if parameter_mask[r_f, c_f] != 1.0:
                 ax.set_facecolor(tint)
                 ax.patch.set_alpha(0.05)
-                if r == num_rows - 1:
-                    # Invisible placeholder ticks so xlabel aligns with active cells
+                if r_f == num_rows - 1:
                     ax.set_xticks([0.0, 0.5, 1.0])
                     ax.set_xticklabels(['0.0', '0.5', '1.0'])
                     ax.tick_params(axis='x', length=0, labelcolor='none', labelsize=tick_fontsize)
@@ -181,23 +217,18 @@ def adaptive_coverage(
                 for sp in ax.spines.values():
                     sp.set_visible(False)
                 ax.text(
-                    0.5,
-                    0.5,
-                    "N/A",
+                    0.5, 0.5, "N/A",
                     transform=ax.transAxes,
-                    ha="center",
-                    va="center",
-                    fontsize=18,
-                    weight="bold",
-                    alpha=0.7,
-                    color=tint,
+                    ha="center", va="center",
+                    fontsize=18, weight="bold",
+                    alpha=0.7, color=tint,
                 )
-                ax.set_xlabel("Interval width" if r == num_rows - 1 else "", fontsize=label_fontsize)
+                ax.set_xlabel("Interval width" if r_f == num_rows - 1 else "", fontsize=label_fontsize)
                 continue
 
             # Build per-cell arrays in the shape expected by compute_empirical_coverage
-            estimates_cell = pred[:,:,r,c][..., None] # (batch, draws, 1)
-            targets_cell = true[:, r, c][:, None]  # (batch, 1)
+            estimates_cell = pred[:, :, r_f, c_f][..., None]  # (batch, draws, 1)
+            targets_cell   = true[:, r_f, c_f][:, None]       # (batch, 1)
 
             cov_data = compute_empirical_coverage(
                 estimates=estimates_cell,
@@ -243,11 +274,11 @@ def adaptive_coverage(
                 ax.set_ylim(-0.02, 1.02)
 
             # Labels/titles
-            ax.set_ylabel(ylabel if c == 0 else "", fontsize=label_fontsize)
-            ax.set_xlabel("Interval width" if r == num_rows - 1 else "", fontsize=label_fontsize)
+            ax.set_ylabel(ylabel if c_f == 0 else "", fontsize=label_fontsize)
+            ax.set_xlabel("Interval width" if r_f == num_rows - 1 else "", fontsize=label_fontsize)
 
-            if variable_names is not None and r == 0:
-                ax.set_title(variable_names[c], fontsize=title_fontsize)
+            if col_labels is not None and r_f == 0:
+                ax.set_title(col_labels[c_f], fontsize=title_fontsize)
 
             ticks = [0.0, 0.25, 0.5, 0.75, 1.0]
             ax.set_xticks(ticks)

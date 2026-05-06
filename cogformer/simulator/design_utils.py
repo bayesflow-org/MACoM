@@ -258,6 +258,58 @@ def build_parameter_mask(
     return mask
 
 
+def normalize_design_config(
+    design_config: dict,
+    max_num_regressors: int,
+) -> dict:
+    """
+    Expand a sparse design_config to canonical form by filling in missing main-effect
+    regressor keys (u_1 … u_max_num_regressors) with empty lists.
+
+    This ensures correct positional alignment in the design matrix: the model always
+    expects column block i to correspond to u_i, so absent regressors must be present
+    as empty entries rather than omitted entirely.  Existing keys (including interactions)
+    are preserved as-is.
+    """
+    out = {}
+    if "1" in design_config:
+        out["1"] = design_config["1"]
+    for r in range(1, max_num_regressors + 1):
+        out[f"u_{r}"] = design_config.get(f"u_{r}", [])
+    for key, val in design_config.items():
+        if ":" in key:
+            out[key] = val
+    return out
+
+
+def expand_design_config_to_mask(
+    design_config: dict,
+    parameter_mask: np.ndarray,
+    max_num_categories: int,
+) -> dict:
+    """
+    Infer the number of main-effect regressor blocks from parameter_mask.shape[0] and
+    expand a sparse design_config to include all of them as empty keys where absent.
+
+    Used in diagnostic functions that receive the original (possibly sparse) config but
+    need label generation to match the mask that was built from the normalized config.
+    """
+    block_width = max_num_categories - 1
+    inter_block_width = block_width ** 2
+    has_intercept = "1" in design_config
+    inter_keys = [k for k in design_config if ":" in k]
+    main_rows = parameter_mask.shape[0] - (1 if has_intercept else 0) - len(inter_keys) * inter_block_width
+    num_main_blocks = max(main_rows // block_width, 0)
+    out = {}
+    if has_intercept:
+        out["1"] = design_config.get("1", [])
+    for r in range(1, num_main_blocks + 1):
+        out[f"u_{r}"] = design_config.get(f"u_{r}", [])
+    for key in inter_keys:
+        out[key] = design_config[key]
+    return out
+
+
 def build_random_parameter_mask(
     intrinsic_params: list[str],
     num_regressors: int = 2,

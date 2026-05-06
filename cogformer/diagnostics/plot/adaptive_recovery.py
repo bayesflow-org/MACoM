@@ -4,7 +4,7 @@ import matplotlib.pyplot as plt
 
 from collections.abc import Callable
 
-from cogformer.simulator.design_utils import build_parameter_mask, build_design_matrix, build_random_design_config
+from cogformer.simulator.design_utils import build_parameter_mask, expand_design_config_to_mask
 from cogformer.utils.plot_utils import make_quadratic, credible_interval, cogformer_cm_colors
 
 
@@ -37,39 +37,74 @@ def adaptive_recovery(
     elif parameter_mask.ndim == 3:
         parameter_mask = parameter_mask[0]
 
+    design_config = expand_design_config_to_mask(design_config, parameter_mask, max_num_categories)
     num_rows, num_cols = parameter_mask.shape
-
     regressor_keys = list(design_config.keys())
-    # Cap num_rows to the number of rows the design_config actually covers.
-    # collate() pads the grid to max_num_cols regardless of the specific design,
-    # so parameter_mask may have more rows than design_config accounts for.
-    n_design_rows = 1 + (len(regressor_keys) - 1) * (max_num_categories - 1)
+    block_width = max_num_categories - 1
+    main_keys = [k for k in regressor_keys if k != "1" and ":" not in k]
+    inter_keys = [k for k in regressor_keys if ":" in k]
+    n_design_rows = (
+        (1 if "1" in regressor_keys else 0)
+        + len(main_keys) * block_width
+        + len(inter_keys) * block_width ** 2
+    )
     num_rows = min(num_rows, n_design_rows)
+
+    # Pre-generate labels for all rows before compact filtering
+    row_ylabels = []
+    row_colors  = []
+    _r = 0
+    if "1" in regressor_keys:
+        row_ylabels.append(r"$1$")
+        row_colors.append(intercept_color)
+        _r += 1
+    for key in main_keys:
+        for cat_id in range(1, block_width + 1):
+            row_ylabels.append(fr"${key}$" + (fr"$ | c_{cat_id}$" if max_num_categories > 2 else ""))
+            row_colors.append(main_effect_color)
+            _r += 1
+            if _r >= num_rows:
+                break
+        if _r >= num_rows:
+            break
+    for key in inter_keys:
+        for cat_id in range(1, block_width ** 2 + 1):
+            row_ylabels.append(fr"${key}$" + (fr"$ | c_{cat_id}$" if max_num_categories > 2 else ""))
+            row_colors.append(interaction_color)
+            _r += 1
+            if _r >= num_rows:
+                break
+        if _r >= num_rows:
+            break
+
+    # Compact: drop rows and columns that are entirely N/A
+    row_idx = np.where(np.any(parameter_mask[:num_rows], axis=1))[0]
+    col_idx = np.where(np.any(parameter_mask[:num_rows], axis=0))[0]
+    parameter_mask = parameter_mask[np.ix_(row_idx, col_idx)]
+    true_f  = true[..., row_idx, :][..., col_idx]  # keep original for ref below
+    pred_f  = pred[..., row_idx, :][..., col_idx] if pred.ndim >= 3 else pred
+    row_ylabels = [row_ylabels[i] for i in row_idx]
+    row_colors  = [row_colors[i]  for i in row_idx]
+    col_labels  = [variable_names[i] for i in col_idx]
+    num_rows    = len(row_idx)
+    num_cols    = len(col_idx)
 
     if figsize is None:
         figsize = (3 * num_cols, 2.8 * num_rows)
 
-    fig, axarr = plt.subplots(num_rows, num_cols, figsize=figsize)
+    fig, axarr = plt.subplots(num_rows, num_cols, figsize=figsize, squeeze=False)
 
-    for r in range(num_rows):
-        if r > 0:
-            category_id = (r - 1) % (max_num_categories - 1) + 1
-            regressor_id = (r - 1) // (max_num_categories - 1) + 1
+    for r_f in range(num_rows):
+        ylabel = row_ylabels[r_f]
+        color  = row_colors[r_f]
 
-            regressor_key = regressor_keys[regressor_id]
-            ylabel = fr"${regressor_key}$" + (fr"$ | c_{category_id}$" if max_num_categories > 2 else "")
-            color = interaction_color if ":" in regressor_key else main_effect_color
-        else:
-            ylabel = r"$1$"
-            color = intercept_color
-
-        for c in range(num_cols):
-            ax = axarr[r, c]
-            x = true[..., r, c]
-            mask = parameter_mask[r, c]
+        for c_f in range(num_cols):
+            ax = axarr[r_f, c_f]
+            x = true_f[..., r_f, c_f]
+            mask = parameter_mask[r_f, c_f]
             if mask == 1.0:
-                if pred.ndim == 4: # Full posterior
-                    y = pred[..., r, c]
+                if pred_f.ndim == 4:  # Full posterior
+                    y = pred_f[..., r_f, c_f]
                     y_mean = y.mean(axis=1)
                     make_quadratic(ax, x, y_mean, color=color)
 
@@ -81,8 +116,8 @@ def adaptive_recovery(
                     sns.scatterplot(x=x, y=y_mean, ax=ax, color=color, alpha=0.7)
 
                     corr = np.corrcoef(x, y_mean)[0, 1]
-                else:              # Point estimate
-                    y = pred[..., r, c]
+                else:                 # Point estimate
+                    y = pred_f[..., r_f, c_f]
                     make_quadratic(ax, x, y, color=color)
 
                     sns.scatterplot(x=x, y=y, ax=ax, color=color, alpha=0.5)
@@ -93,14 +128,14 @@ def adaptive_recovery(
 
                 ax.grid(True, color="lightgray", linestyle="--", linewidth=0.5, alpha=0.2)
                 sns.despine(ax=ax)
-                ax.set_ylabel(ylabel if c == 0 else "", fontsize=label_fontsize)
-                ax.set_title(variable_names[c] if r == 0 else "", fontsize=title_fontsize)
-                ax.set_xlabel("Ground Truth" if r == num_rows - 1 else "", fontsize=label_fontsize)
+                ax.set_ylabel(ylabel if c_f == 0 else "", fontsize=label_fontsize)
+                ax.set_title(col_labels[c_f] if r_f == 0 else "", fontsize=title_fontsize)
+                ax.set_xlabel("Ground Truth" if r_f == num_rows - 1 else "", fontsize=label_fontsize)
 
             else:
                 ax.set_facecolor(color)
                 ax.patch.set_alpha(0.05)
-                if r == num_rows - 1:
+                if r_f == num_rows - 1:
                     ax.set_xticks([0.0, 0.5, 1.0])
                     ax.set_xticklabels(['0.0', '0.5', '1.0'])
                     ax.tick_params(axis='x', length=0, labelcolor='none')
@@ -112,14 +147,11 @@ def adaptive_recovery(
                 ax.text(
                     0.5, 0.5, "N/A",
                     transform=ax.transAxes,
-                    ha="center",
-                    va="center",
-                    fontsize=18,
-                    weight="bold",
-                    alpha=0.7,
-                    color=color
+                    ha="center", va="center",
+                    fontsize=18, weight="bold",
+                    alpha=0.7, color=color,
                 )
-                ax.set_xlabel("Ground Truth" if r == num_rows - 1 else "", fontsize=label_fontsize)
+                ax.set_xlabel("Ground Truth" if r_f == num_rows - 1 else "", fontsize=label_fontsize)
 
     fig.tight_layout()
     return fig
