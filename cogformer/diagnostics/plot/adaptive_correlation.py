@@ -128,11 +128,6 @@ def adaptive_correlation(
                     color=row_colors[r], alpha=0.7, zorder=3,
                 )
 
-    # Colorbar
-    sm = plt.cm.ScalarMappable(cmap=cm, norm=norm)
-    sm.set_array([])
-    fig.colorbar(sm, ax=ax, label="Pearson r", shrink=0.8)
-
     ax.set_title("Recovery Correlation (r)", fontsize=title_fontsize)
     ax.set_xticks(range(num_cols))
     ax.set_xticklabels(variable_names, fontsize=tick_fontsize)
