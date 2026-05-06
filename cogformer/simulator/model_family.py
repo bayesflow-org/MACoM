@@ -206,7 +206,7 @@ class ModelFamily:
         if context is None and hasattr(self.model, 'build_default_context'):
             context = self.model.build_default_context(num_obs=num_obs)
 
-        design_matrix = build_design_matrix(
+        design_matrix, actual_col_counts = build_design_matrix(
             design_config=design_config,
             num_obs=num_obs,
             context=context,
@@ -214,6 +214,17 @@ class ModelFamily:
             max_num_categories=max_num_categories,
             collinearity_df=collinearity_df,
             category_concentration=category_concentration,
+            return_category_counts=True,
+        )
+
+        # Rebuild the mask with actual category counts so that rows corresponding to
+        # unused category levels (zero-padded design matrix columns) are excluded.
+        parameter_mask = build_parameter_mask(
+            design_config=design_config,
+            intrinsic_params=self.intrinsic_params,
+            max_num_categories=max_num_categories,
+            keep_intercept="1" in design_config,
+            category_counts=actual_col_counts,
         )
 
         parameter_matrix = sample_parameter_matrix(

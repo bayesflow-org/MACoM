@@ -192,6 +192,7 @@ def build_parameter_mask(
     fixed_params: list[str] = None,
     max_num_categories: int = 3,
     keep_intercept: bool = False,
+    category_counts: dict[str, int] | None = None,
 ) -> np.ndarray:
     """
     Convert a design_config dict into a binary parameter mask mapping
@@ -199,6 +200,12 @@ def build_parameter_mask(
 
     Main-effect blocks occupy block_width rows each.
     Interaction blocks occupy block_width² rows each (one per cross-product of dummy columns).
+
+    category_counts : optional dict mapping each main-effect key to the number of
+        design-matrix columns that were actually filled (1 for continuous, K-1 for
+        a K-category discrete regressor).  When provided, only those rows are activated;
+        the remaining padding rows (for unused category levels) stay zero.  This prevents
+        the model from being trained to recover unidentifiable parameters.
     """
     regressor_keys = list(design_config.keys())
     has_intercept = "1" in regressor_keys
@@ -227,18 +234,24 @@ def build_parameter_mask(
         row_idx = 1
 
     for key in main_keys:
+        active = min(category_counts[key], block_width) if category_counts else block_width
         for intrinsic in design_config[key]:
             if intrinsic in intrinsic_params and intrinsic not in fixed_set:
                 param_index = intrinsic_params.index(intrinsic)
-                for r in range(row_idx, row_idx + block_width):
+                for r in range(row_idx, row_idx + active):
                     mask[r, param_index] = 1.0
         row_idx += block_width
 
     for key in inter_keys:
+        if category_counts:
+            a, b = key.split(":")
+            active = min(category_counts.get(a, 1) * category_counts.get(b, 1), inter_block_width)
+        else:
+            active = inter_block_width
         for intrinsic in design_config[key]:
             if intrinsic in intrinsic_params and intrinsic not in fixed_set:
                 param_index = intrinsic_params.index(intrinsic)
-                for r in range(row_idx, row_idx + inter_block_width):
+                for r in range(row_idx, row_idx + active):
                     mask[r, param_index] = 1.0
         row_idx += inter_block_width
 
@@ -380,7 +393,8 @@ def build_design_matrix(
     main_discrete_mask: np.ndarray = None,
     collinearity_df: float | None = None,
     category_concentration: float | None = None,
-) -> np.ndarray:
+    return_category_counts: bool = False,
+) -> np.ndarray | tuple[np.ndarray, dict[str, int]]:
     """
     Build design matrix based on the respective configuration of free intrinsic parameters.
 
@@ -428,6 +442,7 @@ def build_design_matrix(
         mvn_col_map = {}
 
     col_idx = 0
+    actual_col_counts: dict[str, int] = {}
 
     if has_intercept:
         design_matrix[:, 0] = 1.0
@@ -451,14 +466,17 @@ def build_design_matrix(
             if col.shape[0] != num_obs:
                 raise ValueError(f"context['{key}'] length {col.shape[0]} != num_obs {num_obs}")
             design_matrix[:, start] = col
+            actual_col_counts[key] = 1
             continue
 
         if main_discrete_mask[j] == 1:
             num_categories = np.random.randint(min_num_categories, max_num_categories + 1)
             dummies = _discretize_column(mvn_col_map[j], num_categories, category_concentration)
             design_matrix[:, start:(start + dummies.shape[1])] = dummies
+            actual_col_counts[key] = dummies.shape[1]  # = num_categories - 1
         else:
             design_matrix[:, start] = mvn_col_map[j]
+            actual_col_counts[key] = 1
 
     for key in interaction_keys:
         start = start_col[key]
@@ -486,6 +504,8 @@ def build_design_matrix(
         interaction = (a_cols[:, :, None] * b_cols[:, None, :]).reshape(num_obs, inter_block_width)
         design_matrix[:, start:start + inter_block_width] = interaction
 
+    if return_category_counts:
+        return design_matrix, actual_col_counts
     return design_matrix
 
 
