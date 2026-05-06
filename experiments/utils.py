@@ -90,9 +90,11 @@ def add_global_params(
         }
 
     if "val_scenarios" in cfg:
-        cfg["val_scenarios"] = [
-            (tag, _add_to_intercept(dc)) for tag, dc in cfg["val_scenarios"]
-        ]
+        def _process_scenario(s):
+            tag, dc, opts = s if len(s) == 3 else (*s, {})
+            new_dc = dc if opts.get("skip_global", False) else _add_to_intercept(dc)
+            return (tag, new_dc, {k: v for k, v in opts.items() if k != "skip_global"})
+        cfg["val_scenarios"] = [_process_scenario(s) for s in cfg["val_scenarios"]]
 
     return cfg
 
@@ -122,7 +124,7 @@ def strip_global_params(cfg: dict) -> dict:
 
     if "val_scenarios" in cfg:
         cfg["val_scenarios"] = [
-            (tag, _strip_from(dc)) for tag, dc in cfg["val_scenarios"]
+            (tag, _strip_from(dc), opts) for tag, dc, opts in cfg["val_scenarios"]
         ]
 
     return cfg

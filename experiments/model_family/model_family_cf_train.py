@@ -96,9 +96,14 @@ class CogFormerTrainer:
         link_fun = self.model_cfg["link_fn"]()
         n_cols = len(self.model_cfg["intrinsic_params"])
         self._val_data = []
-        for tag, design_config in self.model_cfg["val_scenarios"]:
+        for tag, design_config, scenario_opts in self.model_cfg["val_scenarios"]:
+            max_cats = scenario_opts.get(
+                "max_num_categories",
+                val_config["model_family_config"]["max_num_categories"],
+            )
+            model_family_cfg = {**val_config["model_family_config"], "max_num_categories": max_cats}
             samples = self.model_family.batch_sample(
-                **val_config["model_family_config"],
+                **model_family_cfg,
                 **val_config["val_sample_config"],
                 batch_size=val_config["batch_size"],
                 flatten_param_outputs=True,
@@ -114,6 +119,7 @@ class CogFormerTrainer:
             self._val_data.append({
                 "tag": tag,
                 "design_config": design_config,
+                "scenario_opts": scenario_opts,
                 "adapted": adapted,
                 "true_set": true_set,
                 "params_mask": params_mask,
@@ -212,20 +218,22 @@ class CogFormerTrainer:
         fig_subdir = self.model_cfg["fig_subdir"]
 
         colors = cogformer_fm_colors()
-        max_num_categories = config["model_family_config"]["max_num_categories"]
+        default_max_cats = config["model_family_config"]["max_num_categories"]
         corr_dir = Path(f"./outputs/figures/{fig_subdir}") / "correlation"
         corr_dir.mkdir(parents=True, exist_ok=True)
 
         self.net.eval()
 
         for scenario in self._val_data:
-            tag          = scenario["tag"]
+            tag           = scenario["tag"]
             design_config = scenario["design_config"]
-            adapted      = scenario["adapted"]
-            true_set     = scenario["true_set"]
-            params_mask  = scenario["params_mask"]
-            n_rows       = scenario["n_rows"]
-            n_cols       = len(params)
+            scenario_opts = scenario["scenario_opts"]
+            adapted       = scenario["adapted"]
+            true_set      = scenario["true_set"]
+            params_mask   = scenario["params_mask"]
+            n_rows        = scenario["n_rows"]
+            n_cols        = len(params)
+            max_num_categories = scenario_opts.get("max_num_categories", default_max_cats)
 
             pred_set = chunked_sample(
                 self.net, adapted,

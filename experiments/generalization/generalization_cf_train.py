@@ -133,16 +133,18 @@ class CogFormerTrainer:
         link_fn = self.model_cfg["link_fn"]
         fig_subdir = self.model_cfg["fig_subdir"]
         colors = cogformer_fm_colors()
-        max_num_categories = config["model_family_config"]["max_num_categories"]
+        default_max_cats = config["model_family_config"]["max_num_categories"]
 
         base = Path(f"./outputs/figures/{fig_subdir}/{self.holdout_type}")
         base.mkdir(parents=True, exist_ok=True)
 
         self.net.eval()
 
-        for tag, design_config in self.model_cfg["val_scenarios"]:
+        for tag, design_config, scenario_opts in self.model_cfg["val_scenarios"]:
+            max_num_categories = scenario_opts.get("max_num_categories", default_max_cats)
+            model_family_cfg = {**config["model_family_config"], "max_num_categories": max_num_categories}
             test_samples = self.model_family.batch_sample(
-                **config["model_family_config"],
+                **model_family_cfg,
                 **config["val_sample_config"],
                 batch_size=config["batch_size"],
                 flatten_param_outputs=True,
