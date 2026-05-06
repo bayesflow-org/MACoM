@@ -91,6 +91,35 @@ class CogFormerTrainer:
                 prior=model_cfg["prior_fn"](),
             )
 
+    def _prepare_val_data(self, val_config):
+        """Pre-generate fixed validation datasets for all scenarios once."""
+        link_fun = self.model_cfg["link_fn"]()
+        n_cols = len(self.model_cfg["intrinsic_params"])
+        self._val_data = []
+        for tag, design_config in self.model_cfg["val_scenarios"]:
+            samples = self.model_family.batch_sample(
+                **val_config["model_family_config"],
+                **val_config["val_sample_config"],
+                batch_size=val_config["batch_size"],
+                flatten_param_outputs=True,
+                design_config=design_config,
+                link_fun=link_fun,
+            )
+            adapted = self.adapter.adapt(samples, device=val_config["device"])
+            true_flat = adapted["param_matrices"].detach().cpu().numpy()
+            n_rows = true_flat.shape[1] // n_cols
+            true_set = true_flat.reshape(val_config["batch_size"], n_rows, n_cols)
+            params_mask = adapted["param_masks"].detach().cpu().numpy()
+            params_mask = params_mask.reshape(val_config["batch_size"], n_rows, n_cols)[0]
+            self._val_data.append({
+                "tag": tag,
+                "design_config": design_config,
+                "adapted": adapted,
+                "true_set": true_set,
+                "params_mask": params_mask,
+                "n_rows": n_rows,
+            })
+
     def train(
         self,
         train_config,
@@ -98,6 +127,8 @@ class CogFormerTrainer:
         checkpoint_path="cogformer_fm.pt",
         fig_path="fig.pdf",
     ):
+        self._prepare_val_data(val_config)
+
         global_step = 0
         optimizer = AdamW(self.net.parameters(), lr=train_config["learning_rate"])
         scheduler = CosineAnnealingLR(optimizer, T_max=train_config["epochs"])
@@ -178,39 +209,23 @@ class CogFormerTrainer:
         model_name = self.model_cfg["name"].lower()
         params = self.model_cfg["intrinsic_params"]
         param_names = self.model_cfg["variable_names"]
-        link_fn = self.model_cfg["link_fn"]
         fig_subdir = self.model_cfg["fig_subdir"]
 
         colors = cogformer_fm_colors()
         max_num_categories = config["model_family_config"]["max_num_categories"]
-        base = Path(f"./outputs/figures/{fig_subdir}")
-
-        corr_dir = base / "correlation"
+        corr_dir = Path(f"./outputs/figures/{fig_subdir}") / "correlation"
         corr_dir.mkdir(parents=True, exist_ok=True)
 
         self.net.eval()
-        torch.cuda.empty_cache()
 
-        for tag, design_config in self.model_cfg["val_scenarios"]:
-            test_samples = self.model_family.batch_sample(
-                **config["model_family_config"],
-                **config["val_sample_config"],
-                batch_size=config["batch_size"],
-                flatten_param_outputs=True,
-                design_config=design_config,
-                link_fun=link_fn(),
-            )
-            adapted = self.adapter.adapt(
-                test_samples,
-                device=config["device"],
-            )
-
-            true_set = adapted["param_matrices"].detach().cpu().numpy()
-            params_mask = adapted["param_masks"].detach().cpu().numpy()
-
-            n_cols = len(params)
-            n_rows = true_set.shape[1] // n_cols
-            true_set = true_set.reshape(config["batch_size"], n_rows, n_cols)
+        for scenario in self._val_data:
+            tag          = scenario["tag"]
+            design_config = scenario["design_config"]
+            adapted      = scenario["adapted"]
+            true_set     = scenario["true_set"]
+            params_mask  = scenario["params_mask"]
+            n_rows       = scenario["n_rows"]
+            n_cols       = len(params)
 
             pred_set = chunked_sample(
                 self.net, adapted,
@@ -219,10 +234,7 @@ class CogFormerTrainer:
                 solver=config.get("fm_solver", "euler"),
                 samples_chunk_size=config.get("val_samples_chunk_size"),
             )
-            pred_set = pred_set.reshape(
-                config["batch_size"], config["fm_num_samples"], n_rows, n_cols
-            )
-            params_mask = params_mask.reshape((config["batch_size"], n_rows, n_cols))[0]
+            pred_set = pred_set.reshape(config["batch_size"], config["fm_num_samples"], n_rows, n_cols)
 
             corr_fig = adaptive_correlation(
                 true=true_set,

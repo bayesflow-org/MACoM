@@ -164,15 +164,19 @@ def main():
 
     pred_filename_template = model_cfg["pred_filename_template"]
 
+    link_fun = link_fn()
+    n_cols = len(intrinsic_params)
+
+    # Phase 1: prepare all data
+    cases = []
     for cfg_name, design_config in benchmark.items():
-        print(f"Validating case {cfg_name}")
+        print(f"Preparing data: {cfg_name}")
         outdir = outdir_root / cfg_name
         outdir.mkdir(parents=True, exist_ok=True)
 
         free_intr, fixed_intr, fixed_vals = infer_free_fixed_intrinsics(
             design_config, intrinsic_params, default_fixed_values
         )
-
         val_sample_config = {
             "mask_randomizer_kwargs": {
                 "free_intrinsics": free_intr,
@@ -186,17 +190,14 @@ def main():
         if args.data_dir is not None:
             data_path = Path(args.data_dir) / f"{model_name}_{cfg_name}_data.npz"
             test_samples = load_validation_data(data_path)
-
             num_rows = len(design_config)
             num_params = len(intrinsic_params)
             design_matrices = test_samples["design_matrices"]
-
             if design_matrices.shape[-1] == 1:
                 batch_size, num_obs = design_matrices.shape[:2]
                 dm = np.zeros((batch_size, num_obs, num_rows))
                 dm[:, :, 0] = design_matrices.squeeze(axis=-1)
                 test_samples["design_matrices"] = dm
-
             if test_samples["param_matrices"].shape[-1] < num_rows * num_params:
                 batch_size = test_samples["param_matrices"].shape[0]
                 pmat = np.zeros((batch_size, num_rows * num_params))
@@ -205,7 +206,6 @@ def main():
                 pmask[:, :test_samples["param_masks"].shape[-1]] = test_samples["param_masks"]
                 test_samples["param_matrices"] = pmat
                 test_samples["param_masks"] = pmask
-
             file_batch = test_samples["sim_data"]["rts"].shape[0]
             assert file_batch == args.batch_size, (
                 f"Batch size mismatch: file={file_batch}, args={args.batch_size}"
@@ -218,32 +218,45 @@ def main():
                 batch_size=args.batch_size,
                 flatten_param_outputs=True,
                 design_config=design_config,
-                link_fun=link_fn(),
+                link_fun=link_fun,
             )
 
         adapted = adapter.adapt(test_samples, device=device)
+        true_flat = adapted["param_matrices"].detach().cpu().numpy()
+        n_rows = true_flat.shape[1] // n_cols
+        true_set = true_flat.reshape(args.batch_size, n_rows, n_cols)
+        params_mask = adapted["param_masks"].detach().cpu().numpy()
+        params_mask = params_mask.reshape((args.batch_size, n_rows, n_cols))[0]
+        cases.append({
+            "cfg_name": cfg_name, "design_config": design_config,
+            "adapted": adapted, "true_set": true_set,
+            "params_mask": params_mask, "n_rows": n_rows, "outdir": outdir,
+        })
 
-        true_set = adapted["param_matrices"].detach().cpu().numpy()
-        n_cols = len(intrinsic_params)
-        n_rows = true_set.shape[1] // n_cols
-        true_set = true_set.reshape(args.batch_size, n_rows, n_cols)
-
-        pred_set = chunked_sample(
-            cogformer, adapted,
+    # Phase 2: run all ODE integrations
+    for case in cases:
+        print(f"Sampling: {case['cfg_name']}")
+        case["pred_set"] = chunked_sample(
+            cogformer, case["adapted"],
             num_samples=args.num_samples,
             steps=args.num_sample_steps,
             solver=args.solver,
             samples_chunk_size=args.samples_chunk_size,
-        )
-        pred_set = pred_set.reshape(args.batch_size, args.num_samples, n_rows, n_cols)
+        ).reshape(args.batch_size, args.num_samples, case["n_rows"], n_cols)
 
-        params_mask = adapted["param_masks"].detach().cpu().numpy()
-        params_mask = params_mask.reshape((args.batch_size, n_rows, n_cols))[0]
+    # Phase 3: save predictions and generate figures
+    pred_dir = Path(args.pred_dir)
+    pred_dir.mkdir(parents=True, exist_ok=True)
+    for case in cases:
+        cfg_name     = case["cfg_name"]
+        design_config = case["design_config"]
+        true_set     = case["true_set"]
+        pred_set     = case["pred_set"]
+        params_mask  = case["params_mask"]
+        outdir       = case["outdir"]
+        n_rows       = case["n_rows"]
 
-        pred_dir = Path(args.pred_dir)
-        pred_dir.mkdir(parents=True, exist_ok=True)
-        pred_filename = pred_filename_template.format(model=model_name, case=cfg_name)
-        pred_path = pred_dir / pred_filename
+        pred_path = pred_dir / pred_filename_template.format(model=model_name, case=cfg_name)
         np.savez(pred_path, pred_set=pred_set, true_set=true_set, params_mask=params_mask)
         logging.info(f"[saved] {pred_path}")
 

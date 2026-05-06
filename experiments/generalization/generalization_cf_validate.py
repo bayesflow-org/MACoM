@@ -235,8 +235,13 @@ def main():
 
     holdout_cases = _holdout_configs(args.holdout_type, model_cfg, args)
 
+    link_fun = link_fn()
+    n_cols = len(intrinsic_params)
+
+    # Phase 1: prepare all data
+    cases = []
     for cfg_name, design_config in holdout_cases:
-        print(f"Validating holdout case: {cfg_name}")
+        print(f"Preparing data: {cfg_name}")
         outdir = outdir_root / cfg_name
         outdir.mkdir(parents=True, exist_ok=True)
 
@@ -252,35 +257,47 @@ def main():
             "min_num_regressors": 0,
             "fixed_config": True,
         }
-
         test_samples = model_family.batch_sample(
             **model_family_config,
             **val_sample_config,
             batch_size=args.batch_size,
             flatten_param_outputs=True,
             design_config=design_config,
-            link_fun=link_fn(),
+            link_fun=link_fun,
         )
         adapted = adapter.adapt(test_samples, device=device)
+        true_flat = adapted["param_matrices"].detach().cpu().numpy()
+        n_rows = true_flat.shape[1] // n_cols
+        true_set = true_flat.reshape(args.batch_size, n_rows, n_cols)
+        params_mask = adapted["param_masks"].detach().cpu().numpy()
+        params_mask = params_mask.reshape((args.batch_size, n_rows, n_cols))[0]
+        cases.append({
+            "cfg_name": cfg_name, "design_config": design_config,
+            "adapted": adapted, "true_set": true_set,
+            "params_mask": params_mask, "n_rows": n_rows, "outdir": outdir,
+        })
 
-        true_set = adapted["param_matrices"].detach().cpu().numpy()
-        n_cols = len(intrinsic_params)
-        n_rows = true_set.shape[1] // n_cols
-        true_set = true_set.reshape(args.batch_size, n_rows, n_cols)
-
-        pred_set = chunked_sample(
-            cogformer, adapted,
+    # Phase 2: run all ODE integrations
+    for case in cases:
+        print(f"Sampling: {case['cfg_name']}")
+        case["pred_set"] = chunked_sample(
+            cogformer, case["adapted"],
             num_samples=args.num_samples,
             steps=args.num_sample_steps,
             solver=args.solver,
             samples_chunk_size=args.samples_chunk_size,
-        )
-        pred_set = pred_set.reshape(args.batch_size, args.num_samples, n_rows, n_cols)
+        ).reshape(args.batch_size, args.num_samples, case["n_rows"], n_cols)
 
-        params_mask = adapted["param_masks"].detach().cpu().numpy()
-        params_mask = params_mask.reshape((args.batch_size, n_rows, n_cols))[0]
-
+    # Phase 3: save predictions and generate figures
+    for case in cases:
+        cfg_name      = case["cfg_name"]
+        design_config = case["design_config"]
+        true_set      = case["true_set"]
+        pred_set      = case["pred_set"]
+        params_mask   = case["params_mask"]
+        outdir        = case["outdir"]
         tag = f"{model_name}_{args.holdout_type}_{cfg_name}"
+
         np.savez(pred_dir / f"{tag}_cf_pred.npz",
                  pred_set=pred_set, true_set=true_set, params_mask=params_mask)
         logging.info(f"[saved] {pred_dir / f'{tag}_cf_pred.npz'}")
