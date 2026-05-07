@@ -66,6 +66,26 @@ DDM_BENCHMARK_CONFIGS = {
         "u_2": ["v", "a", "z", "tau", "s_v", "s_tau"],
         "u_1:u_2": ["v", "a", "z", "tau", "s_v", "s_tau"],
     },
+    # ── Holdout configs (excluded from model_family training) ─────────────────
+    "two_factor": {  # same structure as "full"; held out with max_num_categories=3
+        "1": ["v", "a", "z", "tau", "s_v", "s_tau"],
+        "u_1": ["v", "a", "z", "tau", "s_v", "s_tau"],
+        "u_2": ["v", "a", "z", "tau", "s_v", "s_tau"],
+        "u_1:u_2": ["v", "a", "z", "tau", "s_v", "s_tau"],
+    },
+    "asymmetric": {  # drift cluster vs. threshold cluster, no interaction
+        "1": ["v", "a", "z", "tau", "s_v", "s_tau"],
+        "u_1": ["v", "z", "s_v"],
+        "u_2": ["a", "tau", "s_tau"],
+    },
+    "multi_factor": {  # 5 regressors, hierarchical parameter shedding, no interaction
+        "1": ["v", "a", "z", "tau", "s_v", "s_tau"],
+        "u_1": ["v", "a", "z", "tau", "s_v", "s_tau"],
+        "u_2": ["v", "a", "z", "tau", "s_v"],
+        "u_3": ["v", "a", "z", "tau"],
+        "u_4": ["v", "a", "z"],
+        "u_5": ["v", "a"],
+    },
 }
 
 DDM_CONFIG = {
@@ -83,6 +103,12 @@ DDM_CONFIG = {
     "val_scenarios": [
         ("interaction", DDM_BENCHMARK_CONFIGS["three_reg_interaction"], {"max_num_categories": 3}),
         ("fixed", DDM_BENCHMARK_CONFIGS["fixed"], {"skip_global": True}),
+    ],
+    "holdout_configs": [
+        {"design_config": DDM_BENCHMARK_CONFIGS["three_reg_interaction"], "max_num_categories": 3},
+        {"design_config": DDM_BENCHMARK_CONFIGS["two_factor"], "max_num_categories": 3},
+        {"design_config": DDM_BENCHMARK_CONFIGS["asymmetric"], "max_num_categories": 2},
+        {"design_config": DDM_BENCHMARK_CONFIGS["multi_factor"], "max_num_categories": 2},
     ],
 }
 
@@ -127,6 +153,26 @@ CDM_BENCHMARK_CONFIGS = {
         "u_2": ["v", "v_theta", "a", "tau", "s_v", "s_tau"],
         "u_1:u_2": ["v", "v_theta", "a", "tau", "s_v", "s_tau"],
     },
+    # ── Holdout configs (excluded from model_family training) ─────────────────
+    "two_factor": {
+        "1": ["v", "v_theta", "a", "tau", "s_v", "s_tau"],
+        "u_1": ["v", "v_theta", "a", "tau", "s_v", "s_tau"],
+        "u_2": ["v", "v_theta", "a", "tau", "s_v", "s_tau"],
+        "u_1:u_2": ["v", "v_theta", "a", "tau", "s_v", "s_tau"],
+    },
+    "asymmetric": {
+        "1": ["v", "v_theta", "a", "tau", "s_v", "s_tau"],
+        "u_1": ["v", "v_theta", "s_v"],
+        "u_2": ["a", "tau", "s_tau"],
+    },
+    "multi_factor": {
+        "1": ["v", "v_theta", "a", "tau", "s_v", "s_tau"],
+        "u_1": ["v", "v_theta", "a", "tau", "s_v", "s_tau"],
+        "u_2": ["v", "v_theta", "a", "tau", "s_v"],
+        "u_3": ["v", "v_theta", "a", "tau"],
+        "u_4": ["v", "v_theta", "a"],
+        "u_5": ["v", "v_theta"],
+    },
 }
 
 CDM_CONFIG = {
@@ -144,6 +190,12 @@ CDM_CONFIG = {
     "val_scenarios": [
         ("interaction", CDM_BENCHMARK_CONFIGS["three_reg_interaction"], {"max_num_categories": 3}),
         ("fixed", CDM_BENCHMARK_CONFIGS["fixed"], {"skip_global": True}),
+    ],
+    "holdout_configs": [
+        {"design_config": CDM_BENCHMARK_CONFIGS["three_reg_interaction"], "max_num_categories": 3},
+        {"design_config": CDM_BENCHMARK_CONFIGS["two_factor"], "max_num_categories": 3},
+        {"design_config": CDM_BENCHMARK_CONFIGS["asymmetric"], "max_num_categories": 2},
+        {"design_config": CDM_BENCHMARK_CONFIGS["multi_factor"], "max_num_categories": 2},
     ],
 }
 
@@ -188,6 +240,26 @@ RDM_BENCHMARK_CONFIGS = {
         "u_2": ["v", "v_diff", "a", "tau", "s_v", "s_tau"],
         "u_1:u_2": ["v", "v_diff", "a", "tau", "s_v", "s_tau"],
     },
+    # ── Holdout configs (excluded from model_family training) ─────────────────
+    "two_factor": {
+        "1": ["v", "v_diff", "a", "tau", "s_v", "s_tau"],
+        "u_1": ["v", "v_diff", "a", "tau", "s_v", "s_tau"],
+        "u_2": ["v", "v_diff", "a", "tau", "s_v", "s_tau"],
+        "u_1:u_2": ["v", "v_diff", "a", "tau", "s_v", "s_tau"],
+    },
+    "asymmetric": {
+        "1": ["v", "v_diff", "a", "tau", "s_v", "s_tau"],
+        "u_1": ["v", "v_diff", "s_v"],
+        "u_2": ["a", "tau", "s_tau"],
+    },
+    "multi_factor": {
+        "1": ["v", "v_diff", "a", "tau", "s_v", "s_tau"],
+        "u_1": ["v", "v_diff", "a", "tau", "s_v", "s_tau"],
+        "u_2": ["v", "v_diff", "a", "tau", "s_v"],
+        "u_3": ["v", "v_diff", "a", "tau"],
+        "u_4": ["v", "v_diff", "a"],
+        "u_5": ["v", "v_diff"],
+    },
 }
 
 RDM_CONFIG = {
@@ -205,6 +277,12 @@ RDM_CONFIG = {
     "val_scenarios": [
         ("interaction", RDM_BENCHMARK_CONFIGS["three_reg_interaction"], {"max_num_categories": 3}),
         ("fixed", RDM_BENCHMARK_CONFIGS["fixed"], {"skip_global": True}),
+    ],
+    "holdout_configs": [
+        {"design_config": RDM_BENCHMARK_CONFIGS["three_reg_interaction"], "max_num_categories": 3},
+        {"design_config": RDM_BENCHMARK_CONFIGS["two_factor"], "max_num_categories": 3},
+        {"design_config": RDM_BENCHMARK_CONFIGS["asymmetric"], "max_num_categories": 2},
+        {"design_config": RDM_BENCHMARK_CONFIGS["multi_factor"], "max_num_categories": 2},
     ],
     "train_context": RDM.build_random_context,
 }
@@ -250,6 +328,26 @@ LBA_BENCHMARK_CONFIGS = {
         "u_2": ["v", "v_diff", "a", "tau", "s_v", "s_tau"],
         "u_1:u_2": ["v", "v_diff", "a", "tau", "s_v", "s_tau"],
     },
+    # ── Holdout configs (excluded from model_family training) ─────────────────
+    "two_factor": {
+        "1": ["v", "v_diff", "a", "tau", "s_v", "s_tau"],
+        "u_1": ["v", "v_diff", "a", "tau", "s_v", "s_tau"],
+        "u_2": ["v", "v_diff", "a", "tau", "s_v", "s_tau"],
+        "u_1:u_2": ["v", "v_diff", "a", "tau", "s_v", "s_tau"],
+    },
+    "asymmetric": {
+        "1": ["v", "v_diff", "a", "tau", "s_v", "s_tau"],
+        "u_1": ["v", "v_diff", "s_v"],
+        "u_2": ["a", "tau", "s_tau"],
+    },
+    "multi_factor": {
+        "1": ["v", "v_diff", "a", "tau", "s_v", "s_tau"],
+        "u_1": ["v", "v_diff", "a", "tau", "s_v", "s_tau"],
+        "u_2": ["v", "v_diff", "a", "tau", "s_v"],
+        "u_3": ["v", "v_diff", "a", "tau"],
+        "u_4": ["v", "v_diff", "a"],
+        "u_5": ["v", "v_diff"],
+    },
 }
 
 LBA_CONFIG = {
@@ -267,6 +365,12 @@ LBA_CONFIG = {
     "val_scenarios": [
         ("interaction", LBA_BENCHMARK_CONFIGS["three_reg_interaction"], {"max_num_categories": 3}),
         ("fixed", LBA_BENCHMARK_CONFIGS["fixed"], {"skip_global": True}),
+    ],
+    "holdout_configs": [
+        {"design_config": LBA_BENCHMARK_CONFIGS["three_reg_interaction"], "max_num_categories": 3},
+        {"design_config": LBA_BENCHMARK_CONFIGS["two_factor"], "max_num_categories": 3},
+        {"design_config": LBA_BENCHMARK_CONFIGS["asymmetric"], "max_num_categories": 2},
+        {"design_config": LBA_BENCHMARK_CONFIGS["multi_factor"], "max_num_categories": 2},
     ],
     "train_context": LBA.build_random_context,
 }
