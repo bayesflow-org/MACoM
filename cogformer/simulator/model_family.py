@@ -16,6 +16,7 @@ from .design_utils import (
     build_regressor_mask,
     sample_parameter_matrix,
     normalize_design_config,
+    design_config_signature,
 )
 
 from ..utils.simulator_utils import softplus, inspect
@@ -55,6 +56,7 @@ class ModelFamily:
         default_workers = max(1, (os.cpu_count() or 1) // 6)
         self._num_workers: int = num_workers if num_workers is not None else default_workers
         self._executor: ThreadPoolExecutor | None = None
+        self._holdout_signatures: set = set()
 
     @property
     def _pool(self) -> ThreadPoolExecutor:
@@ -74,6 +76,12 @@ class ModelFamily:
     def __del__(self) -> None:
         if self._executor is not None:
             self._executor.shutdown(wait=False)
+
+    def set_holdout_configs(self, holdout_configs: list[dict]) -> None:
+        """Pre-compute holdout signatures so _resolve_design can reject matching designs."""
+        self._holdout_signatures = {
+            design_config_signature(hc["design_config"]) for hc in holdout_configs
+        }
 
     @property
     def parameter_names(self) -> list[str]:
@@ -121,15 +129,18 @@ class ModelFamily:
                     add_interaction=add_interaction,
                 )
             else:
-                design_config = build_random_design_config(
-                    intrinsic_params=self.intrinsic_params,
-                    free_intrinsics=kwargs.get("free_intrinsics"),
-                    fixed_intrinsics=kwargs.get("fixed_intrinsics"),
-                    num_regressors=num_regressors,
-                    keep_intercept=keep_intercept,
-                    add_interaction=add_interaction,
-                    global_params=kwargs.get("global_params"),
-                )
+                while True:
+                    design_config = build_random_design_config(
+                        intrinsic_params=self.intrinsic_params,
+                        free_intrinsics=kwargs.get("free_intrinsics"),
+                        fixed_intrinsics=kwargs.get("fixed_intrinsics"),
+                        num_regressors=num_regressors,
+                        keep_intercept=keep_intercept,
+                        add_interaction=add_interaction,
+                        global_params=kwargs.get("global_params"),
+                    )
+                    if not self._holdout_signatures or design_config_signature(design_config) not in self._holdout_signatures:
+                        break
             parameter_mask = build_parameter_mask(
                 design_config=design_config,
                 intrinsic_params=self.intrinsic_params,
@@ -138,19 +149,22 @@ class ModelFamily:
                 keep_intercept=keep_intercept,
             )
         else:
-            parameter_mask, design_config = build_random_parameter_mask(
-                intrinsic_params=self.intrinsic_params,
-                num_regressors=num_regressors,
-                max_num_categories=max_num_categories,
-                keep_intercept=keep_intercept,
-                free_prob=free_prob,
-                intercept_prob=kwargs.get("intercept_prob"),
-                free_intrinsics=kwargs.get("free_intrinsics"),
-                fixed_intrinsics=kwargs.get("fixed_intrinsics"),
-                add_interaction=add_interaction,
-                allowed_slope_patterns=allowed_slope_patterns,
-                global_params=kwargs.get("global_params"),
-            )
+            while True:
+                parameter_mask, design_config = build_random_parameter_mask(
+                    intrinsic_params=self.intrinsic_params,
+                    num_regressors=num_regressors,
+                    max_num_categories=max_num_categories,
+                    keep_intercept=keep_intercept,
+                    free_prob=free_prob,
+                    intercept_prob=kwargs.get("intercept_prob"),
+                    free_intrinsics=kwargs.get("free_intrinsics"),
+                    fixed_intrinsics=kwargs.get("fixed_intrinsics"),
+                    add_interaction=add_interaction,
+                    allowed_slope_patterns=allowed_slope_patterns,
+                    global_params=kwargs.get("global_params"),
+                )
+                if not self._holdout_signatures or design_config_signature(design_config) not in self._holdout_signatures:
+                    break
 
         if is_intrinsic_priors:
             intrinsic_prior = prior

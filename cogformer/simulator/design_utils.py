@@ -6,6 +6,16 @@ from scipy.stats import invwishart
 from cogformer.utils.simulator_utils import shifted_softplus
 
 
+def design_config_signature(design_config: dict) -> frozenset:
+    """Category-agnostic structural hash of a design config.
+
+    Two configs with the same parameter assignments per regressor key produce
+    the same signature, regardless of max_num_categories.  Used to reject
+    holdout configs during random design sampling.
+    """
+    return frozenset((k, frozenset(v)) for k, v in design_config.items())
+
+
 def split_design_space(
     free_intrinsics: list[str],
     split_ratio: float = 0.5,

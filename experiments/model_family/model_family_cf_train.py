@@ -90,6 +90,8 @@ class CogFormerTrainer:
                 model=model_cfg["model_cls"](),
                 prior=model_cfg["prior_fn"](),
             )
+        if model_cfg.get("holdout_configs"):
+            self.model_family.set_holdout_configs(model_cfg["holdout_configs"])
 
     def _prepare_val_data(self, val_config):
         """Pre-generate fixed validation datasets for all scenarios once."""
