@@ -96,6 +96,12 @@ def add_global_params(
             return (tag, new_dc, {k: v for k, v in opts.items() if k != "skip_global"})
         cfg["val_scenarios"] = [_process_scenario(s) for s in cfg["val_scenarios"]]
 
+    if "holdout_configs" in cfg:
+        cfg["holdout_configs"] = [
+            {**hc, "design_config": _add_to_intercept(hc["design_config"])}
+            for hc in cfg["holdout_configs"]
+        ]
+
     return cfg
 
 
@@ -125,6 +131,12 @@ def strip_global_params(cfg: dict) -> dict:
     if "val_scenarios" in cfg:
         cfg["val_scenarios"] = [
             (tag, _strip_from(dc), opts) for tag, dc, opts in cfg["val_scenarios"]
+        ]
+
+    if "holdout_configs" in cfg:
+        cfg["holdout_configs"] = [
+            {**hc, "design_config": _strip_from(hc["design_config"])}
+            for hc in cfg["holdout_configs"]
         ]
 
     return cfg
