@@ -5,6 +5,7 @@ except Exception:
     wandb = None
 import logging
 import argparse
+from collections import deque
 from concurrent.futures import ThreadPoolExecutor
 
 from pathlib import Path
@@ -143,10 +144,13 @@ class CogFormerTrainer:
         val_interval = self.model_cfg["val_epoch_interval"]
         device = train_config["device"]
 
-        # Persistent single-thread executor: simulate + adapt in background while
-        # the GPU processes the current step. Avoids per-step thread-creation overhead.
-        with ThreadPoolExecutor(max_workers=1) as executor:
-            future = executor.submit(self._simulate_and_adapt, train_config)
+        # Two workers keep 2 simulations in flight at all times. While the GPU
+        # processes batch i, batches i+1 and i+2 simulate in parallel, so the GPU
+        # never stalls waiting for data after the initial warm-up.
+        with ThreadPoolExecutor(max_workers=2) as executor:
+            queue = deque(
+                executor.submit(self._simulate_and_adapt, train_config) for _ in range(2)
+            )
 
             for epoch in range(train_config["epochs"]):
                 pbar = tqdm(
@@ -155,8 +159,8 @@ class CogFormerTrainer:
                     miniters=100,
                 )
                 for _ in range(train_config["steps_per_epoch"]):
-                    adapted_cpu = future.result()
-                    future = executor.submit(self._simulate_and_adapt, train_config)
+                    adapted_cpu = queue.popleft().result()
+                    queue.append(executor.submit(self._simulate_and_adapt, train_config))
                     # Non-blocking DMA to GPU. Source tensors are pinned, so this is a
                     # true async copy queued in the compute stream. CUDA stream ordering
                     # ensures the copy completes before the first kernel that reads the data.
