@@ -141,6 +141,7 @@ class CogFormerTrainer:
         optimizer = AdamW(self.net.parameters(), lr=train_config["learning_rate"])
         scheduler = CosineAnnealingLR(optimizer, T_max=train_config["epochs"])
         val_interval = self.model_cfg["val_epoch_interval"]
+        device = train_config["device"]
 
         # Persistent single-thread executor: simulate + adapt in background while
         # the GPU processes the current step. Avoids per-step thread-creation overhead.
@@ -154,8 +155,15 @@ class CogFormerTrainer:
                     miniters=100,
                 )
                 for _ in range(train_config["steps_per_epoch"]):
-                    adapted = future.result()
+                    adapted_cpu = future.result()
                     future = executor.submit(self._simulate_and_adapt, train_config)
+                    # Non-blocking DMA to GPU. Source tensors are pinned, so this is a
+                    # true async copy queued in the compute stream. CUDA stream ordering
+                    # ensures the copy completes before the first kernel that reads the data.
+                    adapted = {
+                        k: v.to(device, non_blocking=True) if isinstance(v, torch.Tensor) else v
+                        for k, v in adapted_cpu.items()
+                    }
                     loss, current_lr = self._train_step_from_adapted(
                         adapted=adapted,
                         config=train_config,
@@ -192,10 +200,14 @@ class CogFormerTrainer:
             link_fun=link_fn(),
             context=self.model_cfg.get("train_context"),
         )
-        return self.adapter.adapt(samples, device=config["device"])
+        # Keep tensors on CPU and pin them. The main thread transfers to GPU
+        # asynchronously so this thread is never blocked by GPU transfer latency.
+        adapted = self.adapter.adapt(samples, device="cpu")
+        return {k: v.pin_memory() if isinstance(v, torch.Tensor) else v
+                for k, v in adapted.items()}
 
     def _train_step_from_adapted(self, adapted, config, optimizer, scheduler):
-        optimizer.zero_grad()
+        optimizer.zero_grad(set_to_none=True)
         device_type = config["device"].type
         with torch.autocast(device_type=device_type, dtype=torch.bfloat16, enabled=(device_type == "cuda")):
             pred_velocity, target_velocity = self.net(
