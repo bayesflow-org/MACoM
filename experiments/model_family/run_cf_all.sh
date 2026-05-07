@@ -44,17 +44,17 @@ LR=1e-4
 EPOCHS=5000
 STEPS_PER_EPOCH=100
 TRAIN_BATCH=64
-VAL_BATCH=200
+VAL_BATCH=500
 NUM_OBS=500
 MIN_NUM_OBS=200
-MAX_NUM_OBS=500
+MAX_NUM_OBS=1000
 
 # Inference
-FM_STEPS=200
+FM_STEPS=100
 FM_SAMPLES=200       # fm_num_samples for training val_step
 CF_BATCH=500         # batch_size for cf_validate / ensemble
 CF_FM_SAMPLES=500    # num_samples for cf_validate / ensemble
-FM_SOLVER="midpoint"   # euler | midpoint | rk4  (rk4: same quality as euler at ~quarter the steps)
+FM_SOLVER="euler"    # euler | midpoint | rk4
 
 # ============================================================
 # Apply any command-line overrides to centralized variables.

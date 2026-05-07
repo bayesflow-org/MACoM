@@ -298,7 +298,7 @@ def parse_args():
     # Training
     parser.add_argument("--num_obs", type=int, default=500)
     parser.add_argument("--min_num_obs", type=int, default=200)
-    parser.add_argument("--max_num_obs", type=int, default=500)
+    parser.add_argument("--max_num_obs", type=int, default=1000)
     parser.add_argument("--train_batch_size", type=int, default=64)
     parser.add_argument("--val_batch_size", type=int, default=500)
     parser.add_argument("--epochs", type=int, default=5000)

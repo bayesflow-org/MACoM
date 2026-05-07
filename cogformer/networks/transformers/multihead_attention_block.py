@@ -1,7 +1,16 @@
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 
 from ..mlp.ffn import FFN
+
+
+class AdaptiveRMSNorm(nn.RMSNorm):
+    """RMSNorm that casts its weight to the input dtype so the fused kernel always fires."""
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        if self.weight is not None and self.weight.dtype != x.dtype:
+            return F.rms_norm(x, self.normalized_shape, self.weight.to(x.dtype), self.eps)
+        return super().forward(x)
 
 
 class MultiheadAttentionBlock(nn.Module):
@@ -48,9 +57,9 @@ class MultiheadAttentionBlock(nn.Module):
         )
 
         if layer_norm:
-            self.norm_q   = nn.RMSNorm(query_dim)
-            self.norm_kv  = nn.RMSNorm(key_dim)
-            self.norm_ffn = nn.RMSNorm(query_dim)
+            self.norm_q   = AdaptiveRMSNorm(query_dim)
+            self.norm_kv  = AdaptiveRMSNorm(key_dim)
+            self.norm_ffn = AdaptiveRMSNorm(query_dim)
         else:
             self.norm_q = self.norm_kv = self.norm_ffn = None
 

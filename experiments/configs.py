@@ -101,7 +101,7 @@ DDM_CONFIG = {
     "default_fixed_values": {"s_v": 0.0, "s_tau": 0.0},
     "benchmark_configs": DDM_BENCHMARK_CONFIGS,
     "val_scenarios": [
-        ("interaction", DDM_BENCHMARK_CONFIGS["three_reg_interaction"], {"max_num_categories": 3}),
+        ("interaction", DDM_BENCHMARK_CONFIGS["interaction"], {"max_num_categories": 2}),
         ("fixed", DDM_BENCHMARK_CONFIGS["fixed"], {"skip_global": True}),
     ],
     "holdout_configs": [
@@ -188,7 +188,7 @@ CDM_CONFIG = {
     "default_fixed_values": {"s_v": 0.0, "s_tau": 0.0},
     "benchmark_configs": CDM_BENCHMARK_CONFIGS,
     "val_scenarios": [
-        ("interaction", CDM_BENCHMARK_CONFIGS["three_reg_interaction"], {"max_num_categories": 3}),
+        ("interaction", CDM_BENCHMARK_CONFIGS["interaction"], {"max_num_categories": 2}),
         ("fixed", CDM_BENCHMARK_CONFIGS["fixed"], {"skip_global": True}),
     ],
     "holdout_configs": [
@@ -275,7 +275,7 @@ RDM_CONFIG = {
     "default_fixed_values": {"s_v": 0.0, "s_tau": 0.0},
     "benchmark_configs": RDM_BENCHMARK_CONFIGS,
     "val_scenarios": [
-        ("interaction", RDM_BENCHMARK_CONFIGS["three_reg_interaction"], {"max_num_categories": 3}),
+        ("interaction", RDM_BENCHMARK_CONFIGS["interaction"], {"max_num_categories": 2}),
         ("fixed", RDM_BENCHMARK_CONFIGS["fixed"], {"skip_global": True}),
     ],
     "holdout_configs": [
@@ -363,7 +363,7 @@ LBA_CONFIG = {
     "default_fixed_values": {"s_v": 0.0, "s_tau": 0.0},
     "benchmark_configs": LBA_BENCHMARK_CONFIGS,
     "val_scenarios": [
-        ("interaction", LBA_BENCHMARK_CONFIGS["three_reg_interaction"], {"max_num_categories": 3}),
+        ("interaction", LBA_BENCHMARK_CONFIGS["interaction"], {"max_num_categories": 2}),
         ("fixed", LBA_BENCHMARK_CONFIGS["fixed"], {"skip_global": True}),
     ],
     "holdout_configs": [
