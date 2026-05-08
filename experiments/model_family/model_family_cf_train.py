@@ -45,7 +45,7 @@ def _build_train_config(base: dict, val_epoch_interval: int, wandb_project: str,
 MODELS = {
     "ddm": _build_train_config(
         _BASE_MODELS["ddm"],
-        val_epoch_interval=5000,
+        val_epoch_interval=10000,
         wandb_project="cogformer-fm-ddm",
         checkpoint_dir="./outputs/checkpoints/model_family/cf/ddm/",
         checkpoint_prefix="cogformer_ddm_mf",
@@ -53,7 +53,7 @@ MODELS = {
     ),
     "cdm": _build_train_config(
         _BASE_MODELS["cdm"],
-        val_epoch_interval=5000,
+        val_epoch_interval=10000,
         wandb_project="cogformer-fm-cdm",
         checkpoint_dir="./outputs/checkpoints/model_family/cf/cdm/",
         checkpoint_prefix="cogformer_cdm_mf",
@@ -61,7 +61,7 @@ MODELS = {
     ),
     "rdm": _build_train_config(
         _BASE_MODELS["rdm"],
-        val_epoch_interval=5000,
+        val_epoch_interval=10000,
         wandb_project="cogformer-fm-rdm",
         checkpoint_dir="./outputs/checkpoints/model_family/cf/rdm/",
         checkpoint_prefix="cogformer_rdm_mf",
