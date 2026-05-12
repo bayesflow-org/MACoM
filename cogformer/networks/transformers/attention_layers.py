@@ -10,18 +10,18 @@ def cross_attention_layers(
     num_heads: int = 4,
     layer_norm: bool = True,
     dropout: float = 0.1,
+    expansion_factor: float = 4.0,
 ):
-
     layers = []
     for i in range(num_layers):
-        l = MultiheadAttentionBlock(
+        layers.append(MultiheadAttentionBlock(
             query_dim=query_dim,
             key_dim=key_dim,
             num_heads=num_heads,
             dropout=dropout,
             layer_norm=layer_norm,
-        )
-        layers.append(l)
+            expansion_factor=expansion_factor,
+        ))
     return nn.ModuleList(layers)
 
 
@@ -34,50 +34,37 @@ def self_attention_layers(
     query_dim: int = 128,
     skip_first: bool = False,
     skip_last: bool = False,
+    expansion_factor: float = 4.0,
 ):
     layers = []
 
     if skip_first:
         l = MultiheadAttentionBlock(
-            query_dim=query_dim,
-            key_dim=key_dim,
-            num_heads=num_heads,
-            dropout=dropout,
-            layer_norm=layer_norm,
+            query_dim=query_dim, key_dim=key_dim, num_heads=num_heads,
+            dropout=dropout, layer_norm=layer_norm, expansion_factor=expansion_factor,
         )
     else:
         l = SelfAttentionBlock(
-            input_dim=query_dim,
-            num_heads=num_heads,
-            dropout=dropout,
-            layer_norm=layer_norm,
+            input_dim=query_dim, num_heads=num_heads,
+            dropout=dropout, layer_norm=layer_norm, expansion_factor=expansion_factor,
         )
     layers.append(l)
 
     for _ in range(1, num_layers - 1):
-        layers.append(
-            SelfAttentionBlock(
-                input_dim=query_dim,
-                num_heads=num_heads,
-                dropout=dropout,
-                layer_norm=layer_norm,
-            )
-        )
+        layers.append(SelfAttentionBlock(
+            input_dim=query_dim, num_heads=num_heads,
+            dropout=dropout, layer_norm=layer_norm, expansion_factor=expansion_factor,
+        ))
 
     if skip_last:
         l = MultiheadAttentionBlock(
-            query_dim=query_dim,
-            key_dim=key_dim,
-            num_heads=num_heads,
-            dropout=dropout,
-            layer_norm=layer_norm,
+            query_dim=query_dim, key_dim=key_dim, num_heads=num_heads,
+            dropout=dropout, layer_norm=layer_norm, expansion_factor=expansion_factor,
         )
     else:
         l = SelfAttentionBlock(
-            input_dim=query_dim,
-            num_heads=num_heads,
-            dropout=dropout,
-            layer_norm=layer_norm,
+            input_dim=query_dim, num_heads=num_heads,
+            dropout=dropout, layer_norm=layer_norm, expansion_factor=expansion_factor,
         )
     layers.append(l)
 
@@ -92,29 +79,21 @@ def mixed_attention_layers(
     layer_norm: bool = True,
     dropout: float = 0.1,
     mab_first: bool = True,
+    expansion_factor: float = 4.0,
 ):
     layers = []
     for i in range(num_layers):
         use_mab = (i % 2 == 0) if mab_first else (i % 2 == 1)
         if use_mab:
-            layers.append(
-                MultiheadAttentionBlock(
-                    query_dim=query_dim,
-                    key_dim=key_dim,
-                    num_heads=num_heads,
-                    dropout=dropout,
-                    layer_norm=layer_norm,
-                )
-            )
+            layers.append(MultiheadAttentionBlock(
+                query_dim=query_dim, key_dim=key_dim, num_heads=num_heads,
+                dropout=dropout, layer_norm=layer_norm, expansion_factor=expansion_factor,
+            ))
         else:
-            layers.append(
-                SelfAttentionBlock(
-                    input_dim=query_dim,
-                    num_heads=num_heads,
-                    dropout=dropout,
-                    layer_norm=layer_norm,
-                )
-            )
+            layers.append(SelfAttentionBlock(
+                input_dim=query_dim, num_heads=num_heads,
+                dropout=dropout, layer_norm=layer_norm, expansion_factor=expansion_factor,
+            ))
     return nn.ModuleList(layers)
 
 
@@ -126,28 +105,20 @@ def custom_attention_layers(
     num_heads: int = 4,
     layer_norm: bool = True,
     dropout: float = 0.1,
+    expansion_factor: float = 4.0,
 ):
     """Patterned attention layers: 1 = MAB (cross-attention), 0 = SAB (self-attention)."""
     design = [pattern[i % len(pattern)] for i in range(num_layers)]
     layers = []
     for i in range(num_layers):
         if design[i] == 1:
-            layers.append(
-                MultiheadAttentionBlock(
-                    query_dim=query_dim,
-                    key_dim=key_dim,
-                    num_heads=num_heads,
-                    dropout=dropout,
-                    layer_norm=layer_norm,
-                )
-            )
+            layers.append(MultiheadAttentionBlock(
+                query_dim=query_dim, key_dim=key_dim, num_heads=num_heads,
+                dropout=dropout, layer_norm=layer_norm, expansion_factor=expansion_factor,
+            ))
         else:
-            layers.append(
-                SelfAttentionBlock(
-                    input_dim=query_dim,
-                    num_heads=num_heads,
-                    dropout=dropout,
-                    layer_norm=layer_norm,
-                )
-            )
+            layers.append(SelfAttentionBlock(
+                input_dim=query_dim, num_heads=num_heads,
+                dropout=dropout, layer_norm=layer_norm, expansion_factor=expansion_factor,
+            ))
     return nn.ModuleList(layers)

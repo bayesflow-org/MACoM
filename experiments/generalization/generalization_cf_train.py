@@ -1,3 +1,5 @@
+import os
+import threading
 import torch
 try:
     import wandb
@@ -5,6 +7,8 @@ except Exception:
     wandb = None
 import logging
 import argparse
+from collections import deque
+from concurrent.futures import ThreadPoolExecutor
 
 from pathlib import Path
 from tqdm.auto import tqdm
@@ -60,46 +64,28 @@ class CogFormerTrainer:
         self.holdout_type = holdout_type
         self.val_epoch_interval = val_epoch_interval
         self.use_wandb = use_wandb
+        self._local = threading.local()
 
-    def train(self, train_config, val_config, checkpoint_path="cogformer_gen.pt", fig_path="fig.pdf"):
-        global_step = 0
-        optimizer = AdamW(self.net.parameters(), lr=train_config["learning_rate"])
-        scheduler = CosineAnnealingLR(optimizer, T_max=train_config["epochs"])
-
-        for epoch in range(train_config["epochs"]):
-            pbar = tqdm(
-                total=train_config["steps_per_epoch"],
-                desc=f"Epoch {epoch + 1}/{train_config['epochs']}",
-                miniters=100,
+    def _get_sim_mf(self):
+        """Return a per-thread ModelFamily so 3 outer workers don't contend on one pool."""
+        if not hasattr(self._local, "mf"):
+            n_outer = 3
+            n_inner = max(1, (os.cpu_count() or 1) // n_outer)
+            self._local.mf = ModelFamily(
+                name=self.model_cfg["name"],
+                model=self.model_cfg["model_cls"](),
+                prior=self.model_cfg["prior_fn"](),
+                num_workers=n_inner,
             )
-            for _ in range(train_config["steps_per_epoch"]):
-                loss, current_lr = self.train_step(train_config, optimizer, scheduler)
-                if self.use_wandb:
-                    wandb.log(
-                        {"train/loss": loss, "opt/lr": current_lr, "epoch": epoch + 1},
-                        step=global_step,
-                    )
-                global_step += 1
-                pbar.set_postfix(loss=f"{loss:.4f}", lr=f"{current_lr:.2e}")
-                pbar.update(1)
+        return self._local.mf
 
-            if (epoch + 1) % self.val_epoch_interval == 0:
-                self.val_step(val_config, global_step, fig_path)
-
-            scheduler.step()
-            pbar.close()
-
-        checkpoint_dir = Path(self.model_cfg["checkpoint_dir"])
-        checkpoint_dir.mkdir(parents=True, exist_ok=True)
-        torch.save(self.net.state_dict(), checkpoint_dir / checkpoint_path)
-        logging.info(f"[saved] {checkpoint_dir / checkpoint_path}")
-
-    def train_step(self, config, optimizer, scheduler):
+    def _simulate_and_adapt(self, config):
+        mf = self._get_sim_mf()
         link_fn = self.model_cfg["link_fn"]
-        train_samples = self.model_family.batch_sample(
+        samples = mf.batch_sample(
             **config["model_family_config"],
             **config["train_sample_config"],
-            prior=self.model_family.prior,
+            prior=mf.prior,
             batch_size=config["batch_size"],
             flatten_param_outputs=True,
             link_fun=link_fn(),
@@ -107,8 +93,12 @@ class CogFormerTrainer:
             free_prob=config.get("train_free_prob"),
             allowed_slope_patterns=config.get("train_slope_patterns"),
         )
-        adapted = self.adapter.adapt(train_samples, device=config["device"])
-        optimizer.zero_grad()
+        adapted = self.adapter.adapt(samples, device="cpu")
+        return {k: v.pin_memory() if isinstance(v, torch.Tensor) else v
+                for k, v in adapted.items()}
+
+    def _train_step_from_adapted(self, adapted, config, optimizer, scheduler):
+        optimizer.zero_grad(set_to_none=True)
         device_type = config["device"].type
         with torch.autocast(device_type=device_type, dtype=torch.bfloat16, enabled=(device_type == "cuda")):
             pred_velocity, target_velocity = self.net(
@@ -125,6 +115,56 @@ class CogFormerTrainer:
         optimizer.step()
         return L.detach().item(), scheduler.get_last_lr()[0]
 
+    def train(self, train_config, val_config, checkpoint_path="cogformer_gen.pt", fig_path="fig.pdf"):
+        global_step = 0
+        optimizer = AdamW(self.net.parameters(), lr=train_config["learning_rate"], fused=True)
+        scheduler = CosineAnnealingLR(optimizer, T_max=train_config["epochs"])
+        device = train_config["device"]
+
+        with ThreadPoolExecutor(max_workers=3) as executor:
+            queue = deque(
+                executor.submit(self._simulate_and_adapt, train_config) for _ in range(3)
+            )
+
+            for epoch in range(train_config["epochs"]):
+                pbar = tqdm(
+                    total=train_config["steps_per_epoch"],
+                    desc=f"Epoch {epoch + 1}/{train_config['epochs']}",
+                    miniters=100,
+                )
+                for _ in range(train_config["steps_per_epoch"]):
+                    adapted_cpu = queue.popleft().result()
+                    queue.append(executor.submit(self._simulate_and_adapt, train_config))
+                    adapted = {
+                        k: v.to(device, non_blocking=True) if isinstance(v, torch.Tensor) else v
+                        for k, v in adapted_cpu.items()
+                    }
+                    loss, current_lr = self._train_step_from_adapted(
+                        adapted=adapted,
+                        config=train_config,
+                        optimizer=optimizer,
+                        scheduler=scheduler,
+                    )
+                    if self.use_wandb:
+                        wandb.log(
+                            {"train/loss": loss, "opt/lr": current_lr, "epoch": epoch + 1},
+                            step=global_step,
+                        )
+                    global_step += 1
+                    pbar.set_postfix(loss=f"{loss:.4f}", lr=f"{current_lr:.2e}")
+                    pbar.update(1)
+
+                if (epoch + 1) % self.val_epoch_interval == 0:
+                    self.val_step(val_config, global_step, fig_path)
+
+                scheduler.step()
+                pbar.close()
+
+        checkpoint_dir = Path(self.model_cfg["checkpoint_dir"])
+        checkpoint_dir.mkdir(parents=True, exist_ok=True)
+        torch.save(self.net.state_dict(), checkpoint_dir / checkpoint_path)
+        logging.info(f"[saved] {checkpoint_dir / checkpoint_path}")
+
     @torch.no_grad()
     def val_step(self, config, global_step, fig_path):
         model_name = self.model_cfg["name"].lower()
@@ -139,6 +179,7 @@ class CogFormerTrainer:
         base.mkdir(parents=True, exist_ok=True)
 
         self.net.eval()
+        torch.cuda.empty_cache()
 
         for tag, design_config, scenario_opts in self.model_cfg["val_scenarios"]:
             max_num_categories = scenario_opts.get("max_num_categories", default_max_cats)
@@ -150,6 +191,7 @@ class CogFormerTrainer:
                 flatten_param_outputs=True,
                 design_config=design_config,
                 link_fun=link_fn(),
+                pad_to_max_num_categories=default_max_cats,
             )
             adapted = self.adapter.adapt(test_samples, device=config["device"])
 
@@ -210,11 +252,19 @@ def parse_args():
     parser.add_argument("--decoder_num_layers", type=int, default=8)
     parser.add_argument("--encoder_num_heads", type=int, default=8)
     parser.add_argument("--decoder_num_heads", type=int, default=8)
+    parser.add_argument("--encoder_embed_dim", type=int, default=64)
     parser.add_argument("--proj_dim", type=int, default=256)
+    parser.add_argument("--ffn_expansion_factor", type=float, default=4.0,
+                        help="FFN intermediate width multiplier. Use 6.0 with SwiGLU to get a "
+                             "true 4:1 intermediate/model ratio (parameter-equivalent to 4x standard FFN).")
     parser.add_argument("--num_seeds", type=int, default=32)
     parser.add_argument("--seed_dim", type=int, default=64)
     parser.add_argument("--time_embedding_dim", type=int, default=32)
     parser.add_argument("--pos_embedding_dim", type=int, default=32)
+    parser.add_argument("--compile_mode", type=str, default="default",
+                        choices=["default", "reduce-overhead", "max-autotune", "max-autotune-no-cudagraphs"],
+                        help="torch.compile mode. 'max-autotune' finds optimal Triton kernel configs "
+                             "but adds ~2-5 min to the first epoch.")
 
     # Optimizer
     parser.add_argument("--lr", type=float, default=1e-4)
@@ -376,6 +426,8 @@ if __name__ == "__main__":
         "decoder_num_layers": args.decoder_num_layers,
         "encoder_num_heads": args.encoder_num_heads,
         "decoder_num_heads": args.decoder_num_heads,
+        "encoder_embed_dim": args.encoder_embed_dim,
+        "ffn_expansion_factor": args.ffn_expansion_factor,
         "num_seeds": args.num_seeds,
         "seed_dim": args.seed_dim,
         "proj_dim": args.proj_dim,
@@ -423,9 +475,13 @@ if __name__ == "__main__":
         name=model_cfg["name"],
         prior=model_cfg["prior_fn"](),
         mask_randomizer_kwargs=train_mask_kwargs_for_family,
+        num_workers=max(1, (os.cpu_count() or 1) // 2),
     )
+    torch.set_float32_matmul_precision("high")
+
     adapter = Adapter()
     cogformer = CogFormer(**cogformer_config).to(device).train()
+    cogformer = torch.compile(cogformer, dynamic=True, mode=args.compile_mode)
 
     trainer = CogFormerTrainer(
         net=cogformer,

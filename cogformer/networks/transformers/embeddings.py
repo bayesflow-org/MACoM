@@ -15,15 +15,16 @@ class SinusoidalEmbedding(nn.Module):
         super().__init__()
         assert dim % 2 == 0, "SinusoidalEmbedding dim must be even"
         self.dim = dim
+        half = dim // 2
+        freqs = torch.exp(
+            -np.log(10000) * torch.arange(half).float()
+            / max(half - 1, 1)
+        )
+        self.register_buffer("freqs", freqs)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         # x: (..., 1)
-        half = self.dim // 2
-        freqs = torch.exp(
-            -np.log(10000) * torch.arange(half, device=x.device, dtype=x.dtype)
-            / max(half - 1, 1)
-        )
-        args = x * freqs  # (..., half)
+        args = x * self.freqs  # (..., half)
         return torch.cat([torch.sin(args), torch.cos(args)], dim=-1)  # (..., dim)
 
 

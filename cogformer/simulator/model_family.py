@@ -318,6 +318,7 @@ class ModelFamily:
         free_prob: float | None = None,
         keep_intercept: bool = True,
         remove_intercept_on_collate: bool = False,
+        pad_to_max_num_categories: int | None = None,
         mask_randomizer_kwargs: dict | None = None,
         flatten_param_outputs: bool = True,
         fixed_config: bool = False,
@@ -382,6 +383,7 @@ class ModelFamily:
             list_batch,
             flatten_param_outputs=flatten_param_outputs,
             remove_intercept=remove_intercept_on_collate,
+            pad_to_max_num_categories=pad_to_max_num_categories,
         )
 
     def collate(
@@ -389,6 +391,7 @@ class ModelFamily:
         list_batch: list[dict],
         flatten_param_outputs: bool = True,
         remove_intercept: bool = True,
+        pad_to_max_num_categories: int | None = None,
     ) -> dict[str, np.ndarray]:
 
         batch_size = len(list_batch)
@@ -412,10 +415,10 @@ class ModelFamily:
         else:
             param_outputs_shape = (batch_size, max_num_cols, num_params)
 
-        design_matrices = np.zeros((batch_size, max_num_obs, max_num_cols))
-        param_masks = np.zeros(param_outputs_shape)
-        param_matrices = np.zeros(param_outputs_shape)
-        regressor_masks = np.zeros((batch_size, max_num_cols))
+        design_matrices = np.zeros((batch_size, max_num_obs, max_num_cols), dtype=np.float32)
+        param_masks = np.zeros(param_outputs_shape, dtype=np.float32)
+        param_matrices = np.zeros(param_outputs_shape, dtype=np.float32)
+        regressor_masks = np.zeros((batch_size, max_num_cols), dtype=np.float32)
         discrete_masks = -np.ones((batch_size, max_total_regressors))
         num_obs_array = np.zeros((batch_size, 1))
         num_regressors_array = np.zeros((batch_size, 1))
@@ -424,7 +427,7 @@ class ModelFamily:
         model_names, design_configs = [], []
 
         sim_keys = list_batch[0]["obs"].keys()
-        sim_data = {k: np.empty((batch_size, max_num_obs, 1)) for k in sim_keys}
+        sim_data = {k: np.empty((batch_size, max_num_obs, 1), dtype=np.float32) for k in sim_keys}
 
         for i, b in enumerate(list_batch):
             model_names.append(b["model_name"])
@@ -451,6 +454,46 @@ class ModelFamily:
             for k in sim_keys:
                 v = b["obs"][k]
                 sim_data[k][i, :v.shape[0]] = v
+
+        if pad_to_max_num_categories is not None and pad_to_max_num_categories > max_num_categories:
+            wide_bw = pad_to_max_num_categories - 1
+            wide_inter_bw = wide_bw ** 2
+            inter_bw = block_width ** 2
+            has_intercept = bool(list_batch[0]["keep_intercept"])
+            wide_cols = n_main * wide_bw + n_inter * wide_inter_bw + (1 if has_intercept else 0)
+
+            col_map: dict[int, int] = {}
+            nc, wc = 0, 0
+            if has_intercept:
+                col_map[0] = 0
+                nc, wc = 1, 1
+            for _ in range(n_main):
+                for d in range(block_width):
+                    col_map[nc + d] = wc + d
+                nc += block_width
+                wc += wide_bw
+            for _ in range(n_inter):
+                for d in range(inter_bw):
+                    col_map[nc + d] = wc + d
+                nc += inter_bw
+                wc += wide_inter_bw
+
+            wide_dm = np.zeros((batch_size, max_num_obs, wide_cols))
+            for nc_idx, wc_idx in col_map.items():
+                wide_dm[:, :, wc_idx] = design_matrices[:, :, nc_idx]
+            design_matrices = wide_dm
+
+            src_pm  = param_masks.reshape(batch_size, max_num_cols, num_params)
+            src_pmx = param_matrices.reshape(batch_size, max_num_cols, num_params)
+            dst_pm  = np.zeros((batch_size, wide_cols, num_params))
+            dst_pmx = np.zeros((batch_size, wide_cols, num_params))
+            for nc_idx, wc_idx in col_map.items():
+                dst_pm[:, wc_idx, :]  = src_pm[:, nc_idx, :]
+                dst_pmx[:, wc_idx, :] = src_pmx[:, nc_idx, :]
+            param_masks    = dst_pm.reshape(batch_size, wide_cols * num_params) if flatten_param_outputs else dst_pm
+            param_matrices = dst_pmx.reshape(batch_size, wide_cols * num_params) if flatten_param_outputs else dst_pmx
+
+            max_num_categories = pad_to_max_num_categories
 
         if remove_intercept:
             design_matrices = design_matrices[:, :, 1:]

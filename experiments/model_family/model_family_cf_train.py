@@ -1,3 +1,5 @@
+import os
+import threading
 import torch
 try:
     import wandb
@@ -20,7 +22,7 @@ np.set_printoptions(suppress=True)
 from cogformer.simulator import ModelFamily
 from cogformer.adapter import Adapter
 from cogformer.networks.transformers.cogformer import CogFormer
-from cogformer.diagnostics.plot.adaptive_correlation import adaptive_correlation
+from cogformer.diagnostics.plot.adaptive_recovery import adaptive_recovery
 from cogformer.utils.plot_utils import cogformer_fm_colors
 
 from ..configs import MODELS as _BASE_MODELS, GLOBAL_PARAMS, GLOBAL_VARIABLE_NAMES
@@ -83,6 +85,7 @@ class CogFormerTrainer:
         self.model_cfg = model_cfg
         self.adapter = adapter
         self.use_wandb = use_wandb
+        self._local = threading.local()
         if model_family is not None:
             self.model_family = model_family
         else:
@@ -98,12 +101,10 @@ class CogFormerTrainer:
         """Pre-generate fixed validation datasets for all scenarios once."""
         link_fun = self.model_cfg["link_fn"]()
         n_cols = len(self.model_cfg["intrinsic_params"])
+        training_max_cats = val_config["model_family_config"]["max_num_categories"]
         self._val_data = []
         for tag, design_config, scenario_opts in self.model_cfg["val_scenarios"]:
-            max_cats = scenario_opts.get(
-                "max_num_categories",
-                val_config["model_family_config"]["max_num_categories"],
-            )
+            max_cats = scenario_opts.get("max_num_categories", training_max_cats)
             model_family_cfg = {**val_config["model_family_config"], "max_num_categories": max_cats}
             samples = self.model_family.batch_sample(
                 **model_family_cfg,
@@ -112,6 +113,7 @@ class CogFormerTrainer:
                 flatten_param_outputs=True,
                 design_config=design_config,
                 link_fun=link_fun,
+                pad_to_max_num_categories=training_max_cats,
             )
             adapted = self.adapter.adapt(samples, device=val_config["device"])
             true_flat = adapted["param_matrices"].detach().cpu().numpy()
@@ -139,17 +141,17 @@ class CogFormerTrainer:
         self._prepare_val_data(val_config)
 
         global_step = 0
-        optimizer = AdamW(self.net.parameters(), lr=train_config["learning_rate"])
+        optimizer = AdamW(self.net.parameters(), lr=train_config["learning_rate"], fused=True)
         scheduler = CosineAnnealingLR(optimizer, T_max=train_config["epochs"])
         val_interval = self.model_cfg["val_epoch_interval"]
         device = train_config["device"]
 
-        # Two workers keep 2 simulations in flight at all times. While the GPU
-        # processes batch i, batches i+1 and i+2 simulate in parallel, so the GPU
+        # Three workers keep 3 simulations in flight at all times. While the GPU
+        # processes batch i, batches i+1..i+3 simulate in parallel, so the GPU
         # never stalls waiting for data after the initial warm-up.
-        with ThreadPoolExecutor(max_workers=2) as executor:
+        with ThreadPoolExecutor(max_workers=3) as executor:
             queue = deque(
-                executor.submit(self._simulate_and_adapt, train_config) for _ in range(2)
+                executor.submit(self._simulate_and_adapt, train_config) for _ in range(3)
             )
 
             for epoch in range(train_config["epochs"]):
@@ -184,6 +186,9 @@ class CogFormerTrainer:
                     pbar.update(1)
 
                 if (epoch + 1) % val_interval == 0:
+                    checkpoint_dir = Path(self.model_cfg["checkpoint_dir"])
+                    checkpoint_dir.mkdir(parents=True, exist_ok=True)
+                    torch.save(self.net.state_dict(), checkpoint_dir / checkpoint_path)
                     self.val_step(val_config, global_step, fig_path)
 
                 scheduler.step()
@@ -193,19 +198,34 @@ class CogFormerTrainer:
         checkpoint_dir.mkdir(parents=True, exist_ok=True)
         torch.save(self.net.state_dict(), checkpoint_dir / checkpoint_path)
 
+    def _get_sim_mf(self):
+        """Return a per-thread ModelFamily so 3 outer workers don't contend on one pool."""
+        if not hasattr(self._local, "mf"):
+            n_outer = 3
+            n_inner = max(1, (os.cpu_count() or 1) // n_outer)
+            mf = ModelFamily(
+                name=self.model_cfg["name"],
+                model=self.model_cfg["model_cls"](),
+                prior=self.model_cfg["prior_fn"](),
+                num_workers=n_inner,
+            )
+            if self.model_cfg.get("holdout_configs"):
+                mf.set_holdout_configs(self.model_cfg["holdout_configs"])
+            self._local.mf = mf
+        return self._local.mf
+
     def _simulate_and_adapt(self, config):
+        mf = self._get_sim_mf()
         link_fn = self.model_cfg["link_fn"]
-        samples = self.model_family.batch_sample(
+        samples = mf.batch_sample(
             **config["model_family_config"],
             **config["train_sample_config"],
-            prior=self.model_family.prior,
+            prior=mf.prior,
             batch_size=config["batch_size"],
             flatten_param_outputs=True,
             link_fun=link_fn(),
             context=self.model_cfg.get("train_context"),
         )
-        # Keep tensors on CPU and pin them. The main thread transfers to GPU
-        # asynchronously so this thread is never blocked by GPU transfer latency.
         adapted = self.adapter.adapt(samples, device="cpu")
         return {k: v.pin_memory() if isinstance(v, torch.Tensor) else v
                 for k, v in adapted.items()}
@@ -237,10 +257,11 @@ class CogFormerTrainer:
 
         colors = cogformer_fm_colors()
         default_max_cats = config["model_family_config"]["max_num_categories"]
-        corr_dir = Path(f"./outputs/figures/{fig_subdir}") / "correlation"
-        corr_dir.mkdir(parents=True, exist_ok=True)
+        rec_dir = Path(f"./outputs/figures/{fig_subdir}") / "recovery"
+        rec_dir.mkdir(parents=True, exist_ok=True)
 
         self.net.eval()
+        torch.cuda.empty_cache()
 
         for scenario in self._val_data:
             tag           = scenario["tag"]
@@ -262,7 +283,7 @@ class CogFormerTrainer:
             )
             pred_set = pred_set.reshape(config["batch_size"], config["fm_num_samples"], n_rows, n_cols)
 
-            corr_fig = adaptive_correlation(
+            rec_fig = adaptive_recovery(
                 true=true_set,
                 pred=pred_set,
                 design_config=design_config,
@@ -274,15 +295,15 @@ class CogFormerTrainer:
                 main_effect_color=colors["main_effect"],
                 interaction_color=colors["interaction"],
             )
-            out_corr = corr_dir / f"{model_name}_val_correlation_{tag}.pdf"
-            corr_fig.savefig(out_corr, bbox_inches="tight")
+            out_rec = rec_dir / f"{model_name}_val_recovery_{tag}.pdf"
+            rec_fig.savefig(out_rec, bbox_inches="tight")
 
             if self.use_wandb:
                 wandb.log(
-                    {f"val/correlation_{tag}": wandb.Image(corr_fig)},
+                    {f"val/recovery_{tag}": wandb.Image(rec_fig)},
                     step=global_step,
                 )
-            plt.close(corr_fig)
+            plt.close(rec_fig)
 
         self.net.train()
 
@@ -302,11 +323,19 @@ def parse_args():
     parser.add_argument("--decoder_num_layers", type=int, default=8)
     parser.add_argument("--encoder_num_heads", type=int, default=8)
     parser.add_argument("--decoder_num_heads", type=int, default=8)
+    parser.add_argument("--encoder_embed_dim", type=int, default=64)
     parser.add_argument("--proj_dim", type=int, default=256)
+    parser.add_argument("--ffn_expansion_factor", type=float, default=4.0,
+                        help="FFN intermediate width multiplier. Use 6.0 with SwiGLU to get a "
+                             "true 4:1 intermediate/model ratio (parameter-equivalent to 4x standard FFN).")
     parser.add_argument("--num_seeds", type=int, default=32)
     parser.add_argument("--seed_dim", type=int, default=64)
     parser.add_argument("--time_embedding_dim", type=int, default=32)
     parser.add_argument("--pos_embedding_dim", type=int, default=32)
+    parser.add_argument("--compile_mode", type=str, default="default",
+                        choices=["default", "reduce-overhead", "max-autotune", "max-autotune-no-cudagraphs"],
+                        help="torch.compile mode. 'max-autotune' finds optimal Triton kernel configs "
+                             "but adds ~2-5 min to the first epoch.")
     # Hyperparameters
     parser.add_argument("--lr", type=float, default=1e-4)
     parser.add_argument("--dropout", type=float, default=0.05)
@@ -316,7 +345,7 @@ def parse_args():
     parser.add_argument("--min_num_obs", type=int, default=200)
     parser.add_argument("--max_num_obs", type=int, default=1000)
     parser.add_argument("--train_batch_size", type=int, default=64)
-    parser.add_argument("--val_batch_size", type=int, default=500)
+    parser.add_argument("--val_batch_size", type=int, default=50)
     parser.add_argument("--epochs", type=int, default=5000)
     parser.add_argument("--steps_per_epoch", type=int, default=100)
     # Inference
@@ -325,7 +354,7 @@ def parse_args():
     parser.add_argument("--fm_solver", type=str, default="euler",
                         choices=["euler", "midpoint", "rk4"],
                         help="ODE solver for flow matching sampling")
-    parser.add_argument("--val_samples_chunk_size", type=int, default=20,
+    parser.add_argument("--val_samples_chunk_size", type=int, default=4,
                         help="Samples per ODE loop during validation; peak GPU memory scales with "
                              "batch_size * val_samples_chunk_size.")
     parser.add_argument("--estimate_global_params", action=argparse.BooleanOptionalAction,
@@ -425,6 +454,8 @@ if __name__ == "__main__":
         "decoder_num_layers": args.decoder_num_layers,
         "encoder_num_heads": args.encoder_num_heads,
         "decoder_num_heads": args.decoder_num_heads,
+        "encoder_embed_dim": args.encoder_embed_dim,
+        "ffn_expansion_factor": args.ffn_expansion_factor,
         "num_seeds": args.num_seeds,
         "seed_dim": args.seed_dim,
         "proj_dim": args.proj_dim,
@@ -456,10 +487,11 @@ if __name__ == "__main__":
         name=model_cfg["name"],
         prior=model_cfg["prior_fn"](),
         mask_randomizer_kwargs=train_params_kwargs,
+        num_workers=max(1, (os.cpu_count() or 1) // 2),
     )
     adapter = Adapter()
     cogformer = CogFormer(**cogformer_config).to(device).train()
-    cogformer = torch.compile(cogformer, dynamic=True)
+    cogformer = torch.compile(cogformer, dynamic=True, mode=args.compile_mode)
 
     trainer = CogFormerTrainer(
         model_family=model_family,

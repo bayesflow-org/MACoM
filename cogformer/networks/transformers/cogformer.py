@@ -24,6 +24,8 @@ class CogFormer(nn.Module):
             decoder_num_heads: int = 4,
             num_seeds: int = 10,
             seed_dim: int = 128,
+            encoder_embed_dim: int = 64,
+            ffn_expansion_factor: float = 4.0,
             layer_norm: bool = True,
             dropout: float = 0.0,
             layer_dropout: float = 0.0,
@@ -47,6 +49,7 @@ class CogFormer(nn.Module):
 
         self.encoder = Encoder(
             input_dim=encoder_input_dim,
+            embed_dim=encoder_embed_dim,
             num_layers=encoder_num_layers,
             num_seeds=num_seeds,
             seed_dim=seed_dim,
@@ -56,6 +59,7 @@ class CogFormer(nn.Module):
             layer_dropout=layer_dropout,
             layer_design=encoder_layer_design,
             layer_kwargs=encoder_layer_kwargs,
+            expansion_factor=ffn_expansion_factor,
         )
 
         self.decoder = Decoder(
@@ -73,6 +77,7 @@ class CogFormer(nn.Module):
             model_embedding_dim=self._model_embed_dim,
             time_freq_trainable=time_freq_trainable,
             block_film=block_film,
+            expansion_factor=ffn_expansion_factor,
         )
 
     def forward(self, params, input_data, param_indices, regressor_indices, params_mask=None, model_ids=None):

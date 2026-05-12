@@ -24,6 +24,7 @@ class Encoder(nn.Module):
         layer_dropout: float = 0.0,
         layer_design: str = None,
         layer_kwargs: dict = None,
+        expansion_factor: float = 4.0,
     ):
         super().__init__()
         assert num_layers >= 1, "num_layers must be >= 1"
@@ -40,6 +41,7 @@ class Encoder(nn.Module):
                         num_layers=num_layers,
                         layer_norm=layer_norm,
                         dropout=dropout,
+                        expansion_factor=expansion_factor,
                         **layer_kwargs
                     )
                 case "mixed_attention":
@@ -50,6 +52,7 @@ class Encoder(nn.Module):
                         num_layers=num_layers,
                         layer_norm=layer_norm,
                         dropout=dropout,
+                        expansion_factor=expansion_factor,
                         **layer_kwargs
                     )
                 case "custom_attention":
@@ -60,6 +63,7 @@ class Encoder(nn.Module):
                         num_layers=num_layers,
                         layer_norm=layer_norm,
                         dropout=dropout,
+                        expansion_factor=expansion_factor,
                         **layer_kwargs
                     )
         else:
@@ -69,6 +73,7 @@ class Encoder(nn.Module):
                     num_heads=num_heads,
                     layer_norm=layer_norm,
                     dropout=dropout,
+                    expansion_factor=expansion_factor,
                 ) for _ in range(num_layers)]
             )
 
@@ -80,7 +85,8 @@ class Encoder(nn.Module):
             num_seeds=num_seeds,
             num_heads=num_heads,
             layer_norm=layer_norm,
-            dropout=dropout
+            dropout=dropout,
+            expansion_factor=expansion_factor,
         )
 
     def forward(self, x, attn_mask=None):

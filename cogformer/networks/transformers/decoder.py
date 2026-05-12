@@ -31,6 +31,7 @@ class Decoder(nn.Module):
             model_embedding_dim: int = 0,
             time_freq_trainable: bool = True,
             block_film: bool = False,
+            expansion_factor: float = 4.0,
     ):
         super().__init__()
         assert num_layers >= 1, "num_layers must be >= 1"
@@ -55,6 +56,7 @@ class Decoder(nn.Module):
                         num_layers=num_layers,
                         layer_norm=layer_norm,
                         dropout=dropout,
+                        expansion_factor=expansion_factor,
                         **layer_kwargs
                     )
                 case "mixed_attention":
@@ -65,6 +67,7 @@ class Decoder(nn.Module):
                         num_layers=num_layers,
                         layer_norm=layer_norm,
                         dropout=dropout,
+                        expansion_factor=expansion_factor,
                         **layer_kwargs
                     )
                 case "cross_attention":
@@ -75,6 +78,7 @@ class Decoder(nn.Module):
                         num_layers=num_layers,
                         layer_norm=layer_norm,
                         dropout=dropout,
+                        expansion_factor=expansion_factor,
                     )
                 case "custom_attention":
                     self.layers = custom_attention_layers(
@@ -84,6 +88,7 @@ class Decoder(nn.Module):
                         num_layers=num_layers,
                         layer_norm=layer_norm,
                         dropout=dropout,
+                        expansion_factor=expansion_factor,
                         **layer_kwargs
                     )
         else:
@@ -94,6 +99,7 @@ class Decoder(nn.Module):
                 num_layers=num_layers,
                 layer_norm=layer_norm,
                 dropout=dropout,
+                expansion_factor=expansion_factor,
                 **layer_kwargs
             )
 
