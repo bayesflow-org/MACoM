@@ -406,7 +406,7 @@ if __name__ == "__main__":
     val_params_kwargs = {
         "free_intrinsics": model_cfg["intrinsic_params"],
         "fixed_intrinsics": [],
-        "fixed_values": {},
+        "fixed_values": model_cfg["default_fixed_values"],
     }
 
     train_sample_config = {

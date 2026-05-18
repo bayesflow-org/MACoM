@@ -237,12 +237,12 @@ class ModelFamily:
 
         # Rebuild the mask with actual category counts so that rows corresponding to
         # unused category levels (zero-padded design matrix columns) are excluded.
-        # fixed_params must be forwarded so that fixed_intrinsics are always mask=0,
-        # regardless of whether they appear in the design_config intercept.
+        # No fixed_params override: the design config is authoritative. Params listed in
+        # fixed_intrinsics are probabilistically included via build_random_design_config
+        # (intercept_prob ~ Beta(2,2)) and are estimation targets when they appear.
         parameter_mask = build_parameter_mask(
             design_config=design_config,
             intrinsic_params=self.intrinsic_params,
-            fixed_params=kwargs.get("fixed_intrinsics"),
             max_num_categories=max_num_categories,
             keep_intercept="1" in design_config,
             category_counts=actual_col_counts,
@@ -262,9 +262,13 @@ class ModelFamily:
         )
 
         predictor = design_matrix @ parameter_matrix
+        fixed_vals = kwargs.get("fixed_values", {})
         regressed_parameters = np.empty_like(predictor, dtype=np.float32)
         for j, name in enumerate(self.intrinsic_params):
-            regressed_parameters[:, j] = link_funs[name](predictor[:, j]).astype(np.float32, copy=False)
+            if name in fixed_vals and parameter_mask[:, j].sum() == 0:
+                regressed_parameters[:, j] = fixed_vals[name]
+            else:
+                regressed_parameters[:, j] = link_funs[name](predictor[:, j]).astype(np.float32, copy=False)
 
         params = {
             name: regressed_parameters[:, j].astype(np.float32, copy=False)
@@ -284,6 +288,7 @@ class ModelFamily:
             parameter_mask = parameter_mask.flatten()
             parameter_matrix = parameter_matrix.flatten()
 
+        ctx = context or {}
         out = {
             "model_name": f"{self.name}",
             "design_config": design_config,
@@ -295,7 +300,12 @@ class ModelFamily:
             "regressor_mask": regressor_mask,
             "max_num_regressors": max_num_regressors,
             "keep_intercept": has_intercept_col,
-            "num_alternatives": int((context or {}).get("num_alternatives", 2)),
+            "num_alternatives": int(ctx.get("num_alternatives", 2)),
+            "per_trial_context": {
+                k: np.asarray(v, dtype=np.float32)
+                for k, v in ctx.items()
+                if isinstance(v, np.ndarray) and v.shape == (num_obs,)
+            },
         }
 
         if debug:
@@ -431,6 +441,8 @@ class ModelFamily:
 
         sim_keys = list_batch[0]["obs"].keys()
         sim_data = {k: np.empty((batch_size, max_num_obs, 1), dtype=np.float32) for k in sim_keys}
+        ptc_keys = list(list_batch[0].get("per_trial_context", {}).keys())
+        per_trial_context = {k: np.zeros((batch_size, max_num_obs), dtype=np.float32) for k in ptc_keys}
 
         for i, b in enumerate(list_batch):
             model_names.append(b["model_name"])
@@ -453,6 +465,9 @@ class ModelFamily:
             num_obs_array[i] = b["num_obs"]
             num_regressors_array[i] = b["num_regressors"]
             num_alternatives_array[i] = b.get("num_alternatives", 2)
+            for k, arr in b.get("per_trial_context", {}).items():
+                if k in per_trial_context:
+                    per_trial_context[k][i, :num_obs] = arr
 
             for k in sim_keys:
                 v = b["obs"][k]
@@ -513,6 +528,7 @@ class ModelFamily:
             "num_obs": num_obs_array,
             "num_regressors": num_regressors_array,
             "num_alternatives": num_alternatives_array,
+            "per_trial_context": per_trial_context,
             "max_num_regressors": max_num_regressors,
             "max_num_categories": max_num_categories,
             "n_params": len(self.intrinsic_params),

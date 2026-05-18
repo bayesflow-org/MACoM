@@ -54,8 +54,21 @@ class Adapter:
             num_obs, axis=1,
         ).astype(np.float32)
 
+        _ptc = samples.get("per_trial_context", {})
+        _zeros = np.zeros((batch_size, num_obs), dtype=np.float32)
+
+        # favored_idx: which accumulator is boosted per trial (RDM); 0 for other models.
+        # Normalized to [0, 1] using the same max_alternatives denominator as choices.
+        fav_raw = np.asarray(_ptc.get("favored_idx", _zeros), dtype=np.float32)
+        fav_col = (fav_raw / max(max_alternatives - 1, 1))[..., None]  # (B, T, 1)
+
+        # theta: per-trial heading direction (CDM); 0 for other models.
+        # Normalized to [-1, 1] via division by π.
+        theta_raw = np.asarray(_ptc.get("theta", _zeros), dtype=np.float32)
+        theta_col = (theta_raw / np.pi)[..., None]  # (B, T, 1)
+
         input_data = Adapter.to_torch(
-            np.concatenate([design_matrices, rts, choices_normalized, alt_col], axis=-1)
+            np.concatenate([design_matrices, rts, choices_normalized, alt_col, fav_col, theta_col], axis=-1)
         ).to(torch.float32)
 
         n_tokens = samples["param_masks"].shape[-1] // n_params

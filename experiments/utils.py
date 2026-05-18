@@ -60,7 +60,7 @@ def build_encoder_input_dim(
     n_main = max_num_regressors
     n_inter = max_num_regressors * (max_num_regressors - 1) // 2
     design_cols = n_main * block_width + n_inter * block_width ** 2 + (1 if keep_intercept else 0)
-    return design_cols + 3  # +3 for sim_data features (rt, choice, and one auxiliary)
+    return design_cols + 5  # +5: rt, choices_normalized, alt_col, favored_idx, theta
 
 
 def add_global_params(

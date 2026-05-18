@@ -158,14 +158,18 @@ class RDM(Model):
     def build_context(num_obs: int, num_alternatives: int = 2) -> dict[str, np.ndarray]:
         """Build context for RDM simulation."""
         context = {"num_alternatives": num_alternatives}
-        if num_alternatives > 2:
+        if num_alternatives == 2:
+            # For 2-alt the simulation always boosts accumulator 1, so record that
+            # explicitly so the encoder can see it as a per-trial feature.
+            context["favored_idx"] = np.ones(num_obs, dtype=np.int32)
+        else:
             context["favored_idx"] = np.random.randint(0, num_alternatives, size=num_obs)
         return context
 
     @staticmethod
     def build_default_context(num_obs: int) -> dict[str, np.ndarray]:
-        """Build default context (2 alternatives, no favored_idx needed)."""
-        return {"num_alternatives": 2}
+        """Build default context (2 alternatives, accumulator 1 always favored)."""
+        return RDM.build_context(num_obs, num_alternatives=2)
 
     @staticmethod
     def build_random_context(num_obs: int) -> dict[str, np.ndarray]:
