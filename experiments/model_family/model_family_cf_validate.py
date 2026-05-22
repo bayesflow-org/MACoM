@@ -57,7 +57,7 @@ def parse_args():
                    help="Output directory (defaults to model-specific path)")
     p.add_argument("--pred_dir", type=str, default="./outputs/data/model_family/")
     p.add_argument("--data_dir", type=str, default=None)
-    p.add_argument("--batch_size", type=int, default=200)
+    p.add_argument("--batch_size", type=int, default=500)
     p.add_argument("--num_obs", type=int, default=500)
     p.add_argument("--max_num_regressors", type=int, default=5)
     p.add_argument("--max_num_categories", type=int, default=5)
@@ -151,6 +151,7 @@ def main():
     ).to(device)
 
     state = torch.load(Path(args.checkpoint), map_location=device)
+    state = {k.removeprefix("_orig_mod."): v for k, v in state.items()}
     cogformer.load_state_dict(state)
     cogformer.eval()
     cogformer = torch.compile(cogformer, dynamic=True)
