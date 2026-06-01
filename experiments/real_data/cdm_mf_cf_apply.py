@@ -73,8 +73,18 @@ def main():
 
     intrinsic_params = model_cfg["intrinsic_params"]
     variable_names   = model_cfg["variable_names"]
-    design_config    = model_cfg["benchmark_configs"]["interaction"]
     n_params         = len(intrinsic_params)
+
+    # speed_condition, difficulty, and their interaction are regressed on
+    # drift length (v), threshold (a), and ndt (tau); v_theta/s_v/s_tau are intercept-only
+    design_config = {
+        "1":       ["v", "v_theta", "a", "tau", "s_v", "s_tau"],
+        "u_1":     ["v", "a", "tau"],
+        "u_2":     ["v", "a", "tau"],
+        "u_1:u_2": ["v", "a", "tau"],
+    }
+    if args.estimate_global_params:
+        design_config["1"] = design_config["1"] + ["pi"]
 
     encoder_input_dim = build_encoder_input_dim(
         args.max_num_regressors, args.max_num_categories, args.keep_intercept

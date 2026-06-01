@@ -114,7 +114,15 @@ def main():
     cdm_model_id = model_class.model_index["CDM"]
 
     cdm_cfg = _MODELS_WITH_PI["cdm"]
-    design_config = cdm_cfg["benchmark_configs"]["interaction"]
+
+    # speed_condition, difficulty, and their interaction are regressed on
+    # drift length (v), threshold (a), and ndt (tau); v_theta/s_v/s_tau are intercept-only
+    design_config = {
+        "1":       ["v", "v_theta", "a", "tau", "s_v", "s_tau", "pi"],
+        "u_1":     ["v", "a", "tau"],
+        "u_2":     ["v", "a", "tau"],
+        "u_1:u_2": ["v", "a", "tau"],
+    }
 
     encoder_input_dim = build_encoder_input_dim(
         args.max_num_regressors, args.max_num_categories, args.keep_intercept
@@ -139,6 +147,8 @@ def main():
     ).to(device)
 
     state = torch.load(Path(args.checkpoint), map_location=device)
+    if isinstance(state, dict) and "state_dict" in state:
+        state = state["state_dict"]
     cogformer.load_state_dict(state)
     cogformer.eval()
 

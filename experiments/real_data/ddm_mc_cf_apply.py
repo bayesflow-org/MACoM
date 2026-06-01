@@ -148,6 +148,8 @@ def main():
     ).to(device)
 
     state = torch.load(Path(args.checkpoint), map_location=device)
+    if isinstance(state, dict) and "state_dict" in state:
+        state = state["state_dict"]
     cogformer.load_state_dict(state)
     cogformer.eval()
 

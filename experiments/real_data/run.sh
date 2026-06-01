@@ -9,7 +9,7 @@ source "$(dirname "${BASH_SOURCE[0]}")/../shared_config.sh"
 
 echo "=== Real data: DDM model-family apply ==="
 python -m experiments.real_data.ddm_mf_cf_apply \
-    --checkpoint_path "$DDM_MF_CKPT" \
+    --checkpoint "$DDM_MF_CKPT" \
     --encoder_num_layers "$ENC_LAYERS" \
     --decoder_num_layers "$DEC_LAYERS" \
     --encoder_num_heads  "$HEADS" \
@@ -20,7 +20,7 @@ python -m experiments.real_data.ddm_mf_cf_apply \
 
 echo "=== Real data: DDM model-class apply ==="
 python -m experiments.real_data.ddm_mc_cf_apply \
-    --checkpoint_path "$MC_CKPT" \
+    --checkpoint "$MC_CKPT" \
     --encoder_num_layers "$ENC_LAYERS" \
     --decoder_num_layers "$DEC_LAYERS" \
     --encoder_num_heads  "$HEADS" \
@@ -32,7 +32,7 @@ python -m experiments.real_data.ddm_mc_cf_apply \
 
 echo "=== Real data: CDM model-family apply ==="
 python -m experiments.real_data.cdm_mf_cf_apply \
-    --checkpoint_path "$CDM_MF_CKPT" \
+    --checkpoint "$CDM_MF_CKPT" \
     --encoder_num_layers "$ENC_LAYERS" \
     --decoder_num_layers "$DEC_LAYERS" \
     --encoder_num_heads  "$HEADS" \
@@ -43,7 +43,7 @@ python -m experiments.real_data.cdm_mf_cf_apply \
 
 echo "=== Real data: CDM model-class apply ==="
 python -m experiments.real_data.cdm_mc_cf_apply \
-    --checkpoint_path "$MC_CKPT" \
+    --checkpoint "$MC_CKPT" \
     --encoder_num_layers "$ENC_LAYERS" \
     --decoder_num_layers "$DEC_LAYERS" \
     --encoder_num_heads  "$HEADS" \
