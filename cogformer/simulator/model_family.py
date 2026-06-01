@@ -369,6 +369,7 @@ class ModelFamily:
                 context=ctx_i,
                 mask_randomizer_kwargs=mask_randomizer_kwargs,
                 num_regressors=int(num_regressors_array[i]),
+                max_num_regressors=max_num_regressors,
                 discrete_prob=discrete_prob,
                 free_prob=free_prob,
                 keep_intercept=keep_intercept,

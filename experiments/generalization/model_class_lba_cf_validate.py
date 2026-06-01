@@ -205,6 +205,9 @@ def main():
     ).to(device)
 
     state = torch.load(Path(args.checkpoint), map_location=device)
+    if isinstance(state, dict) and "state_dict" in state:
+        state = state["state_dict"]
+    state = {k.removeprefix("_orig_mod."): v for k, v in state.items()}
     cogformer.load_state_dict(state)
     cogformer.eval()
     cogformer = torch.compile(cogformer, dynamic=True)

@@ -8,6 +8,8 @@
 set -euo pipefail
 source "$(dirname "${BASH_SOURCE[0]}")/../shared_config.sh"
 
+export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
+
 DRY=()
 [[ -n "${DRY_EPOCHS:-}" ]] && DRY=(--dry_run_epochs "$DRY_EPOCHS")
 
@@ -28,7 +30,8 @@ python -m experiments.model_class.model_class_cf_train \
     --min_num_obs   "$MIN_OBS" \
     --max_num_obs   "$MAX_OBS" \
     --train_batch_size "$MC_BATCH" \
-    --val_batch_size   "$VAL_BATCH" \
+    --val_batch_size   50 \
+    --val_samples_chunk_size 1 \
     --epochs          "$EPOCHS" \
     --steps_per_epoch "$STEPS" \
     --lr 1e-4 --dropout 0.05 --layer_dropout 0.05 \
@@ -47,7 +50,8 @@ python -m experiments.model_class.model_class_cf_validate \
     --num_seeds     "$SEEDS" \
     --seed_dim      "$MC_DIM" \
     --model_embed_dim 8 \
-    --batch_size 500 --num_samples 500 --num_obs "$OBS"
+    --batch_size 200 --num_samples 200 --num_obs "$OBS" \
+    --samples_chunk_size 1
 
 # ── LBA validate ───────────────────────────────────────────────────────────────
 echo "=== ModelClass: LBA validate ==="
@@ -61,4 +65,5 @@ python -m experiments.generalization.model_class_lba_cf_validate \
     --num_seeds     "$SEEDS" \
     --seed_dim      "$MC_DIM" \
     --model_embed_dim 8 \
-    --batch_size 500 --num_samples 500 --num_obs "$OBS"
+    --batch_size 200 --num_samples 200 --num_obs "$OBS" \
+    --samples_chunk_size 1

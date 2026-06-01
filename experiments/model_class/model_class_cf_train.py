@@ -1,3 +1,5 @@
+import os
+import threading
 import torch
 try:
     import wandb
@@ -5,6 +7,8 @@ except Exception:
     wandb = None
 import logging
 import argparse
+from collections import deque
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from tqdm.auto import tqdm
 from torch.optim import AdamW
@@ -26,7 +30,7 @@ from cogformer.diagnostics.plot.adaptive_recovery import adaptive_recovery
 from cogformer.utils.plot_utils import cogformer_fm_colors
 
 from ..configs import MODELS as _BASE_MODELS
-from ..utils import add_global_params, build_encoder_input_dim
+from ..utils import add_global_params, build_encoder_input_dim, chunked_sample, infer_free_fixed_intrinsics
 from ..timing import RunTimer
 
 
@@ -36,7 +40,7 @@ GLOBAL_VARIABLE_NAMES = [r"$\pi$"]
 _MODELS_WITH_PI = {
     m: add_global_params(cfg, GLOBAL_PARAMS, GLOBAL_VARIABLE_NAMES)
     for m, cfg in _BASE_MODELS.items()
-    if m != "lba"  # lba is not part of the trained model class
+    if m != "lba"
 }
 
 # val_step uses the "interaction" benchmark config as the fixed validation design
@@ -44,68 +48,58 @@ MODEL_CONFIGS = {
     m.upper(): {
         "intrinsic_params": cfg["intrinsic_params"],
         "variable_names": cfg["variable_names"],
+        "default_fixed_values": cfg["default_fixed_values"],
         "val_design_config": cfg["benchmark_configs"]["interaction"],
     }
     for m, cfg in _MODELS_WITH_PI.items()
 }
 
+CHECKPOINT_DIR = "./outputs/checkpoints/model_class/cf/"
+
 
 class CogFormerTrainer:
-    def __init__(self, net, model_class, adapter, use_wandb=False):
+    def __init__(self, net, model_class, model_class_config, adapter, use_wandb=False, val_epoch_interval=2000):
         self.net = net
-        self.model_class = model_class
+        self.model_class = model_class      # main instance used in val_step
+        self.model_class_config = model_class_config  # config dict for per-thread reconstruction
         self.adapter = adapter
         self.use_wandb = use_wandb
+        self.val_epoch_interval = val_epoch_interval
+        self._local = threading.local()
 
-    def train(self, train_config, val_config, checkpoint_path="cogformer_model_class_fm.pt", fig_path="fig"):
-        global_step = 0
-        optimizer = AdamW(self.net.parameters(), lr=train_config["learning_rate"])
-        scheduler = CosineAnnealingLR(optimizer, T_max=train_config["epochs"])
-
-        for epoch in range(train_config["epochs"]):
-            pbar = tqdm(
-                total=train_config["steps_per_epoch"],
-                desc=f"Epoch {epoch + 1}/{train_config['epochs']}",
-                miniters=100,
-            )
-            for _ in range(train_config["steps_per_epoch"]):
-                loss, current_lr = self.train_step(
-                    config=train_config,
-                    optimizer=optimizer,
-                    scheduler=scheduler,
+    def _get_sim_mc(self):
+        """Return a per-thread ModelClass so 3 outer workers don't contend on one instance."""
+        if not hasattr(self._local, "mc"):
+            n_outer = 3
+            n_inner = max(1, (os.cpu_count() or 1) // n_outer)
+            families = {}
+            for name, cfg in self.model_class_config["families"].items():
+                families[name] = ModelFamily(
+                    model=cfg["model_cls"](),
+                    name=name,
+                    prior=cfg["prior_fn"](),
+                    intrinsic_params=cfg["intrinsic_params"],
+                    mask_randomizer_kwargs=cfg["mask_randomizer_kwargs"],
+                    num_workers=n_inner,
                 )
-                if self.use_wandb:
-                    wandb.log(
-                        {"train/loss": loss, "opt/lr": current_lr, "epoch": epoch + 1},
-                        step=global_step,
-                    )
-                global_step += 1
-                pbar.set_postfix(loss=f"{loss:.4f}", lr=f"{current_lr:.2e}")
-                pbar.update(1)
+            link_funs = {k: fn() for k, fn in self.model_class_config["link_funs"].items()}
+            self._local.mc = ModelClass(model_families=families, link_funs=link_funs)
+        return self._local.mc
 
-            if (epoch + 1) % 2000 == 0:
-                self.val_step(val_config, global_step, fig_path)
-
-            scheduler.step()
-            pbar.close()
-
-        checkpoint_dir = Path("./outputs/checkpoints/model_class/cf/")
-        checkpoint_dir.mkdir(parents=True, exist_ok=True)
-        torch.save(self.net.state_dict(), checkpoint_dir / checkpoint_path)
-        logging.info(f"[saved] {checkpoint_dir / checkpoint_path}")
-
-    def train_step(self, config, optimizer, scheduler):
-        train_samples = self.model_class.batch_sample(
+    def _simulate_and_adapt(self, config):
+        mc = self._get_sim_mc()
+        samples = mc.batch_sample(
             **config["model_family_config"],
             **config["train_sample_config"],
             batch_size=config["batch_size"],
             flatten_param_outputs=True,
         )
+        adapted = self.adapter.adapt(samples, device="cpu")
+        return {k: v.pin_memory() if isinstance(v, torch.Tensor) else v
+                for k, v in adapted.items()}
 
-        adapted = self.adapter.adapt(train_samples)
-
-        optimizer.zero_grad()
-
+    def _train_step_from_adapted(self, adapted, config, optimizer, scheduler):
+        optimizer.zero_grad(set_to_none=True)
         device_type = config["device"].type
         with torch.autocast(device_type=device_type, dtype=torch.bfloat16, enabled=(device_type == "cuda")):
             pred_velocity, target_velocity = self.net(
@@ -118,18 +112,105 @@ class CogFormerTrainer:
             )
             L = self.net.compute_loss(pred_velocity, target_velocity, adapted["param_masks"])
         L.backward()
-
         if config["gradient_clip_norm"] is not None:
             torch.nn.utils.clip_grad_norm_(self.net.parameters(), config["gradient_clip_norm"])
-
         optimizer.step()
-        loss = L.detach().item()
-        current_lr = scheduler.get_last_lr()[0]
-        return loss, current_lr
+        return L.detach().item(), scheduler.get_last_lr()[0]
+
+    def train(self, train_config, val_config, checkpoint_path="cogformer_model_class_fm.pt",
+              fig_path="fig", resume=False, resume_start_epoch=0):
+        checkpoint_dir = Path(CHECKPOINT_DIR)
+        full_ckpt_path = checkpoint_dir / checkpoint_path
+        device = train_config["device"]
+
+        # ── optional resume ────────────────────────────────────────────────────
+        start_epoch = 0
+        saved_optimizer_state = None
+        saved_scheduler_state = None
+        if resume and full_ckpt_path.exists():
+            ckpt = torch.load(full_ckpt_path, map_location=device)
+            if isinstance(ckpt, dict) and "state_dict" in ckpt:
+                self.net.load_state_dict(ckpt["state_dict"])
+                start_epoch = ckpt.get("epoch", resume_start_epoch)
+                saved_optimizer_state = ckpt.get("optimizer_state")
+                saved_scheduler_state = ckpt.get("scheduler_state")
+            else:
+                # old format: raw state_dict OrderedDict
+                self.net.load_state_dict(ckpt)
+                start_epoch = resume_start_epoch
+            logging.info(f"[resumed] from epoch {start_epoch}, checkpoint: {full_ckpt_path}")
+
+        # ── optimizer + scheduler (LR resumes at the right point) ─────────────
+        optimizer = AdamW(self.net.parameters(), lr=train_config["learning_rate"], fused=True)
+        scheduler = CosineAnnealingLR(
+            optimizer, T_max=train_config["epochs"], last_epoch=start_epoch - 1
+        )
+        if saved_optimizer_state is not None:
+            optimizer.load_state_dict(saved_optimizer_state)
+        if saved_scheduler_state is not None:
+            scheduler.load_state_dict(saved_scheduler_state)
+
+        global_step = start_epoch * train_config["steps_per_epoch"]
+
+        with ThreadPoolExecutor(max_workers=3) as executor:
+            queue = deque(
+                executor.submit(self._simulate_and_adapt, train_config) for _ in range(3)
+            )
+
+            for epoch in range(start_epoch, train_config["epochs"]):
+                pbar = tqdm(
+                    total=train_config["steps_per_epoch"],
+                    desc=f"Epoch {epoch + 1}/{train_config['epochs']}",
+                    miniters=100,
+                )
+                for _ in range(train_config["steps_per_epoch"]):
+                    adapted_cpu = queue.popleft().result()
+                    queue.append(executor.submit(self._simulate_and_adapt, train_config))
+                    adapted = {
+                        k: v.to(device, non_blocking=True) if isinstance(v, torch.Tensor) else v
+                        for k, v in adapted_cpu.items()
+                    }
+                    loss, current_lr = self._train_step_from_adapted(
+                        adapted=adapted,
+                        config=train_config,
+                        optimizer=optimizer,
+                        scheduler=scheduler,
+                    )
+                    if self.use_wandb:
+                        wandb.log(
+                            {"train/loss": loss, "opt/lr": current_lr, "epoch": epoch + 1},
+                            step=global_step,
+                        )
+                    global_step += 1
+                    pbar.set_postfix(loss=f"{loss:.4f}", lr=f"{current_lr:.2e}")
+                    pbar.update(1)
+
+                if (epoch + 1) % self.val_epoch_interval == 0:
+                    checkpoint_dir.mkdir(parents=True, exist_ok=True)
+                    torch.save({
+                        "state_dict": self.net.state_dict(),
+                        "epoch": epoch + 1,
+                        "optimizer_state": optimizer.state_dict(),
+                        "scheduler_state": scheduler.state_dict(),
+                    }, full_ckpt_path)
+                    self.val_step(val_config, global_step, fig_path)
+
+                scheduler.step()
+                pbar.close()
+
+        checkpoint_dir.mkdir(parents=True, exist_ok=True)
+        torch.save({
+            "state_dict": self.net.state_dict(),
+            "epoch": train_config["epochs"],
+            "optimizer_state": optimizer.state_dict(),
+            "scheduler_state": scheduler.state_dict(),
+        }, full_ckpt_path)
+        logging.info(f"[saved] {full_ckpt_path}")
 
     @torch.no_grad()
     def val_step(self, config, global_step, fig_path):
         self.net.eval()
+        torch.cuda.empty_cache()
 
         model_family_config = config["model_family_config"]
         n_global_params = self.model_class.n_global_params
@@ -147,6 +228,11 @@ class CogFormerTrainer:
             variable_names = model_cfg["variable_names"]
             design_config = model_cfg["val_design_config"]
 
+            free, fixed, fixed_vals = infer_free_fixed_intrinsics(
+                design_config, intrinsic_params, model_cfg["default_fixed_values"]
+            )
+            mask_kwargs = {"free_intrinsics": free, "fixed_intrinsics": fixed, "fixed_values": fixed_vals}
+
             test_samples = mf.batch_sample(
                 design_config=design_config,
                 batch_size=config["batch_size"],
@@ -154,12 +240,12 @@ class CogFormerTrainer:
                 max_num_regressors=model_family_config["max_num_regressors"],
                 max_num_categories=model_family_config["max_num_categories"],
                 keep_intercept=model_family_config["keep_intercept"],
+                mask_randomizer_kwargs=mask_kwargs,
                 flatten_param_outputs=True,
+                fixed_config=True,
                 link_fun=link_fun,
             )
             test_samples["model_ids"] = np.full(config["batch_size"], model_id, dtype=np.int64)
-
-            # Lift local param positions to global space before adapting
             test_samples["param_matrices"], test_samples["param_masks"] = \
                 self.model_class.lift_to_global_space(
                     model_name,
@@ -168,16 +254,14 @@ class CogFormerTrainer:
                 )
             test_samples["n_params"] = n_global_params
 
-            adapted = self.adapter.adapt(test_samples)
+            adapted = self.adapter.adapt(test_samples, device=config["device"])
 
-            pred_set = self.net.sample(
-                adapted["input_data"],
-                adapted["param_indices"],
-                adapted["regressor_indices"],
-                adapted["param_masks"],
-                steps=config["fm_sample_steps"],
+            pred_set = chunked_sample(
+                self.net, adapted,
                 num_samples=config["fm_num_samples"],
-                model_ids=adapted["model_ids"],
+                steps=config["fm_sample_steps"],
+                solver=config.get("fm_solver", "euler"),
+                samples_chunk_size=config.get("val_samples_chunk_size"),
             )
 
             batch_size = config["batch_size"]
@@ -223,18 +307,26 @@ class CogFormerTrainer:
 def parse_args():
     parser = argparse.ArgumentParser()
     parser.add_argument("--use_wandb", action="store_true")
+    parser.add_argument("--resume", action="store_true",
+                        help="Resume training from existing checkpoint if it exists.")
+    parser.add_argument("--resume_start_epoch", type=int, default=0,
+                        help="Epoch to resume from when checkpoint lacks epoch metadata (old format).")
 
     # Architecture
     parser.add_argument("--encoder_num_layers", type=int, default=8)
     parser.add_argument("--decoder_num_layers", type=int, default=8)
     parser.add_argument("--encoder_num_heads", type=int, default=8)
     parser.add_argument("--decoder_num_heads", type=int, default=8)
+    parser.add_argument("--encoder_embed_dim", type=int, default=64)
+    parser.add_argument("--ffn_expansion_factor", type=float, default=4.0)
     parser.add_argument("--proj_dim", type=int, default=256)
     parser.add_argument("--num_seeds", type=int, default=32)
     parser.add_argument("--seed_dim", type=int, default=128)
     parser.add_argument("--model_embed_dim", type=int, default=8)
     parser.add_argument("--time_embedding_dim", type=int, default=32)
     parser.add_argument("--pos_embedding_dim", type=int, default=32)
+    parser.add_argument("--compile_mode", type=str, default="default",
+                        choices=["default", "reduce-overhead", "max-autotune", "max-autotune-no-cudagraphs"])
 
     # Optimizer
     parser.add_argument("--lr", type=float, default=1e-4)
@@ -249,13 +341,19 @@ def parse_args():
     parser.add_argument("--val_batch_size", type=int, default=500)
     parser.add_argument("--epochs", type=int, default=5000)
     parser.add_argument("--steps_per_epoch", type=int, default=100)
+    parser.add_argument("--val_epoch_interval", type=int, default=2500,
+                        help="Epochs between validation + checkpoint saves.")
+    parser.add_argument("--dry_run_epochs", type=int, default=None,
+                        help="If set, train for this many epochs only and record extrapolated time.")
 
     # Flow matching
     parser.add_argument("--fm_sample_steps", type=int, default=100)
     parser.add_argument("--fm_num_samples", type=int, default=100)
-
-    parser.add_argument("--dry_run_epochs", type=int, default=None,
-                        help="If set, train for this many epochs only and record extrapolated time.")
+    parser.add_argument("--fm_solver", type=str, default="euler",
+                        choices=["euler", "midpoint", "rk4"])
+    parser.add_argument("--val_samples_chunk_size", type=int, default=4,
+                        help="Samples per ODE loop during validation; peak GPU memory scales with "
+                             "batch_size * val_samples_chunk_size.")
 
     # Design space
     parser.add_argument("--max_num_regressors", type=int, default=5)
@@ -307,9 +405,12 @@ if __name__ == "__main__":
     val_config = {
         "fm_sample_steps": args.fm_sample_steps,
         "fm_num_samples": args.fm_num_samples,
+        "fm_solver": args.fm_solver,
+        "val_samples_chunk_size": args.val_samples_chunk_size,
         "batch_size": args.val_batch_size,
         "num_obs": args.val_num_obs,
         "model_family_config": model_family_config,
+        "device": device,
     }
 
     cogformer_config = {
@@ -318,6 +419,8 @@ if __name__ == "__main__":
         "decoder_num_layers": args.decoder_num_layers,
         "encoder_num_heads": args.encoder_num_heads,
         "decoder_num_heads": args.decoder_num_heads,
+        "encoder_embed_dim": args.encoder_embed_dim,
+        "ffn_expansion_factor": args.ffn_expansion_factor,
         "num_seeds": args.num_seeds,
         "seed_dim": args.seed_dim,
         "proj_dim": args.proj_dim,
@@ -332,53 +435,45 @@ if __name__ == "__main__":
     }
 
     logging.info(
-        f"Training ModelClass GPT: {train_config['epochs']} epochs, "
+        f"Training ModelClass CogFormer: {train_config['epochs']} epochs, "
         f"{train_config['steps_per_epoch']} steps/epoch, "
         f"batch_size={train_config['batch_size']}, device={device}"
     )
 
+    mask_randomizer_kwargs = {
+        "DDM": {"free_intrinsics": ["v", "a", "z", "tau"], "fixed_intrinsics": ["s_v", "s_tau"], "fixed_values": {}, "global_params": GLOBAL_PARAMS},
+        "RDM": {"free_intrinsics": ["v", "v_diff", "a", "tau"], "fixed_intrinsics": ["s_v", "s_tau"], "fixed_values": {}, "global_params": GLOBAL_PARAMS},
+        "CDM": {"free_intrinsics": ["v", "v_theta", "a", "tau"], "fixed_intrinsics": ["s_v", "s_tau"], "fixed_values": {}, "global_params": GLOBAL_PARAMS},
+    }
+
+    # Config dict used by trainer to reconstruct per-thread ModelClass instances
+    model_class_config = {
+        "families": {
+            "DDM": {"model_cls": DDM, "prior_fn": ddm_priors, "intrinsic_params": _MODELS_WITH_PI["ddm"]["intrinsic_params"], "mask_randomizer_kwargs": mask_randomizer_kwargs["DDM"]},
+            "RDM": {"model_cls": RDM, "prior_fn": rdm_priors, "intrinsic_params": _MODELS_WITH_PI["rdm"]["intrinsic_params"], "mask_randomizer_kwargs": mask_randomizer_kwargs["RDM"]},
+            "CDM": {"model_cls": CDM, "prior_fn": cdm_priors, "intrinsic_params": _MODELS_WITH_PI["cdm"]["intrinsic_params"], "mask_randomizer_kwargs": mask_randomizer_kwargs["CDM"]},
+        },
+        "link_funs": {"DDM": ddm_link_fun, "RDM": rdm_link_fun, "CDM": cdm_link_fun},
+    }
+
+    # Main ModelClass instance used for validation
     model_families = {
-        "DDM": ModelFamily(
-            model=DDM(), name="DDM",
-            prior=ddm_priors(),
-            intrinsic_params=_MODELS_WITH_PI["ddm"]["intrinsic_params"],
-            mask_randomizer_kwargs={
-                "free_intrinsics": ["v", "a", "z", "tau"],
-                "fixed_intrinsics": ["s_v", "s_tau"], "fixed_values": {},
-                "global_params": GLOBAL_PARAMS,
-            },
-        ),
-        "RDM": ModelFamily(
-            model=RDM(), name="RDM",
-            prior=rdm_priors(),
-            intrinsic_params=_MODELS_WITH_PI["rdm"]["intrinsic_params"],
-            mask_randomizer_kwargs={
-                "free_intrinsics": ["v", "v_diff", "a", "tau"],
-                "fixed_intrinsics": ["s_v", "s_tau"], "fixed_values": {},
-                "global_params": GLOBAL_PARAMS,
-            },
-        ),
-        "CDM": ModelFamily(
-            model=CDM(), name="CDM",
-            prior=cdm_priors(),
-            intrinsic_params=_MODELS_WITH_PI["cdm"]["intrinsic_params"],
-            mask_randomizer_kwargs={
-                "free_intrinsics": ["v", "v_theta", "a", "tau"],
-                "fixed_intrinsics": ["s_v", "s_tau"], "fixed_values": {},
-                "global_params": GLOBAL_PARAMS,
-            },
-        ),
+        name: ModelFamily(
+            model=cfg["model_cls"](), name=name,
+            prior=cfg["prior_fn"](),
+            intrinsic_params=cfg["intrinsic_params"],
+            mask_randomizer_kwargs=cfg["mask_randomizer_kwargs"],
+        )
+        for name, cfg in model_class_config["families"].items()
     }
-
-    link_funs = {
-        "DDM": ddm_link_fun(),
-        "RDM": rdm_link_fun(),
-        "CDM": cdm_link_fun(),
-    }
-
+    link_funs = {k: fn() for k, fn in model_class_config["link_funs"].items()}
     model_class = ModelClass(model_families=model_families, link_funs=link_funs)
+
     adapter = Adapter()
+
+    torch.set_float32_matmul_precision("high")
     cogformer = CogFormer(**cogformer_config).to(device).train()
+    cogformer = torch.compile(cogformer, dynamic=True, mode=args.compile_mode)
 
     if args.use_wandb:
         wandb.init(
@@ -409,8 +504,10 @@ if __name__ == "__main__":
     trainer = CogFormerTrainer(
         net=cogformer,
         model_class=model_class,
+        model_class_config=model_class_config,
         adapter=adapter,
         use_wandb=args.use_wandb,
+        val_epoch_interval=args.val_epoch_interval,
     )
 
     is_dry_run = args.dry_run_epochs is not None
@@ -425,6 +522,8 @@ if __name__ == "__main__":
             val_config=val_config,
             checkpoint_path=checkpoint_path,
             fig_path=fig_path,
+            resume=args.resume,
+            resume_start_epoch=args.resume_start_epoch,
         )
 
     if args.use_wandb:

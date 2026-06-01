@@ -24,7 +24,7 @@ MC_BATCH=64
 VAL_BATCH=200
 
 # ── Training ───────────────────────────────────────────────────────────────────
-EPOCHS=1
+EPOCHS=5000
 STEPS=100
 MF_BF_EPOCHS=1000
 LCA_FFI_EPOCHS=500
