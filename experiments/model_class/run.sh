@@ -53,8 +53,8 @@ python -m experiments.model_class.model_class_cf_validate \
     --batch_size 200 --num_samples 200 --num_obs "$OBS" \
     --samples_chunk_size 1
 
-# ── LBA validate ───────────────────────────────────────────────────────────────
-echo "=== ModelClass: LBA validate ==="
+# ── LBA validate (zero-shot) ────────────────────────────────────────────────────
+echo "=== ModelClass: LBA validate (zero-shot) ==="
 python -m experiments.generalization.model_class_lba_cf_validate \
     --checkpoint "$MC_CKPT" \
     --encoder_num_layers "$ENC_LAYERS" \
@@ -67,3 +67,47 @@ python -m experiments.generalization.model_class_lba_cf_validate \
     --model_embed_dim 8 \
     --batch_size 200 --num_samples 200 --num_obs "$OBS" \
     --samples_chunk_size 1
+
+# ── LBA fine-tune (Scheme 2 default; override with FINETUNE_SCHEME=1) ──────────
+echo "=== ModelClass: LBA fine-tune ==="
+FT_SCHEME="${FINETUNE_SCHEME:-2}"
+python -m experiments.model_class.model_class_cf_finetune_lba \
+    --pretrained_checkpoint "$MC_CKPT" \
+    --encoder_num_layers "$ENC_LAYERS" \
+    --decoder_num_layers "$DEC_LAYERS" \
+    --encoder_num_heads  "$HEADS" \
+    --decoder_num_heads  "$HEADS" \
+    --proj_dim      "$PROJ" \
+    --num_seeds     "$SEEDS" \
+    --seed_dim      "$MC_DIM" \
+    --model_embed_dim 8 \
+    --epochs "$LBA_FT_EPOCHS" \
+    --steps_per_epoch "$STEPS" \
+    --lr 1e-5 --dropout 0.05 --layer_dropout 0.05 \
+    --train_batch_size "$MC_BATCH" \
+    --val_batch_size 50 --val_samples_chunk_size 1 \
+    --finetune_scheme "$FT_SCHEME" \
+    "${WANDB[@]}"
+
+# ── LBA fine-tune validate ─────────────────────────────────────────────────────
+echo "=== ModelClass: LBA fine-tune validate ==="
+python -m experiments.model_class.model_class_lba_finetune_validate \
+    --checkpoint "$LBA_FT_CKPT" \
+    --encoder_num_layers "$ENC_LAYERS" \
+    --decoder_num_layers "$DEC_LAYERS" \
+    --encoder_num_heads  "$HEADS" \
+    --decoder_num_heads  "$HEADS" \
+    --proj_dim      "$PROJ" \
+    --num_seeds     "$SEEDS" \
+    --seed_dim      "$MC_DIM" \
+    --model_embed_dim 8 \
+    --batch_size 200 --num_samples 200 --num_obs "$OBS" \
+    --samples_chunk_size 1
+
+# ── LBA comparison (zero-shot vs. fine-tuned + forgetting) ─────────────────────
+echo "=== ModelClass: LBA comparison ==="
+python -m experiments.model_class.model_class_lba_compare \
+    --zero_shot_lba_pred_dir "./outputs/data/generalization/model_class_lba/cf/" \
+    --base_mc_pred_dir       "./outputs/data/model_class/" \
+    --finetuned_pred_dir     "./outputs/data/model_class/cf/lba_finetune/" \
+    --outdir                 "./outputs/figures/model_class/cf/lba_comparison/"

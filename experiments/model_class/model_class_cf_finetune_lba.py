@@ -36,7 +36,7 @@ from cogformer.diagnostics.plot.adaptive_recovery import adaptive_recovery
 from cogformer.utils.plot_utils import cogformer_fm_colors
 
 from ..configs import MODELS as _BASE_MODELS
-from ..utils import add_global_params, build_encoder_input_dim
+from ..utils import add_global_params, build_encoder_input_dim, chunked_sample
 from ..timing import RunTimer
 
 
@@ -65,7 +65,10 @@ def _load_pretrained(net: CogFormer, checkpoint_path: str, device: torch.device)
     LBA's new embedding (row 3) is initialised from RDM's (row 1) since they
     share the same intrinsic parameter space.
     """
-    state = torch.load(checkpoint_path, map_location=device, weights_only=True)
+    state = torch.load(checkpoint_path, map_location=device)
+    if isinstance(state, dict) and "state_dict" in state:
+        state = state["state_dict"]
+    state = {k.removeprefix("_orig_mod."): v for k, v in state.items()}
     if "model_embedding.weight" in state:
         w = state["model_embedding.weight"]           # (3, model_embed_dim)
         new_w = torch.empty(w.shape[0] + 1, w.shape[1], dtype=w.dtype)
@@ -77,30 +80,42 @@ def _load_pretrained(net: CogFormer, checkpoint_path: str, device: torch.device)
 
 
 class LBAFinetuner:
-    def __init__(self, net, model_class, lba_family, lba_link_fun, adapter, use_wandb=False):
+    def __init__(self, net, model_class, lba_family, lba_link_fun, adapter,
+                 finetune_scheme=2, use_wandb=False):
         self.net = net
         self.model_class = model_class
         self.lba_family = lba_family
         self.lba_link_fun = lba_link_fun
         self.adapter = adapter
+        self.finetune_scheme = finetune_scheme
         self.use_wandb = use_wandb
 
     def _sample_and_adapt(self, config):
-        samples = self.lba_family.batch_sample(
-            **config["model_family_config"],
-            **config["train_sample_config"],
-            batch_size=config["batch_size"],
-            flatten_param_outputs=True,
-            link_fun=self.lba_link_fun,
-        )
-        samples["param_matrices"], samples["param_masks"] = \
-            self.model_class.lift_to_global_space(
-                "LBA",
-                samples["param_matrices"],
-                samples["param_masks"],
+        if self.finetune_scheme == 1:
+            # Scheme 1: LBA data only — risks catastrophic forgetting.
+            samples = self.lba_family.batch_sample(
+                **config["model_family_config"],
+                **config["train_sample_config"],
+                batch_size=config["batch_size"],
+                flatten_param_outputs=True,
+                link_fun=self.lba_link_fun,
             )
-        samples["n_params"] = self.model_class.n_global_params
-        samples["model_ids"] = np.full(config["batch_size"], LBA_MODEL_ID, dtype=np.int64)
+            samples["param_matrices"], samples["param_masks"] = \
+                self.model_class.lift_to_global_space(
+                    "LBA",
+                    samples["param_matrices"],
+                    samples["param_masks"],
+                )
+            samples["n_params"] = self.model_class.n_global_params
+            samples["model_ids"] = np.full(config["batch_size"], LBA_MODEL_ID, dtype=np.int64)
+        else:
+            # Scheme 2 (default): joint DDM+RDM+CDM+LBA — preserves other families.
+            samples = self.model_class.batch_sample(
+                **config["model_family_config"],
+                **config["train_sample_config"],
+                batch_size=config["batch_size"],
+                flatten_param_outputs=True,
+            )
         return self.adapter.adapt(samples)
 
     def train(self, train_config, val_config, checkpoint_path="cogformer_lba_finetune.pt", fig_path="fig"):
@@ -133,7 +148,8 @@ class LBAFinetuner:
 
         checkpoint_dir = Path("./outputs/checkpoints/model_class/cf/lba_finetune/")
         checkpoint_dir.mkdir(parents=True, exist_ok=True)
-        torch.save(self.net.state_dict(), checkpoint_dir / checkpoint_path)
+        torch.save({"state_dict": self.net.state_dict(), "epoch": train_config["epochs"]},
+                   checkpoint_dir / checkpoint_path)
         logging.info(f"[saved] {checkpoint_dir / checkpoint_path}")
 
     def train_step(self, config, optimizer, scheduler):
@@ -162,6 +178,7 @@ class LBAFinetuner:
     @torch.no_grad()
     def val_step(self, config, global_step, fig_path):
         self.net.eval()
+        torch.cuda.empty_cache()
 
         model_family_config = config["model_family_config"]
         n_global = self.model_class.n_global_params
@@ -193,14 +210,11 @@ class LBAFinetuner:
 
         adapted = self.adapter.adapt(test_samples)
 
-        pred_set = self.net.sample(
-            adapted["input_data"],
-            adapted["param_indices"],
-            adapted["regressor_indices"],
-            adapted["param_masks"],
-            steps=config["fm_sample_steps"],
+        pred_set = chunked_sample(
+            self.net, adapted,
             num_samples=config["fm_num_samples"],
-            model_ids=adapted["model_ids"],
+            steps=config["fm_sample_steps"],
+            samples_chunk_size=config.get("val_samples_chunk_size"),
         )
 
         batch_size = config["batch_size"]
@@ -246,6 +260,10 @@ def parse_args():
     parser.add_argument("--pretrained_checkpoint", type=str, required=True,
                         help="Path to the pretrained DDM/RDM/CDM ModelClass checkpoint.")
     parser.add_argument("--use_wandb", action="store_true")
+    parser.add_argument("--finetune_scheme", type=int, default=2, choices=[1, 2],
+                        help="1=LBA-only, 2=full DDM+RDM+CDM+LBA joint (default).")
+    parser.add_argument("--val_samples_chunk_size", type=int, default=4,
+                        help="Samples per ODE chunk during validation.")
 
     # Architecture — must match the pretrained checkpoint exactly
     parser.add_argument("--encoder_num_layers", type=int, default=8)
@@ -328,11 +346,12 @@ if __name__ == "__main__":
     }
 
     val_config = {
-        "fm_sample_steps":   args.fm_sample_steps,
-        "fm_num_samples":    args.fm_num_samples,
-        "batch_size":        args.val_batch_size,
-        "num_obs":           args.val_num_obs,
-        "model_family_config": model_family_config,
+        "fm_sample_steps":       args.fm_sample_steps,
+        "fm_num_samples":        args.fm_num_samples,
+        "val_samples_chunk_size": args.val_samples_chunk_size,
+        "batch_size":            args.val_batch_size,
+        "num_obs":               args.val_num_obs,
+        "model_family_config":   model_family_config,
     }
 
     cogformer_config = {
@@ -411,6 +430,7 @@ if __name__ == "__main__":
 
     checkpoint_path = (
         f"cogformer_lba_finetune"
+        f"_s{args.finetune_scheme}"
         f"_l{cogformer_config['decoder_num_layers']}"
         f"_h{cogformer_config['decoder_num_heads']}"
         f"_p{cogformer_config['proj_dim']}"
@@ -442,6 +462,7 @@ if __name__ == "__main__":
         lba_family=lba_family,
         lba_link_fun=lba_lf,
         adapter=adapter,
+        finetune_scheme=args.finetune_scheme,
         use_wandb=args.use_wandb,
     )
 

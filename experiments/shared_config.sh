@@ -28,6 +28,7 @@ EPOCHS=5000
 STEPS=100
 MF_BF_EPOCHS=1000
 LCA_FFI_EPOCHS=500
+LBA_FT_EPOCHS=2000
 
 # ── Derived checkpoint paths ───────────────────────────────────────────────────
 DDM_MF_CKPT="./outputs/checkpoints/model_family/cf/ddm/cogformer_ddm_mf_l${DEC_LAYERS}_h${HEADS}_p${PROJ}_s${SEEDS}_d${DIM}_o${OBS}_b${BATCH}_e${EPOCHS}_t${STEPS}.pt"
@@ -37,3 +38,5 @@ RDM_MF_CKPT="./outputs/checkpoints/model_family/cf/rdm/cogformer_rdm_mf_l${DEC_L
 MC_CKPT="./outputs/checkpoints/model_class/cf/cogformer_model_class_fm_l${DEC_LAYERS}_h${HEADS}_p${PROJ}_s${SEEDS}_d${MC_DIM}_b${MC_BATCH}_e${EPOCHS}_t${STEPS}.pt"
 
 ENC_REP_CKPT="./outputs/checkpoints/encoder_rep/cf/cogformer_encoder_rep_fm_l${DEC_LAYERS}_h${HEADS}_p${PROJ}_s${SEEDS}_d${MC_DIM}_b${BATCH}_e${EPOCHS}_t${STEPS}.pt"
+
+LBA_FT_CKPT="./outputs/checkpoints/model_class/cf/lba_finetune/cogformer_lba_finetune_s2_l${DEC_LAYERS}_h${HEADS}_p${PROJ}_s${SEEDS}_d${MC_DIM}_b${MC_BATCH}_e${LBA_FT_EPOCHS}_t${STEPS}.pt"
