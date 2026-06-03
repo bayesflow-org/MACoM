@@ -125,7 +125,8 @@ def _condition_labels(subject_data, condition_col, label_map):
         return vals.round(1)
 
 
-def _simulate_subject(model, link_funs, intrinsic_params, design_matrix, posterior_sample):
+def _simulate_subject(model, link_funs, intrinsic_params, design_matrix, posterior_sample,
+                      no_contamination=False):
     """
     Forward-simulate one set of trials from one posterior sample.
 
@@ -136,9 +137,8 @@ def _simulate_subject(model, link_funs, intrinsic_params, design_matrix, posteri
     predictor = design_matrix @ posterior_sample  # (num_obs, n_params)
     params = {}
     for j, pname in enumerate(intrinsic_params):
-        if pname == "pi":
-            # pi is the intercept value (scalar from the first row's predictor at intercept col)
-            params[pname] = link_funs[pname](predictor[:, j])
+        if pname == "pi" and no_contamination:
+            params[pname] = np.zeros(predictor.shape[0], dtype=np.float32)
         else:
             params[pname] = link_funs[pname](predictor[:, j])
 
@@ -152,7 +152,7 @@ def _simulate_subject(model, link_funs, intrinsic_params, design_matrix, posteri
 
 
 def collect_ppc(
-    model_name, variant, n_ppc_samples, seed=0,
+    model_name, variant, n_ppc_samples, seed=0, no_contamination=False,
 ):
     rng = np.random.default_rng(seed)
     cfg = MODEL_REGISTRY[model_name]
@@ -226,7 +226,8 @@ def collect_ppc(
         # PPC: simulate for each sampled posterior draw
         for k, s_idx in enumerate(sample_indices):
             post_sample = post_subj[s_idx].reshape(n_rows, n_params)
-            sim = _simulate_subject(model, link_funs, intrinsic_params, dm, post_sample)
+            sim = _simulate_subject(model, link_funs, intrinsic_params, dm, post_sample,
+                                    no_contamination=no_contamination)
 
             for cond_name, cond_col, label_map in cfg["conditions"]:
                 cond_vals = _condition_labels(d, cond_col, label_map)
@@ -329,6 +330,8 @@ def parse_args():
                    help="Number of posterior samples to simulate from (subset for speed).")
     p.add_argument("--seed", type=int, default=0)
     p.add_argument("--outdir", type=str, default=None)
+    p.add_argument("--no_contamination", action="store_true",
+                   help="Set pi=0 during simulation to isolate distributional fit from lapse contamination.")
     return p.parse_args()
 
 
@@ -342,6 +345,7 @@ def main():
         variant=args.variant,
         n_ppc_samples=args.n_ppc_samples,
         seed=args.seed,
+        no_contamination=args.no_contamination,
     )
     plot_ppc(obs_pooled, ppc_pooled, conditions, args.model, args.variant, outdir)
     logging.info("Done.")
