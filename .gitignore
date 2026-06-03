@@ -216,7 +216,12 @@ __marimo__/
 .streamlit/secrets.toml
 
 # Results
-outputs/
+outputs/checkpoints/
+outputs/data/
+outputs/timing/
+outputs/logs/
+outputs/figures/*
+!outputs/figures/real_data
 
 .claude/
 .claude/settings.local.json
