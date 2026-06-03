@@ -9,7 +9,7 @@ Generates four figures saved under outputs/figures/real_data/:
 import numpy as np
 import matplotlib.pyplot as plt
 import matplotlib.patches as mpatches
-from scipy.stats import gaussian_kde
+from scipy.stats import gaussian_kde, wasserstein_distance
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -18,6 +18,19 @@ FIG_DIR = ROOT / "outputs/figures/real_data"
 
 MC_COLOR = "#4E2A84"
 MF_COLOR = "#007396"
+NA_COLOR = "#aaaaaa"
+
+PARAM_MATH = {
+    "v":       r"$v$",
+    "a":       r"$a$",
+    "z":       r"$z$",
+    "tau":     r"$\tau$",
+    "s_v":     r"$\sigma_v$",
+    "s_tau":   r"$\sigma_\tau$",
+    "pi":      r"$\pi$",
+    "v_theta": r"$v_\theta$",
+    "v_diff":  r"$\Delta v$",
+}
 
 # Active design rows: (row_index_in_181, row_label, active_param_names)
 # Row layout (max_num_regressors=5, max_num_categories=5, keep_intercept=True,
@@ -28,19 +41,19 @@ MF_COLOR = "#007396"
 #   cols 9-24:  u_1:u_2 block (width 16)
 
 DDM_DESIGN = [
-    (0,  "Intercept",       ["v", "a", "z", "tau", "s_v", "s_tau", "pi"]),
-    (1,  "Stim type (u1)",  ["v", "a", "z", "tau", "s_tau"]),
-    (5,  "Truth (u2)",      ["v", "a", "z", "tau", "s_tau"]),
-    (9,  "Stim x Truth",    ["v", "a", "z", "tau", "s_tau"]),
+    (0,  "Intercept",                   ["v", "a", "z", "tau", "s_v", "s_tau", "pi"]),
+    (1,  r"Stim type ($u_1$)",          ["v", "a", "z", "tau", "s_tau"]),
+    (5,  r"Truth ($u_2$)",              ["v", "a", "z", "tau", "s_tau"]),
+    (9,  r"$u_1 \times u_2$",           ["v", "a", "z", "tau", "s_tau"]),
 ]
 
 CDM_DESIGN = [
-    (0,  "Intercept",         ["v", "v_theta", "a", "tau", "s_v", "s_tau", "pi"]),
-    (1,  "Speed (u1)",        ["v", "a", "tau"]),
-    (5,  "Difficulty d2 (u2)",["v", "a", "tau"]),
-    (6,  "Difficulty d3 (u2)",["v", "a", "tau"]),
-    (9,  "Speed x d2",        ["v", "a", "tau"]),
-    (10, "Speed x d3",        ["v", "a", "tau"]),
+    (0,  "Intercept",                      ["v", "v_theta", "a", "tau", "s_v", "s_tau", "pi"]),
+    (1,  r"Speed ($u_1$)",                 ["v", "a", "tau"]),
+    (5,  r"Difficulty $d_2$ ($u_2$)",      ["v", "a", "tau"]),
+    (6,  r"Difficulty $d_3$ ($u_2$)",      ["v", "a", "tau"]),
+    (9,  r"Speed $\times$ $d_2$",          ["v", "a", "tau"]),
+    (10, r"Speed $\times$ $d_3$",          ["v", "a", "tau"]),
 ]
 
 
@@ -100,29 +113,61 @@ def posterior_summary_figure(
 
         for j, pname in enumerate(all_params):
             ax = axes[i, j]
+            col_title = PARAM_MATH.get(pname, f"${pname}$")
+
             if pname not in param_names:
-                ax.set_visible(False)
+                ax.set_facecolor(NA_COLOR)
+                ax.patch.set_alpha(0.08)
+                ax.set_xticks([])
+                ax.set_yticks([])
+                for sp in ax.spines.values():
+                    sp.set_visible(False)
+                ax.text(
+                    0.5, 0.5, "N/A",
+                    transform=ax.transAxes,
+                    ha="center", va="center",
+                    fontsize=11, weight="bold",
+                    alpha=0.5, color=NA_COLOR,
+                )
+                if i == 0:
+                    ax.set_title(col_title, fontsize=9)
                 continue
 
-            _kde_plot(ax, mc_med[pname], MC_COLOR, "mc")
-            _kde_plot(ax, mf_med[pname], MF_COLOR, "mf")
+            mc_vals = mc_med[pname]
+            mf_vals = mf_med[pname]
 
+            _kde_plot(ax, mc_vals, MC_COLOR, "mc")
+            _kde_plot(ax, mf_vals, MF_COLOR, "mf")
+
+            ax.axvline(np.mean(mc_vals), color=MC_COLOR, lw=1.0, ls="--", alpha=0.8)
+            ax.axvline(np.mean(mf_vals), color=MF_COLOR, lw=1.0, ls="--", alpha=0.8)
             ax.axvline(0, color="gray", lw=0.6, ls="--", alpha=0.4)
+
+            wd = wasserstein_distance(mc_vals, mf_vals)
+            ax.text(0.04, 0.96, f"W={wd:.3f}",
+                    transform=ax.transAxes, ha="left", va="top",
+                    fontsize=6.5, color="black")
+
             ax.set_yticks([])
             ax.spines[["top", "right", "left"]].set_visible(False)
             ax.tick_params(axis="x", labelsize=7)
 
             if i == 0:
-                ax.set_title(pname, fontsize=9)
+                ax.set_title(col_title, fontsize=9)
             if j == 0:
                 ax.set_ylabel(row_label, fontsize=8)
 
     mc_patch = mpatches.Patch(color=MC_COLOR, alpha=0.7, label="ModelClass (mc)")
     mf_patch = mpatches.Patch(color=MF_COLOR, alpha=0.7, label="ModelFamily (mf)")
-    axes[0, 0].legend(handles=[mc_patch, mf_patch], fontsize=7, loc="upper right")
+    fig.legend(
+        handles=[mc_patch, mf_patch],
+        fontsize=8, loc="lower center",
+        ncol=2, bbox_to_anchor=(0.5, 0),
+        frameon=False,
+    )
 
     fig.suptitle(title, fontsize=11)
-    fig.tight_layout()
+    fig.tight_layout(rect=[0, 0.05, 1, 1])
     fig.savefig(savepath, bbox_inches="tight", dpi=150)
     plt.close(fig)
     print(f"Saved: {savepath}")
@@ -162,7 +207,8 @@ def mc_vs_mf_scatter(
         ax.set_ylim(lims)
 
         r = np.corrcoef(mc_means, mf_means)[0, 1]
-        ax.set_title(f"{pname}\nr={r:.2f}", fontsize=9)
+        col_title = PARAM_MATH.get(pname, f"${pname}$")
+        ax.set_title(f"{col_title}\nr={r:.2f}", fontsize=9)
         ax.set_xlabel("mc", fontsize=8)
         ax.set_ylabel("mf", fontsize=8)
         ax.tick_params(labelsize=7)
