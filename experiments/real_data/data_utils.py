@@ -194,6 +194,36 @@ def load_ddm_data(csv_path: str) -> tuple[dict, list[int]]:
     return data, sorted(data.keys())
 
 
+def load_rdm_data(csv_path: str) -> tuple[dict, list[int]]:
+    """
+    Load RDM CSV data (3-alternative Stroop, 149 subjects).
+
+    Regressors:
+      u_1     : congruent, effect coded ±0.5  (congruent=+0.5, incongruent=-0.5)
+      u_2     : session,   effect coded ±0.5  (session 0 → -0.5, session 1 → +0.5)
+      u_1:u_2 : congruent × session           (continuous × continuous → 1 column)
+    """
+    import pandas as pd
+    df = pd.read_csv(csv_path)
+    counts = df.groupby("id")["id"].transform("size")
+    df = df[counts >= 100].copy()
+
+    data = {}
+    for sid in sorted(df["id"].unique()):
+        sdf = df[df["id"] == sid].reset_index(drop=True)
+        congruent   = (sdf["congruent"].values * 1.0 - 0.5).astype(np.float32)
+        session     = (sdf["session"].values * 1.0 - 0.5).astype(np.float32)
+        interaction = (congruent * session).astype(np.float32)
+        data[int(sid)] = {
+            "rts":     sdf["rt"].values.astype(np.float32),
+            "choices": sdf["resp"].values.astype(np.float32),
+            "u_1":     congruent,
+            "u_2":     session,
+            "u_1:u_2": interaction,
+        }
+    return data, sorted(data.keys())
+
+
 def load_cdm_data(csv_path: str) -> tuple[dict, list[int]]:
     """
     Load CDM CSV data (Kvam, 2019).

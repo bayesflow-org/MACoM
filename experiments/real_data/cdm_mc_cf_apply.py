@@ -21,7 +21,7 @@ from cogformer.simulator.benchmarks.ssms.priors import ddm_priors, rdm_priors, c
 from cogformer.simulator.benchmarks.ssms.link_funs import ddm_link_fun, rdm_link_fun, cdm_link_fun
 
 from ..configs import MODELS as _BASE_MODELS, GLOBAL_PARAMS, GLOBAL_VARIABLE_NAMES
-from ..utils import add_global_params, build_encoder_input_dim
+from ..utils import add_global_params, build_encoder_input_dim, chunked_sample
 from .data_utils import (
     load_cdm_data,
     build_real_design_matrix,
@@ -44,6 +44,7 @@ def parse_args():
     # Inference
     p.add_argument("--num_sample_steps", type=int, default=50)
     p.add_argument("--num_samples", type=int, default=500)
+    p.add_argument("--samples_chunk_size", type=int, default=1)
     p.add_argument("--solver", type=str, default="midpoint", choices=["euler", "midpoint", "rk4"])
 
     # Architecture (must match training)
@@ -149,6 +150,7 @@ def main():
     state = torch.load(Path(args.checkpoint), map_location=device)
     if isinstance(state, dict) and "state_dict" in state:
         state = state["state_dict"]
+    state = {k.removeprefix("_orig_mod."): v for k, v in state.items()}
     cogformer.load_state_dict(state)
     cogformer.eval()
 
@@ -198,15 +200,12 @@ def main():
 
         adapted = adapter.adapt(batch, device=device)
 
-        pred = cogformer.sample(
-            adapted["input_data"],
-            adapted["param_indices"],
-            adapted["regressor_indices"],
-            adapted["param_masks"],
-            steps=args.num_sample_steps,
+        pred = chunked_sample(
+            cogformer, adapted,
             num_samples=args.num_samples,
+            steps=args.num_sample_steps,
             solver=args.solver,
-            model_ids=adapted["model_ids"],
+            samples_chunk_size=args.samples_chunk_size,
         )
         # pred: (1, num_samples, n_rows * n_global_params) → (num_samples, n_rows, n_global_params)
         pred = pred.reshape(args.num_samples, n_rows, n_global_params)
