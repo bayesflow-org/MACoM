@@ -58,19 +58,21 @@ CHECKPOINT_DIR = "./outputs/checkpoints/model_class/cf/"
 
 
 class CogFormerTrainer:
-    def __init__(self, net, model_class, model_class_config, adapter, use_wandb=False, val_epoch_interval=2000):
+    def __init__(self, net, model_class, model_class_config, adapter, use_wandb=False, val_epoch_interval=2000,
+                 num_sim_workers=3):
         self.net = net
         self.model_class = model_class      # main instance used in val_step
         self.model_class_config = model_class_config  # config dict for per-thread reconstruction
         self.adapter = adapter
         self.use_wandb = use_wandb
         self.val_epoch_interval = val_epoch_interval
+        self.num_sim_workers = num_sim_workers
         self._local = threading.local()
 
     def _get_sim_mc(self):
-        """Return a per-thread ModelClass so 3 outer workers don't contend on one instance."""
+        """Return a per-thread ModelClass so outer workers don't contend on one instance."""
         if not hasattr(self._local, "mc"):
-            n_outer = 3
+            n_outer = self.num_sim_workers
             n_inner = max(1, (os.cpu_count() or 1) // n_outer)
             families = {}
             for name, cfg in self.model_class_config["families"].items():
@@ -152,9 +154,10 @@ class CogFormerTrainer:
 
         global_step = start_epoch * train_config["steps_per_epoch"]
 
-        with ThreadPoolExecutor(max_workers=3) as executor:
+        n_workers = self.num_sim_workers
+        with ThreadPoolExecutor(max_workers=n_workers) as executor:
             queue = deque(
-                executor.submit(self._simulate_and_adapt, train_config) for _ in range(3)
+                executor.submit(self._simulate_and_adapt, train_config) for _ in range(n_workers)
             )
 
             for epoch in range(start_epoch, train_config["epochs"]):
@@ -327,6 +330,8 @@ def parse_args():
     parser.add_argument("--pos_embedding_dim", type=int, default=32)
     parser.add_argument("--compile_mode", type=str, default="default",
                         choices=["default", "reduce-overhead", "max-autotune", "max-autotune-no-cudagraphs"])
+    parser.add_argument("--num_sim_workers", type=int, default=3,
+                        help="Number of parallel CPU simulation workers (each gets cpu_count//num_sim_workers inner workers).")
 
     # Optimizer
     parser.add_argument("--lr", type=float, default=1e-4)
@@ -368,6 +373,7 @@ if __name__ == "__main__":
     args = parse_args()
 
     logging.basicConfig(level=logging.INFO)
+    torch.backends.cuda.matmul.allow_tf32 = True
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
     max_num_regressors = args.max_num_regressors
@@ -508,6 +514,7 @@ if __name__ == "__main__":
         adapter=adapter,
         use_wandb=args.use_wandb,
         val_epoch_interval=args.val_epoch_interval,
+        num_sim_workers=args.num_sim_workers,
     )
 
     is_dry_run = args.dry_run_epochs is not None
