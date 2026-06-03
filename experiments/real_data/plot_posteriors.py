@@ -1,10 +1,10 @@
 """Diagnostic plots for real-data CogFormer posteriors.
 
 Generates four figures saved under outputs/figures/real_data/:
-  ddm_posteriors.png         — KDE grid of per-subject posterior medians (mc vs mf)
-  cdm_posteriors.png         — same for CDM
-  ddm_mc_vs_mf_scatter.png   — intercept-row mc vs mf posterior means per subject
-  cdm_mc_vs_mf_scatter.png   — same for CDM
+  ddm_posteriors.pdf         — KDE grid of per-subject posterior medians (mc vs mf)
+  cdm_posteriors.pdf         — same for CDM
+  ddm_mc_vs_mf_scatter.pdf   — intercept-row mc vs mf posterior means per subject
+  cdm_mc_vs_mf_scatter.pdf   — same for CDM
 """
 import numpy as np
 import matplotlib.pyplot as plt
@@ -168,7 +168,7 @@ def posterior_summary_figure(
 
     fig.suptitle(title, fontsize=11)
     fig.tight_layout(rect=[0, 0.05, 1, 1])
-    fig.savefig(savepath, bbox_inches="tight", dpi=150)
+    fig.savefig(savepath, bbox_inches="tight")
     plt.close(fig)
     print(f"Saved: {savepath}")
 
@@ -217,7 +217,7 @@ def mc_vs_mf_scatter(
 
     fig.suptitle(title, fontsize=10)
     fig.tight_layout()
-    fig.savefig(savepath, bbox_inches="tight", dpi=150)
+    fig.savefig(savepath, bbox_inches="tight")
     plt.close(fig)
     print(f"Saved: {savepath}")
 
@@ -233,7 +233,7 @@ def main():
         mc_param_key="global_param_names",
         mf_param_key="intrinsic_params",
         title="DDM Real Data Posteriors (mc vs mf)  —  Stump et al., 2026",
-        savepath=FIG_DIR / "ddm_posteriors.png",
+        savepath=FIG_DIR / "ddm_posteriors.pdf",
     )
 
     # CDM summary
@@ -244,7 +244,7 @@ def main():
         mc_param_key="global_param_names",
         mf_param_key="intrinsic_params",
         title="CDM Real Data Posteriors (mc vs mf)  —  Kvam et al., 2019",
-        savepath=FIG_DIR / "cdm_posteriors.png",
+        savepath=FIG_DIR / "cdm_posteriors.pdf",
     )
 
     # DDM mc vs mf scatter (intercept row)
@@ -255,7 +255,7 @@ def main():
         mf_param_key="intrinsic_params",
         intercept_param_names=["v", "a", "z", "tau", "s_v", "s_tau", "pi"],
         title="DDM Intercept: mc vs mf posterior means per subject",
-        savepath=FIG_DIR / "ddm_mc_vs_mf_scatter.png",
+        savepath=FIG_DIR / "ddm_mc_vs_mf_scatter.pdf",
     )
 
     # CDM mc vs mf scatter (intercept row)
@@ -266,7 +266,7 @@ def main():
         mf_param_key="intrinsic_params",
         intercept_param_names=["v", "v_theta", "a", "tau", "s_v", "s_tau", "pi"],
         title="CDM Intercept: mc vs mf posterior means per subject",
-        savepath=FIG_DIR / "cdm_mc_vs_mf_scatter.png",
+        savepath=FIG_DIR / "cdm_mc_vs_mf_scatter.pdf",
     )
 
 
