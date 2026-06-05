@@ -7,8 +7,6 @@ except Exception:
     wandb = None
 import logging
 import argparse
-from collections import deque
-from concurrent.futures import ThreadPoolExecutor
 
 from pathlib import Path
 from tqdm.auto import tqdm
@@ -26,7 +24,9 @@ from cogformer.diagnostics.plot.adaptive_recovery import adaptive_recovery
 from cogformer.utils.plot_utils import cogformer_fm_colors
 
 from ..configs import MODELS as _BASE_MODELS, GLOBAL_PARAMS, GLOBAL_VARIABLE_NAMES
-from ..utils import add_global_params, strip_global_params, build_encoder_input_dim, chunked_sample
+from ..utils import (add_global_params, strip_global_params, build_encoder_input_dim,
+                     chunked_sample, PrefetchQueue, train_step,
+                     add_architecture_args, add_training_args)
 from ..timing import RunTimer
 
 
@@ -146,14 +146,7 @@ class CogFormerTrainer:
         val_interval = self.model_cfg["val_epoch_interval"]
         device = train_config["device"]
 
-        # Three workers keep 3 simulations in flight at all times. While the GPU
-        # processes batch i, batches i+1..i+3 simulate in parallel, so the GPU
-        # never stalls waiting for data after the initial warm-up.
-        with ThreadPoolExecutor(max_workers=3) as executor:
-            queue = deque(
-                executor.submit(self._simulate_and_adapt, train_config) for _ in range(3)
-            )
-
+        with PrefetchQueue(lambda: self._simulate_and_adapt(train_config)) as prefetch:
             for epoch in range(train_config["epochs"]):
                 pbar = tqdm(
                     total=train_config["steps_per_epoch"],
@@ -161,21 +154,12 @@ class CogFormerTrainer:
                     miniters=100,
                 )
                 for _ in range(train_config["steps_per_epoch"]):
-                    adapted_cpu = queue.popleft().result()
-                    queue.append(executor.submit(self._simulate_and_adapt, train_config))
-                    # Non-blocking DMA to GPU. Source tensors are pinned, so this is a
-                    # true async copy queued in the compute stream. CUDA stream ordering
-                    # ensures the copy completes before the first kernel that reads the data.
+                    adapted_cpu = prefetch.next()
                     adapted = {
                         k: v.to(device, non_blocking=True) if isinstance(v, torch.Tensor) else v
                         for k, v in adapted_cpu.items()
                     }
-                    loss, current_lr = self._train_step_from_adapted(
-                        adapted=adapted,
-                        config=train_config,
-                        optimizer=optimizer,
-                        scheduler=scheduler,
-                    )
+                    loss, current_lr = train_step(self.net, adapted, train_config, optimizer, scheduler)
                     if self.use_wandb:
                         wandb.log(
                             {"train/loss": loss, "opt/lr": current_lr, "epoch": epoch + 1},
@@ -229,24 +213,6 @@ class CogFormerTrainer:
         adapted = self.adapter.adapt(samples, device="cpu")
         return {k: v.pin_memory() if isinstance(v, torch.Tensor) else v
                 for k, v in adapted.items()}
-
-    def _train_step_from_adapted(self, adapted, config, optimizer, scheduler):
-        optimizer.zero_grad(set_to_none=True)
-        device_type = config["device"].type
-        with torch.autocast(device_type=device_type, dtype=torch.bfloat16, enabled=(device_type == "cuda")):
-            pred_velocity, target_velocity = self.net(
-                adapted["param_matrices"][..., None],
-                adapted["input_data"],
-                adapted["param_indices"],
-                adapted["regressor_indices"],
-                adapted["param_masks"],
-            )
-            L = self.net.compute_loss(pred_velocity, target_velocity, adapted["param_masks"])
-        L.backward()
-        if config["gradient_clip_norm"] is not None:
-            torch.nn.utils.clip_grad_norm_(self.net.parameters(), config["gradient_clip_norm"])
-        optimizer.step()
-        return L.detach().item(), scheduler.get_last_lr()[0]
 
     @torch.no_grad()
     def val_step(self, config, global_step, fig_path):
@@ -307,10 +273,6 @@ class CogFormerTrainer:
 
         self.net.train()
 
-    @staticmethod
-    def finish():
-        wandb.finish()
-
 
 def parse_args():
     parser = argparse.ArgumentParser()
@@ -318,37 +280,15 @@ def parse_args():
                         help="Benchmark model to train (ddm, cdm, rdm)")
     parser.add_argument("--debug", action="store_true")
     parser.add_argument("--use_wandb", action="store_true")
-    # Network dimensions
-    parser.add_argument("--encoder_num_layers", type=int, default=8)
-    parser.add_argument("--decoder_num_layers", type=int, default=8)
-    parser.add_argument("--encoder_num_heads", type=int, default=8)
-    parser.add_argument("--decoder_num_heads", type=int, default=8)
+    add_architecture_args(parser)
     parser.add_argument("--encoder_embed_dim", type=int, default=64)
-    parser.add_argument("--proj_dim", type=int, default=256)
     parser.add_argument("--ffn_expansion_factor", type=float, default=4.0,
-                        help="FFN intermediate width multiplier. Use 6.0 with SwiGLU to get a "
-                             "true 4:1 intermediate/model ratio (parameter-equivalent to 4x standard FFN).")
-    parser.add_argument("--num_seeds", type=int, default=32)
+                        help="FFN intermediate width multiplier.")
     parser.add_argument("--seed_dim", type=int, default=64)
-    parser.add_argument("--time_embedding_dim", type=int, default=32)
-    parser.add_argument("--pos_embedding_dim", type=int, default=32)
-    parser.add_argument("--compile_mode", type=str, default="default",
-                        choices=["default", "reduce-overhead", "max-autotune", "max-autotune-no-cudagraphs"],
-                        help="torch.compile mode. 'max-autotune' finds optimal Triton kernel configs "
-                             "but adds ~2-5 min to the first epoch.")
-    # Hyperparameters
-    parser.add_argument("--lr", type=float, default=1e-4)
-    parser.add_argument("--dropout", type=float, default=0.05)
-    parser.add_argument("--layer_dropout", type=float, default=0.05)
-    # Training
+    add_training_args(parser)
     parser.add_argument("--num_obs", type=int, default=500)
-    parser.add_argument("--min_num_obs", type=int, default=200)
     parser.add_argument("--max_num_obs", type=int, default=1000)
-    parser.add_argument("--train_batch_size", type=int, default=64)
     parser.add_argument("--val_batch_size", type=int, default=50)
-    parser.add_argument("--epochs", type=int, default=5000)
-    parser.add_argument("--steps_per_epoch", type=int, default=100)
-    # Inference
     parser.add_argument("--fm_sample_steps", type=int, default=100)
     parser.add_argument("--fm_num_samples", type=int, default=200)
     parser.add_argument("--fm_solver", type=str, default="euler",
@@ -363,13 +303,6 @@ def parse_args():
                              "in estimation. Use --no-estimate-global-params to disable.")
     parser.add_argument("--val_epoch_interval", type=int, default=None,
                         help="Override the model-default validation interval (epochs between val steps).")
-    parser.add_argument("--dry_run_epochs", type=int, default=None,
-                        help="If set, train for this many epochs only and record extrapolated time.")
-    # Design space
-    parser.add_argument("--max_num_regressors", type=int, default=5)
-    parser.add_argument("--max_num_categories", type=int, default=5)
-    parser.add_argument("--keep_intercept", action="store_true", default=True)
-    parser.add_argument("--add_interaction", action="store_true", default=True)
     return parser.parse_args()
 
 
@@ -541,4 +474,5 @@ if __name__ == "__main__":
             checkpoint_path=checkpoint_path,
             fig_path=fig_path,
         )
-    trainer.finish()
+    if use_wandb:
+        wandb.finish()

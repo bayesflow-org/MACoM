@@ -7,8 +7,6 @@ except Exception:
     wandb = None
 import logging
 import argparse
-from collections import deque
-from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from tqdm.auto import tqdm
 from torch.optim import AdamW
@@ -30,7 +28,9 @@ from cogformer.diagnostics.plot.adaptive_recovery import adaptive_recovery
 from cogformer.utils.plot_utils import cogformer_fm_colors
 
 from ..configs import MODELS as _BASE_MODELS
-from ..utils import add_global_params, build_encoder_input_dim, chunked_sample, infer_free_fixed_intrinsics
+from ..utils import (add_global_params, build_encoder_input_dim, chunked_sample,
+                     infer_free_fixed_intrinsics, PrefetchQueue, train_step,
+                     add_architecture_args, add_training_args)
 from ..timing import RunTimer
 
 
@@ -100,27 +100,65 @@ class CogFormerTrainer:
         return {k: v.pin_memory() if isinstance(v, torch.Tensor) else v
                 for k, v in adapted.items()}
 
-    def _train_step_from_adapted(self, adapted, config, optimizer, scheduler):
-        optimizer.zero_grad(set_to_none=True)
-        device_type = config["device"].type
-        with torch.autocast(device_type=device_type, dtype=torch.bfloat16, enabled=(device_type == "cuda")):
-            pred_velocity, target_velocity = self.net(
-                adapted["param_matrices"][..., None],
-                adapted["input_data"],
-                adapted["param_indices"],
-                adapted["regressor_indices"],
-                adapted["param_masks"],
-                model_ids=adapted["model_ids"],
+    def _prepare_val_data(self, val_config):
+        """Pre-generate fixed validation datasets for all model families once."""
+        device = val_config["device"]
+        model_family_config = val_config["model_family_config"]
+        n_global_params = self.model_class.n_global_params
+        self._val_data = {}
+        for model_name, model_cfg in MODEL_CONFIGS.items():
+            mf = self.model_class.model_families[model_name]
+            model_id = self.model_class.model_index[model_name]
+            link_fun = self.model_class.link_funs[model_name]
+            design_config = model_cfg["val_design_config"]
+            intrinsic_params = model_cfg["intrinsic_params"]
+
+            free, fixed, fixed_vals = infer_free_fixed_intrinsics(
+                design_config, intrinsic_params, model_cfg["default_fixed_values"]
             )
-            L = self.net.compute_loss(pred_velocity, target_velocity, adapted["param_masks"])
-        L.backward()
-        if config["gradient_clip_norm"] is not None:
-            torch.nn.utils.clip_grad_norm_(self.net.parameters(), config["gradient_clip_norm"])
-        optimizer.step()
-        return L.detach().item(), scheduler.get_last_lr()[0]
+            mask_kwargs = {"free_intrinsics": free, "fixed_intrinsics": fixed, "fixed_values": fixed_vals}
+
+            test_samples = mf.batch_sample(
+                design_config=design_config,
+                batch_size=val_config["batch_size"],
+                num_obs=val_config["num_obs"],
+                max_num_regressors=model_family_config["max_num_regressors"],
+                max_num_categories=model_family_config["max_num_categories"],
+                keep_intercept=model_family_config["keep_intercept"],
+                mask_randomizer_kwargs=mask_kwargs,
+                flatten_param_outputs=True,
+                fixed_config=True,
+                link_fun=link_fun,
+            )
+            test_samples["model_ids"] = np.full(val_config["batch_size"], model_id, dtype=np.int64)
+            test_samples["param_matrices"], test_samples["param_masks"] = \
+                self.model_class.lift_to_global_space(
+                    model_name, test_samples["param_matrices"], test_samples["param_masks"])
+            test_samples["n_params"] = n_global_params
+            adapted = self.adapter.adapt(test_samples, device=device)
+
+            global_indices = self.model_class.local_to_global[model_name]
+            batch_size = val_config["batch_size"]
+            true_flat = adapted["param_matrices"].detach().cpu().numpy()
+            n_rows = true_flat.shape[1] // n_global_params
+            true_set = true_flat.reshape(batch_size, n_rows, n_global_params)[:, :, global_indices]
+            params_mask = adapted["param_masks"].detach().cpu().numpy()
+            params_mask = params_mask.reshape(batch_size, n_rows, n_global_params)[0][:, global_indices]
+
+            self._val_data[model_name] = {
+                "adapted": adapted,
+                "true_set": true_set,
+                "params_mask": params_mask,
+                "n_rows": n_rows,
+                "global_indices": global_indices,
+                "design_config": design_config,
+                "intrinsic_params": intrinsic_params,
+                "variable_names": model_cfg["variable_names"],
+            }
 
     def train(self, train_config, val_config, checkpoint_path="cogformer_model_class_fm.pt",
               fig_path="fig", resume=False, resume_start_epoch=0):
+        self._prepare_val_data(val_config)
         checkpoint_dir = Path(CHECKPOINT_DIR)
         full_ckpt_path = checkpoint_dir / checkpoint_path
         device = train_config["device"]
@@ -154,12 +192,8 @@ class CogFormerTrainer:
 
         global_step = start_epoch * train_config["steps_per_epoch"]
 
-        n_workers = self.num_sim_workers
-        with ThreadPoolExecutor(max_workers=n_workers) as executor:
-            queue = deque(
-                executor.submit(self._simulate_and_adapt, train_config) for _ in range(n_workers)
-            )
-
+        with PrefetchQueue(lambda: self._simulate_and_adapt(train_config),
+                           n_workers=self.num_sim_workers) as prefetch:
             for epoch in range(start_epoch, train_config["epochs"]):
                 pbar = tqdm(
                     total=train_config["steps_per_epoch"],
@@ -167,18 +201,12 @@ class CogFormerTrainer:
                     miniters=100,
                 )
                 for _ in range(train_config["steps_per_epoch"]):
-                    adapted_cpu = queue.popleft().result()
-                    queue.append(executor.submit(self._simulate_and_adapt, train_config))
+                    adapted_cpu = prefetch.next()
                     adapted = {
                         k: v.to(device, non_blocking=True) if isinstance(v, torch.Tensor) else v
                         for k, v in adapted_cpu.items()
                     }
-                    loss, current_lr = self._train_step_from_adapted(
-                        adapted=adapted,
-                        config=train_config,
-                        optimizer=optimizer,
-                        scheduler=scheduler,
-                    )
+                    loss, current_lr = train_step(self.net, adapted, train_config, optimizer, scheduler)
                     if self.use_wandb:
                         wandb.log(
                             {"train/loss": loss, "opt/lr": current_lr, "epoch": epoch + 1},
@@ -215,49 +243,22 @@ class CogFormerTrainer:
         self.net.eval()
         torch.cuda.empty_cache()
 
-        model_family_config = config["model_family_config"]
         n_global_params = self.model_class.n_global_params
         colors = cogformer_fm_colors()
-
         figures_dir = Path("./outputs/figures/model_class/cf/recovery")
         figures_dir.mkdir(parents=True, exist_ok=True)
 
-        for model_name, model_cfg in MODEL_CONFIGS.items():
-            mf = self.model_class.model_families[model_name]
-            model_id = self.model_class.model_index[model_name]
-            link_fun = self.model_class.link_funs[model_name]
+        for model_name, val in self._val_data.items():
+            adapted       = val["adapted"]
+            true_set      = val["true_set"]
+            params_mask   = val["params_mask"]
+            n_rows        = val["n_rows"]
+            global_indices = val["global_indices"]
+            design_config  = val["design_config"]
+            intrinsic_params = val["intrinsic_params"]
+            variable_names   = val["variable_names"]
 
-            intrinsic_params = model_cfg["intrinsic_params"]
-            variable_names = model_cfg["variable_names"]
-            design_config = model_cfg["val_design_config"]
-
-            free, fixed, fixed_vals = infer_free_fixed_intrinsics(
-                design_config, intrinsic_params, model_cfg["default_fixed_values"]
-            )
-            mask_kwargs = {"free_intrinsics": free, "fixed_intrinsics": fixed, "fixed_values": fixed_vals}
-
-            test_samples = mf.batch_sample(
-                design_config=design_config,
-                batch_size=config["batch_size"],
-                num_obs=config["num_obs"],
-                max_num_regressors=model_family_config["max_num_regressors"],
-                max_num_categories=model_family_config["max_num_categories"],
-                keep_intercept=model_family_config["keep_intercept"],
-                mask_randomizer_kwargs=mask_kwargs,
-                flatten_param_outputs=True,
-                fixed_config=True,
-                link_fun=link_fun,
-            )
-            test_samples["model_ids"] = np.full(config["batch_size"], model_id, dtype=np.int64)
-            test_samples["param_matrices"], test_samples["param_masks"] = \
-                self.model_class.lift_to_global_space(
-                    model_name,
-                    test_samples["param_matrices"],
-                    test_samples["param_masks"],
-                )
-            test_samples["n_params"] = n_global_params
-
-            adapted = self.adapter.adapt(test_samples, device=config["device"])
+            batch_size = config["batch_size"]
 
             pred_set = chunked_sample(
                 self.net, adapted,
@@ -266,24 +267,16 @@ class CogFormerTrainer:
                 solver=config.get("fm_solver", "euler"),
                 samples_chunk_size=config.get("val_samples_chunk_size"),
             )
-
-            batch_size = config["batch_size"]
-            global_indices = self.model_class.local_to_global[model_name]
-
-            true_set = adapted["param_matrices"].detach().cpu().numpy()
-            n_rows = true_set.shape[1] // n_global_params
-            true_set = true_set.reshape(batch_size, n_rows, n_global_params)[:, :, global_indices]
-            pred_set = pred_set.reshape(batch_size, config["fm_num_samples"], n_rows, n_global_params)[:, :, :, global_indices]
-
-            params_mask = adapted["param_masks"].detach().cpu().numpy()
-            params_mask = params_mask.reshape(batch_size, n_rows, n_global_params)[0][:, global_indices]
+            pred_set = pred_set.reshape(
+                batch_size, config["fm_num_samples"], n_rows, n_global_params
+            )[:, :, :, global_indices]
 
             recovery_fig = adaptive_recovery(
                 true=true_set,
                 pred=pred_set,
                 design_config=design_config,
                 intrinsic_params=intrinsic_params,
-                max_num_categories=model_family_config["max_num_categories"],
+                max_num_categories=config["model_family_config"]["max_num_categories"],
                 parameter_mask=params_mask,
                 variable_names=variable_names,
                 intercept_color=colors["intercept"],
@@ -302,10 +295,6 @@ class CogFormerTrainer:
 
         self.net.train()
 
-    @staticmethod
-    def finish():
-        wandb.finish()
-
 
 def parse_args():
     parser = argparse.ArgumentParser()
@@ -315,43 +304,19 @@ def parse_args():
     parser.add_argument("--resume_start_epoch", type=int, default=0,
                         help="Epoch to resume from when checkpoint lacks epoch metadata (old format).")
 
-    # Architecture
-    parser.add_argument("--encoder_num_layers", type=int, default=8)
-    parser.add_argument("--decoder_num_layers", type=int, default=8)
-    parser.add_argument("--encoder_num_heads", type=int, default=8)
-    parser.add_argument("--decoder_num_heads", type=int, default=8)
+    add_architecture_args(parser)
     parser.add_argument("--encoder_embed_dim", type=int, default=64)
     parser.add_argument("--ffn_expansion_factor", type=float, default=4.0)
-    parser.add_argument("--proj_dim", type=int, default=256)
-    parser.add_argument("--num_seeds", type=int, default=32)
     parser.add_argument("--seed_dim", type=int, default=128)
     parser.add_argument("--model_embed_dim", type=int, default=8)
-    parser.add_argument("--time_embedding_dim", type=int, default=32)
-    parser.add_argument("--pos_embedding_dim", type=int, default=32)
-    parser.add_argument("--compile_mode", type=str, default="default",
-                        choices=["default", "reduce-overhead", "max-autotune", "max-autotune-no-cudagraphs"])
     parser.add_argument("--num_sim_workers", type=int, default=3,
                         help="Number of parallel CPU simulation workers (each gets cpu_count//num_sim_workers inner workers).")
-
-    # Optimizer
-    parser.add_argument("--lr", type=float, default=1e-4)
-    parser.add_argument("--dropout", type=float, default=0.05)
-    parser.add_argument("--layer_dropout", type=float, default=0.05)
-
-    # Training schedule
-    parser.add_argument("--min_num_obs", type=int, default=200)
+    add_training_args(parser)
     parser.add_argument("--max_num_obs", type=int, default=500)
     parser.add_argument("--val_num_obs", type=int, default=500)
-    parser.add_argument("--train_batch_size", type=int, default=64)
     parser.add_argument("--val_batch_size", type=int, default=500)
-    parser.add_argument("--epochs", type=int, default=5000)
-    parser.add_argument("--steps_per_epoch", type=int, default=100)
     parser.add_argument("--val_epoch_interval", type=int, default=2500,
                         help="Epochs between validation + checkpoint saves.")
-    parser.add_argument("--dry_run_epochs", type=int, default=None,
-                        help="If set, train for this many epochs only and record extrapolated time.")
-
-    # Flow matching
     parser.add_argument("--fm_sample_steps", type=int, default=100)
     parser.add_argument("--fm_num_samples", type=int, default=100)
     parser.add_argument("--fm_solver", type=str, default="euler",
@@ -359,12 +324,6 @@ def parse_args():
     parser.add_argument("--val_samples_chunk_size", type=int, default=4,
                         help="Samples per ODE loop during validation; peak GPU memory scales with "
                              "batch_size * val_samples_chunk_size.")
-
-    # Design space
-    parser.add_argument("--max_num_regressors", type=int, default=5)
-    parser.add_argument("--max_num_categories", type=int, default=5)
-    parser.add_argument("--keep_intercept", action="store_true", default=True)
-    parser.add_argument("--add_interaction", action="store_true", default=True)
 
     return parser.parse_args()
 
@@ -534,4 +493,4 @@ if __name__ == "__main__":
         )
 
     if args.use_wandb:
-        trainer.finish()
+        wandb.finish()

@@ -16,7 +16,7 @@ from cogformer.simulator.benchmarks.ssms.priors import ddm_priors, rdm_priors, c
 from cogformer.simulator.benchmarks.ssms.link_funs import ddm_link_fun, rdm_link_fun, cdm_link_fun
 from cogformer.adapter import Adapter
 from cogformer.networks.transformers.cogformer import CogFormer
-from ..utils import add_global_params, build_encoder_input_dim
+from ..utils import add_global_params, build_encoder_input_dim, add_architecture_args, add_training_args
 from ..configs import MODELS as _BASE_MODELS
 from ..model_class.model_class_cf_train import CogFormerTrainer as ModelClassTrainer, MODEL_CONFIGS
 from ..timing import RunTimer
@@ -37,17 +37,9 @@ def parse_args():
     )
     parser.add_argument("--use_wandb", action="store_true")
 
-    # Architecture
-    parser.add_argument("--encoder_num_layers", type=int, default=8)
-    parser.add_argument("--decoder_num_layers", type=int, default=8)
-    parser.add_argument("--encoder_num_heads", type=int, default=8)
-    parser.add_argument("--decoder_num_heads", type=int, default=8)
-    parser.add_argument("--proj_dim", type=int, default=256)
-    parser.add_argument("--num_seeds", type=int, default=32)
+    add_architecture_args(parser)
     parser.add_argument("--seed_dim", type=int, default=128)
     parser.add_argument("--model_embed_dim", type=int, default=8)
-    parser.add_argument("--time_embedding_dim", type=int, default=32)
-    parser.add_argument("--pos_embedding_dim", type=int, default=32)
 
     # Ablation-specific
     parser.add_argument(
@@ -58,29 +50,12 @@ def parse_args():
              "about which SSM generated the data. (default: False)",
     )
 
-    # Optimizer
-    parser.add_argument("--lr", type=float, default=1e-4)
-    parser.add_argument("--dropout", type=float, default=0.05)
-    parser.add_argument("--layer_dropout", type=float, default=0.05)
-
-    # Training schedule
-    parser.add_argument("--min_num_obs", type=int, default=200)
+    add_training_args(parser)
     parser.add_argument("--max_num_obs", type=int, default=500)
     parser.add_argument("--val_num_obs", type=int, default=500)
-    parser.add_argument("--train_batch_size", type=int, default=64)
     parser.add_argument("--val_batch_size", type=int, default=500)
-    parser.add_argument("--epochs", type=int, default=5000)
-    parser.add_argument("--steps_per_epoch", type=int, default=100)
-
-    # Inference
     parser.add_argument("--fm_sample_steps", type=int, default=50)
     parser.add_argument("--fm_num_samples", type=int, default=100)
-
-    # Design space
-    parser.add_argument("--max_num_regressors", type=int, default=5)
-    parser.add_argument("--max_num_categories", type=int, default=5)
-    parser.add_argument("--keep_intercept", action="store_true", default=True)
-    parser.add_argument("--add_interaction", action="store_true", default=True)
 
     # Output path overrides
     parser.add_argument("--checkpoint_dir", type=str, default=None)
@@ -128,9 +103,12 @@ if __name__ == "__main__":
     val_config = {
         "fm_sample_steps": args.fm_sample_steps,
         "fm_num_samples": args.fm_num_samples,
+        "fm_solver": "euler",
+        "val_samples_chunk_size": 4,
         "batch_size": args.val_batch_size,
         "num_obs": args.val_num_obs,
         "model_family_config": model_family_config,
+        "device": device,
     }
 
     # When no_model_embedding is set, num_models=None suppresses the embedding table.
@@ -155,50 +133,38 @@ if __name__ == "__main__":
         "decoder_layer_kwargs": {"mab_first": True},
     }
 
+    mask_randomizer_kwargs = {
+        "DDM": {"free_intrinsics": ["v", "a", "z", "tau"],       "fixed_intrinsics": ["s_v", "s_tau"], "fixed_values": {}, "global_params": GLOBAL_PARAMS},
+        "RDM": {"free_intrinsics": ["v", "v_diff", "a", "tau"],  "fixed_intrinsics": ["s_v", "s_tau"], "fixed_values": {}, "global_params": GLOBAL_PARAMS},
+        "CDM": {"free_intrinsics": ["v", "v_theta", "a", "tau"], "fixed_intrinsics": ["s_v", "s_tau"], "fixed_values": {}, "global_params": GLOBAL_PARAMS},
+    }
+
+    model_class_config = {
+        "families": {
+            "DDM": {"model_cls": DDM, "prior_fn": ddm_priors, "intrinsic_params": _MODELS_WITH_PI["ddm"]["intrinsic_params"], "mask_randomizer_kwargs": mask_randomizer_kwargs["DDM"]},
+            "RDM": {"model_cls": RDM, "prior_fn": rdm_priors, "intrinsic_params": _MODELS_WITH_PI["rdm"]["intrinsic_params"], "mask_randomizer_kwargs": mask_randomizer_kwargs["RDM"]},
+            "CDM": {"model_cls": CDM, "prior_fn": cdm_priors, "intrinsic_params": _MODELS_WITH_PI["cdm"]["intrinsic_params"], "mask_randomizer_kwargs": mask_randomizer_kwargs["CDM"]},
+        },
+        "link_funs": {"DDM": ddm_link_fun, "RDM": rdm_link_fun, "CDM": cdm_link_fun},
+    }
+
     model_families = {
-        "DDM": ModelFamily(
-            model=DDM(), name="DDM",
-            prior=ddm_priors(),
-            intrinsic_params=_MODELS_WITH_PI["ddm"]["intrinsic_params"],
-            mask_randomizer_kwargs={
-                "free_intrinsics": ["v", "a", "z", "tau"],
-                "fixed_intrinsics": ["s_v", "s_tau"],
-                "fixed_values": {},
-                "global_params": GLOBAL_PARAMS,
-            },
-        ),
-        "RDM": ModelFamily(
-            model=RDM(), name="RDM",
-            prior=rdm_priors(),
-            intrinsic_params=_MODELS_WITH_PI["rdm"]["intrinsic_params"],
-            mask_randomizer_kwargs={
-                "free_intrinsics": ["v", "v_diff", "a", "tau"],
-                "fixed_intrinsics": ["s_v", "s_tau"],
-                "fixed_values": {},
-                "global_params": GLOBAL_PARAMS,
-            },
-        ),
-        "CDM": ModelFamily(
-            model=CDM(), name="CDM",
-            prior=cdm_priors(),
-            intrinsic_params=_MODELS_WITH_PI["cdm"]["intrinsic_params"],
-            mask_randomizer_kwargs={
-                "free_intrinsics": ["v", "v_theta", "a", "tau"],
-                "fixed_intrinsics": ["s_v", "s_tau"],
-                "fixed_values": {},
-                "global_params": GLOBAL_PARAMS,
-            },
-        ),
+        name: ModelFamily(
+            model=cfg["model_cls"](), name=name,
+            prior=cfg["prior_fn"](),
+            intrinsic_params=cfg["intrinsic_params"],
+            mask_randomizer_kwargs=cfg["mask_randomizer_kwargs"],
+        )
+        for name, cfg in model_class_config["families"].items()
     }
-    link_funs = {
-        "DDM": ddm_link_fun(),
-        "RDM": rdm_link_fun(),
-        "CDM": cdm_link_fun(),
-    }
+    link_funs = {k: fn() for k, fn in model_class_config["link_funs"].items()}
 
     model_class = ModelClass(model_families=model_families, link_funs=link_funs)
     adapter = Adapter()
+
+    torch.set_float32_matmul_precision("high")
     cogformer = CogFormer(**cogformer_config).to(device).train()
+    cogformer = torch.compile(cogformer, dynamic=True, mode=args.compile_mode)
 
     if args.use_wandb:
         wandb.init(
@@ -235,6 +201,7 @@ if __name__ == "__main__":
     trainer = ModelClassTrainer(
         net=cogformer,
         model_class=model_class,
+        model_class_config=model_class_config,
         adapter=adapter,
         use_wandb=args.use_wandb,
     )
@@ -255,4 +222,4 @@ if __name__ == "__main__":
         )
 
     if args.use_wandb:
-        trainer.finish()
+        wandb.finish()

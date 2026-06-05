@@ -8,7 +8,8 @@ import argparse
 from cogformer.simulator import ModelFamily
 from cogformer.adapter import Adapter
 from cogformer.networks.transformers.cogformer import CogFormer
-from ..utils import add_global_params, strip_global_params, build_encoder_input_dim
+from ..utils import (add_global_params, strip_global_params, build_encoder_input_dim,
+                     add_architecture_args, add_training_args)
 from ..configs import GLOBAL_PARAMS, GLOBAL_VARIABLE_NAMES
 from ..model_family.model_family_cf_train import CogFormerTrainer, MODELS
 from ..timing import RunTimer
@@ -22,16 +23,8 @@ def parse_args():
     parser.add_argument("--debug", action="store_true")
     parser.add_argument("--use_wandb", action="store_true")
 
-    # Architecture
-    parser.add_argument("--encoder_num_layers", type=int, default=8)
-    parser.add_argument("--decoder_num_layers", type=int, default=8)
-    parser.add_argument("--encoder_num_heads", type=int, default=8)
-    parser.add_argument("--decoder_num_heads", type=int, default=8)
-    parser.add_argument("--proj_dim", type=int, default=256)
-    parser.add_argument("--num_seeds", type=int, default=32)
+    add_architecture_args(parser)
     parser.add_argument("--seed_dim", type=int, default=64)
-    parser.add_argument("--time_embedding_dim", type=int, default=32)
-    parser.add_argument("--pos_embedding_dim", type=int, default=32)
 
     # Ablation-specific architecture args
     parser.add_argument(
@@ -62,43 +55,20 @@ def parse_args():
              "output head. (default: False)",
     )
 
-    # Optimizer
-    parser.add_argument("--lr", type=float, default=1e-4)
-    parser.add_argument("--dropout", type=float, default=0.05)
-    parser.add_argument("--layer_dropout", type=float, default=0.05)
-
-    # Training schedule
+    add_training_args(parser)
     parser.add_argument("--num_obs", type=int, default=500)
-    parser.add_argument("--min_num_obs", type=int, default=200)
     parser.add_argument("--max_num_obs", type=int, default=500)
-    parser.add_argument("--train_batch_size", type=int, default=64)
     parser.add_argument("--val_batch_size", type=int, default=500)
-    parser.add_argument("--epochs", type=int, default=5000)
-    parser.add_argument("--steps_per_epoch", type=int, default=100)
     parser.add_argument("--val_samples_chunk_size", type=int, default=None,
                         help="Samples per ODE loop during validation; peak GPU memory scales with "
                              "batch_size * val_samples_chunk_size.")
-    parser.add_argument(
-        "--estimate_global_params",
-        action=argparse.BooleanOptionalAction,
-        default=True,
-    )
+    parser.add_argument("--estimate_global_params", action=argparse.BooleanOptionalAction,
+                        default=True)
     parser.add_argument("--val_epoch_interval", type=int, default=None)
-    parser.add_argument("--dry_run_epochs", type=int, default=None,
-                        help="If set, train for this many epochs only and record extrapolated time.")
-
-    # Inference
     parser.add_argument("--fm_sample_steps", type=int, default=50)
     parser.add_argument("--fm_num_samples", type=int, default=200)
-    parser.add_argument(
-        "--fm_solver", type=str, default="midpoint", choices=["euler", "midpoint", "rk4"]
-    )
-
-    # Design space
-    parser.add_argument("--max_num_regressors", type=int, default=5)
-    parser.add_argument("--max_num_categories", type=int, default=5)
-    parser.add_argument("--keep_intercept", action="store_true", default=True)
-    parser.add_argument("--add_interaction", action="store_true", default=True)
+    parser.add_argument("--fm_solver", type=str, default="midpoint",
+                        choices=["euler", "midpoint", "rk4"])
 
     # Output path overrides
     parser.add_argument(
@@ -250,7 +220,9 @@ if __name__ == "__main__":
         mask_randomizer_kwargs=train_params_kwargs,
     )
     adapter = Adapter()
+    torch.set_float32_matmul_precision("high")
     cogformer = CogFormer(**cogformer_config).to(device).train()
+    cogformer = torch.compile(cogformer, dynamic=True, mode=args.compile_mode)
 
     trainer = CogFormerTrainer(
         model_family=model_family,
@@ -291,4 +263,5 @@ if __name__ == "__main__":
             checkpoint_path=checkpoint_path,
             fig_path=fig_path,
         )
-    trainer.finish()
+    if args.use_wandb:
+        wandb.finish()

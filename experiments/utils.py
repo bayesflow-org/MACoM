@@ -1,6 +1,91 @@
 """Shared utility functions for CogFormer experiment scripts."""
 
 import numpy as np
+import torch
+from collections import deque
+from concurrent.futures import ThreadPoolExecutor
+
+
+class PrefetchQueue:
+    """Overlap CPU simulation with GPU training by keeping n_workers batches in flight.
+
+    While the GPU processes batch i, batches i+1..i+n_workers simulate in parallel
+    threads, so the GPU never stalls waiting for data after the initial warm-up.
+    Each worker thread should use its own simulator instance to avoid contention;
+    pass a callable that handles this (e.g. via threading.local).
+    """
+
+    def __init__(self, sample_fn, n_workers: int = 3):
+        self._fn = sample_fn
+        self._executor = ThreadPoolExecutor(max_workers=n_workers)
+        self._queue = deque(self._executor.submit(self._fn) for _ in range(n_workers))
+
+    def next(self):
+        batch = self._queue.popleft().result()
+        self._queue.append(self._executor.submit(self._fn))
+        return batch
+
+    def shutdown(self):
+        self._executor.shutdown(wait=False, cancel_futures=True)
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *_):
+        self.shutdown()
+        return False
+
+
+def train_step(net, adapted, config, optimizer, scheduler):
+    """One flow-matching gradient step; returns (loss_scalar, current_lr)."""
+    optimizer.zero_grad(set_to_none=True)
+    device_type = config["device"].type
+    with torch.autocast(device_type=device_type, dtype=torch.bfloat16, enabled=(device_type == "cuda")):
+        pred_velocity, target_velocity = net(
+            adapted["param_matrices"][..., None],
+            adapted["input_data"],
+            adapted["param_indices"],
+            adapted["regressor_indices"],
+            adapted["param_masks"],
+            model_ids=adapted.get("model_ids"),
+        )
+        L = net.compute_loss(pred_velocity, target_velocity, adapted["param_masks"])
+    L.backward()
+    if config["gradient_clip_norm"] is not None:
+        torch.nn.utils.clip_grad_norm_(net.parameters(), config["gradient_clip_norm"])
+    optimizer.step()
+    return L.detach().item(), scheduler.get_last_lr()[0]
+
+
+def add_architecture_args(parser):
+    """Register shared CogFormer architecture arguments."""
+    parser.add_argument("--encoder_num_layers", type=int, default=8)
+    parser.add_argument("--decoder_num_layers", type=int, default=8)
+    parser.add_argument("--encoder_num_heads", type=int, default=8)
+    parser.add_argument("--decoder_num_heads", type=int, default=8)
+    parser.add_argument("--proj_dim", type=int, default=256)
+    parser.add_argument("--num_seeds", type=int, default=32)
+    parser.add_argument("--time_embedding_dim", type=int, default=32)
+    parser.add_argument("--pos_embedding_dim", type=int, default=32)
+    parser.add_argument("--dropout", type=float, default=0.05)
+    parser.add_argument("--layer_dropout", type=float, default=0.05)
+    parser.add_argument("--compile_mode", type=str, default="default",
+                        choices=["default", "reduce-overhead", "max-autotune", "max-autotune-no-cudagraphs"])
+
+
+def add_training_args(parser):
+    """Register shared training schedule and design-space arguments."""
+    parser.add_argument("--lr", type=float, default=1e-4)
+    parser.add_argument("--train_batch_size", type=int, default=64)
+    parser.add_argument("--epochs", type=int, default=5000)
+    parser.add_argument("--steps_per_epoch", type=int, default=100)
+    parser.add_argument("--min_num_obs", type=int, default=200)
+    parser.add_argument("--dry_run_epochs", type=int, default=None,
+                        help="If set, train for this many epochs only and record extrapolated time.")
+    parser.add_argument("--max_num_regressors", type=int, default=5)
+    parser.add_argument("--max_num_categories", type=int, default=5)
+    parser.add_argument("--keep_intercept", action="store_true", default=True)
+    parser.add_argument("--add_interaction", action="store_true", default=True)
 
 
 def chunked_sample(model, adapted, num_samples, steps, solver="euler",

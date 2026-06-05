@@ -7,8 +7,6 @@ except Exception:
     wandb = None
 import logging
 import argparse
-from collections import deque
-from concurrent.futures import ThreadPoolExecutor
 
 from pathlib import Path
 from tqdm.auto import tqdm
@@ -27,7 +25,9 @@ from cogformer.diagnostics.plot.adaptive_recovery import adaptive_recovery
 from cogformer.utils.plot_utils import cogformer_fm_colors
 
 from ..configs import MODELS as _BASE_MODELS, GLOBAL_PARAMS, GLOBAL_VARIABLE_NAMES
-from ..utils import add_global_params, strip_global_params, build_encoder_input_dim, chunked_sample
+from ..utils import (add_global_params, strip_global_params, build_encoder_input_dim,
+                     chunked_sample, PrefetchQueue, train_step,
+                     add_architecture_args, add_training_args)
 from ..timing import RunTimer
 
 HOLDOUT_TYPES = ["random", "variability", "interaction", "sparsity"]
@@ -97,35 +97,50 @@ class CogFormerTrainer:
         return {k: v.pin_memory() if isinstance(v, torch.Tensor) else v
                 for k, v in adapted.items()}
 
-    def _train_step_from_adapted(self, adapted, config, optimizer, scheduler):
-        optimizer.zero_grad(set_to_none=True)
-        device_type = config["device"].type
-        with torch.autocast(device_type=device_type, dtype=torch.bfloat16, enabled=(device_type == "cuda")):
-            pred_velocity, target_velocity = self.net(
-                adapted["param_matrices"][..., None],
-                adapted["input_data"],
-                adapted["param_indices"],
-                adapted["regressor_indices"],
-                adapted["param_masks"],
+    def _prepare_val_data(self, val_config):
+        """Pre-generate fixed validation datasets for all holdout scenarios once."""
+        link_fn = self.model_cfg["link_fn"]
+        params = self.model_cfg["intrinsic_params"]
+        n_cols = len(params)
+        default_max_cats = val_config["model_family_config"]["max_num_categories"]
+        batch_size = val_config["batch_size"]
+        self._val_data = []
+        for tag, design_config, scenario_opts in self.model_cfg["val_scenarios"]:
+            max_num_categories = scenario_opts.get("max_num_categories", default_max_cats)
+            model_family_cfg = {**val_config["model_family_config"], "max_num_categories": max_num_categories}
+            samples = self.model_family.batch_sample(
+                **model_family_cfg,
+                **val_config["val_sample_config"],
+                batch_size=batch_size,
+                flatten_param_outputs=True,
+                design_config=design_config,
+                link_fun=link_fn(),
+                pad_to_max_num_categories=default_max_cats,
             )
-            L = self.net.compute_loss(pred_velocity, target_velocity, adapted["param_masks"])
-        L.backward()
-        if config["gradient_clip_norm"] is not None:
-            torch.nn.utils.clip_grad_norm_(self.net.parameters(), config["gradient_clip_norm"])
-        optimizer.step()
-        return L.detach().item(), scheduler.get_last_lr()[0]
+            adapted = self.adapter.adapt(samples, device=val_config["device"])
+            true_flat = adapted["param_matrices"].detach().cpu().numpy()
+            n_rows = true_flat.shape[1] // n_cols
+            true_set = true_flat.reshape(batch_size, n_rows, n_cols)
+            params_mask = adapted["param_masks"].detach().cpu().numpy()
+            params_mask = params_mask.reshape(batch_size, n_rows, n_cols)[0]
+            self._val_data.append({
+                "tag": tag,
+                "design_config": design_config,
+                "scenario_opts": scenario_opts,
+                "adapted": adapted,
+                "true_set": true_set,
+                "params_mask": params_mask,
+                "n_rows": n_rows,
+            })
 
     def train(self, train_config, val_config, checkpoint_path="cogformer_gen.pt", fig_path="fig.pdf"):
+        self._prepare_val_data(val_config)
         global_step = 0
         optimizer = AdamW(self.net.parameters(), lr=train_config["learning_rate"], fused=True)
         scheduler = CosineAnnealingLR(optimizer, T_max=train_config["epochs"])
         device = train_config["device"]
 
-        with ThreadPoolExecutor(max_workers=3) as executor:
-            queue = deque(
-                executor.submit(self._simulate_and_adapt, train_config) for _ in range(3)
-            )
-
+        with PrefetchQueue(lambda: self._simulate_and_adapt(train_config)) as prefetch:
             for epoch in range(train_config["epochs"]):
                 pbar = tqdm(
                     total=train_config["steps_per_epoch"],
@@ -133,18 +148,12 @@ class CogFormerTrainer:
                     miniters=100,
                 )
                 for _ in range(train_config["steps_per_epoch"]):
-                    adapted_cpu = queue.popleft().result()
-                    queue.append(executor.submit(self._simulate_and_adapt, train_config))
+                    adapted_cpu = prefetch.next()
                     adapted = {
                         k: v.to(device, non_blocking=True) if isinstance(v, torch.Tensor) else v
                         for k, v in adapted_cpu.items()
                     }
-                    loss, current_lr = self._train_step_from_adapted(
-                        adapted=adapted,
-                        config=train_config,
-                        optimizer=optimizer,
-                        scheduler=scheduler,
-                    )
+                    loss, current_lr = train_step(self.net, adapted, train_config, optimizer, scheduler)
                     if self.use_wandb:
                         wandb.log(
                             {"train/loss": loss, "opt/lr": current_lr, "epoch": epoch + 1},
@@ -155,6 +164,9 @@ class CogFormerTrainer:
                     pbar.update(1)
 
                 if (epoch + 1) % self.val_epoch_interval == 0:
+                    checkpoint_dir = Path(self.model_cfg["checkpoint_dir"])
+                    checkpoint_dir.mkdir(parents=True, exist_ok=True)
+                    torch.save(self.net.state_dict(), checkpoint_dir / checkpoint_path)
                     self.val_step(val_config, global_step, fig_path)
 
                 scheduler.step()
@@ -167,13 +179,12 @@ class CogFormerTrainer:
 
     @torch.no_grad()
     def val_step(self, config, global_step, fig_path):
-        model_name = self.model_cfg["name"].lower()
         params = self.model_cfg["intrinsic_params"]
         param_names = self.model_cfg["variable_names"]
-        link_fn = self.model_cfg["link_fn"]
         fig_subdir = self.model_cfg["fig_subdir"]
         colors = cogformer_fm_colors()
         default_max_cats = config["model_family_config"]["max_num_categories"]
+        n_cols = len(params)
 
         base = Path(f"./outputs/figures/{fig_subdir}/{self.holdout_type}")
         base.mkdir(parents=True, exist_ok=True)
@@ -181,25 +192,15 @@ class CogFormerTrainer:
         self.net.eval()
         torch.cuda.empty_cache()
 
-        for tag, design_config, scenario_opts in self.model_cfg["val_scenarios"]:
+        for scenario in self._val_data:
+            tag           = scenario["tag"]
+            design_config = scenario["design_config"]
+            scenario_opts = scenario["scenario_opts"]
+            adapted       = scenario["adapted"]
+            true_set      = scenario["true_set"]
+            params_mask   = scenario["params_mask"]
+            n_rows        = scenario["n_rows"]
             max_num_categories = scenario_opts.get("max_num_categories", default_max_cats)
-            model_family_cfg = {**config["model_family_config"], "max_num_categories": max_num_categories}
-            test_samples = self.model_family.batch_sample(
-                **model_family_cfg,
-                **config["val_sample_config"],
-                batch_size=config["batch_size"],
-                flatten_param_outputs=True,
-                design_config=design_config,
-                link_fun=link_fn(),
-                pad_to_max_num_categories=default_max_cats,
-            )
-            adapted = self.adapter.adapt(test_samples, device=config["device"])
-
-            true_set = adapted["param_matrices"].detach().cpu().numpy()
-            params_mask = adapted["param_masks"].detach().cpu().numpy()
-            n_cols = len(params)
-            n_rows = true_set.shape[1] // n_cols
-            true_set = true_set.reshape(config["batch_size"], n_rows, n_cols)
 
             pred_set = chunked_sample(
                 self.net, adapted,
@@ -211,7 +212,6 @@ class CogFormerTrainer:
             pred_set = pred_set.reshape(
                 config["batch_size"], config["fm_num_samples"], n_rows, n_cols
             )
-            params_mask = params_mask.reshape((config["batch_size"], n_rows, n_cols))[0]
 
             fig = adaptive_recovery(
                 true_set, pred_set,
@@ -234,10 +234,6 @@ class CogFormerTrainer:
 
         self.net.train()
 
-    @staticmethod
-    def finish():
-        wandb.finish()
-
 
 def parse_args():
     parser = argparse.ArgumentParser()
@@ -247,65 +243,30 @@ def parse_args():
     parser.add_argument("--debug", action="store_true")
     parser.add_argument("--use_wandb", action="store_true")
 
-    # Architecture
-    parser.add_argument("--encoder_num_layers", type=int, default=8)
-    parser.add_argument("--decoder_num_layers", type=int, default=8)
-    parser.add_argument("--encoder_num_heads", type=int, default=8)
-    parser.add_argument("--decoder_num_heads", type=int, default=8)
+    add_architecture_args(parser)
     parser.add_argument("--encoder_embed_dim", type=int, default=64)
-    parser.add_argument("--proj_dim", type=int, default=256)
     parser.add_argument("--ffn_expansion_factor", type=float, default=4.0,
-                        help="FFN intermediate width multiplier. Use 6.0 with SwiGLU to get a "
-                             "true 4:1 intermediate/model ratio (parameter-equivalent to 4x standard FFN).")
-    parser.add_argument("--num_seeds", type=int, default=32)
+                        help="FFN intermediate width multiplier.")
     parser.add_argument("--seed_dim", type=int, default=64)
-    parser.add_argument("--time_embedding_dim", type=int, default=32)
-    parser.add_argument("--pos_embedding_dim", type=int, default=32)
-    parser.add_argument("--compile_mode", type=str, default="default",
-                        choices=["default", "reduce-overhead", "max-autotune", "max-autotune-no-cudagraphs"],
-                        help="torch.compile mode. 'max-autotune' finds optimal Triton kernel configs "
-                             "but adds ~2-5 min to the first epoch.")
-
-    # Optimizer
-    parser.add_argument("--lr", type=float, default=1e-4)
-    parser.add_argument("--dropout", type=float, default=0.05)
-    parser.add_argument("--layer_dropout", type=float, default=0.05)
-
-    # Training schedule
+    add_training_args(parser)
     parser.add_argument("--num_obs", type=int, default=500)
-    parser.add_argument("--min_num_obs", type=int, default=200)
     parser.add_argument("--max_num_obs", type=int, default=500)
-    parser.add_argument("--train_batch_size", type=int, default=64)
     parser.add_argument("--val_batch_size", type=int, default=500)
-    parser.add_argument("--epochs", type=int, default=5000)
-    parser.add_argument("--steps_per_epoch", type=int, default=100)
     parser.add_argument("--val_epoch_interval", type=int, default=1000)
-
-    # Design space
-    parser.add_argument("--max_num_regressors", type=int, default=5)
-    parser.add_argument("--max_num_categories", type=int, default=5)
-    parser.add_argument("--keep_intercept", action="store_true", default=True)
-
-    # Inference
     parser.add_argument("--fm_sample_steps", type=int, default=50)
     parser.add_argument("--fm_num_samples", type=int, default=200)
     parser.add_argument("--fm_solver", type=str, default="midpoint", choices=["euler", "midpoint", "rk4"])
     parser.add_argument("--val_samples_chunk_size", type=int, default=None,
                         help="Samples per ODE loop during validation; peak GPU memory scales with "
                              "batch_size * val_samples_chunk_size.")
-
-    # Holdout-specific
     parser.add_argument("--split_seed", type=int, default=0,
                         help="[random] Seed for split_design_space.")
     parser.add_argument("--split_ratio", type=float, default=0.5,
                         help="[random] Fraction of slope patterns assigned to training set.")
     parser.add_argument("--sparse_free_prob", type=float, default=0.2,
                         help="[sparsity] Fixed free_prob used during training.")
-
     parser.add_argument("--estimate_global_params", action=argparse.BooleanOptionalAction,
                         default=True)
-    parser.add_argument("--dry_run_epochs", type=int, default=None,
-                        help="If set, train for this many epochs only and record extrapolated time.")
     return parser.parse_args()
 
 
@@ -508,4 +469,4 @@ if __name__ == "__main__":
         )
 
     if args.use_wandb:
-        trainer.finish()
+        wandb.finish()
