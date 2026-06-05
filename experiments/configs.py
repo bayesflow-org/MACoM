@@ -102,7 +102,8 @@ DDM_CONFIG = {
     "benchmark_configs": DDM_BENCHMARK_CONFIGS,
     "val_scenarios": [
         ("interaction", DDM_BENCHMARK_CONFIGS["interaction"], {"max_num_categories": 2}),
-        ("fixed", DDM_BENCHMARK_CONFIGS["fixed"], {"skip_global": True}),
+        ("fixed", DDM_BENCHMARK_CONFIGS["fixed"], {"max_num_categories": 2, "skip_global": True}),
+        ("two_factor", DDM_BENCHMARK_CONFIGS["two_factor"], {"max_num_categories": 3}),
     ],
     "holdout_configs": [
         {"design_config": DDM_BENCHMARK_CONFIGS["three_reg_interaction"], "max_num_categories": 3},
@@ -189,7 +190,8 @@ CDM_CONFIG = {
     "benchmark_configs": CDM_BENCHMARK_CONFIGS,
     "val_scenarios": [
         ("interaction", CDM_BENCHMARK_CONFIGS["interaction"], {"max_num_categories": 2}),
-        ("fixed", CDM_BENCHMARK_CONFIGS["fixed"], {"skip_global": True}),
+        ("fixed", CDM_BENCHMARK_CONFIGS["fixed"], {"max_num_categories": 2, "skip_global": True}),
+        ("two_factor", CDM_BENCHMARK_CONFIGS["two_factor"], {"max_num_categories": 3}),
     ],
     "holdout_configs": [
         {"design_config": CDM_BENCHMARK_CONFIGS["three_reg_interaction"], "max_num_categories": 3},
@@ -276,7 +278,8 @@ RDM_CONFIG = {
     "benchmark_configs": RDM_BENCHMARK_CONFIGS,
     "val_scenarios": [
         ("interaction", RDM_BENCHMARK_CONFIGS["interaction"], {"max_num_categories": 2}),
-        ("fixed", RDM_BENCHMARK_CONFIGS["fixed"], {"skip_global": True}),
+        ("fixed", RDM_BENCHMARK_CONFIGS["fixed"], {"max_num_categories": 2, "skip_global": True}),
+        ("two_factor", RDM_BENCHMARK_CONFIGS["two_factor"], {"max_num_categories": 3}),
     ],
     "holdout_configs": [
         {"design_config": RDM_BENCHMARK_CONFIGS["three_reg_interaction"], "max_num_categories": 3},
@@ -364,7 +367,8 @@ LBA_CONFIG = {
     "benchmark_configs": LBA_BENCHMARK_CONFIGS,
     "val_scenarios": [
         ("interaction", LBA_BENCHMARK_CONFIGS["interaction"], {"max_num_categories": 2}),
-        ("fixed", LBA_BENCHMARK_CONFIGS["fixed"], {"skip_global": True}),
+        ("fixed", LBA_BENCHMARK_CONFIGS["fixed"], {"max_num_categories": 2, "skip_global": True}),
+        ("two_factor", LBA_BENCHMARK_CONFIGS["two_factor"], {"max_num_categories": 3}),
     ],
     "holdout_configs": [
         {"design_config": LBA_BENCHMARK_CONFIGS["three_reg_interaction"], "max_num_categories": 3},

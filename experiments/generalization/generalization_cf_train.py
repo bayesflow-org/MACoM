@@ -200,7 +200,6 @@ class CogFormerTrainer:
             true_set      = scenario["true_set"]
             params_mask   = scenario["params_mask"]
             n_rows        = scenario["n_rows"]
-            max_num_categories = scenario_opts.get("max_num_categories", default_max_cats)
 
             pred_set = chunked_sample(
                 self.net, adapted,
@@ -217,7 +216,7 @@ class CogFormerTrainer:
                 true_set, pred_set,
                 design_config=design_config,
                 intrinsic_params=params,
-                max_num_categories=max_num_categories,
+                max_num_categories=default_max_cats,
                 parameter_mask=params_mask,
                 variable_names=param_names,
                 intercept_color=colors["intercept"],
