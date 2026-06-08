@@ -16,7 +16,7 @@ from cogformer.diagnostics.plot.ensemble_ecdf import ensemble_ecdf
 from cogformer.utils.plot_utils import cogformer_fm_colors
 
 from ..configs import MODELS as _BASE_MODELS, GLOBAL_PARAMS, GLOBAL_VARIABLE_NAMES
-from ..utils import add_global_params, strip_global_params, infer_free_fixed_intrinsics, build_encoder_input_dim
+from ..utils import add_global_params, strip_global_params, infer_free_fixed_intrinsics, build_encoder_input_dim, chunked_sample
 
 
 _CASE_LABELS = {
@@ -65,6 +65,8 @@ def parse_args():
     p.add_argument("--add_interaction", action="store_true", default=True)
     p.add_argument("--num_sample_steps", type=int, default=50)
     p.add_argument("--num_samples", type=int, default=200)
+    p.add_argument("--samples_chunk_size", type=int, default=None,
+                   help="Samples per ODE loop; peak GPU memory scales with batch_size * samples_chunk_size.")
     p.add_argument("--solver", type=str, default="midpoint",
                    choices=["euler", "midpoint", "rk4"])
     p.add_argument("--num_random_configs", type=int, default=8)
@@ -144,8 +146,10 @@ def main():
     ).to(device)
 
     state = torch.load(Path(args.checkpoint), map_location=device)
+    state = {k.removeprefix("_orig_mod."): v for k, v in state.items()}
     cogformer.load_state_dict(state)
     cogformer.eval()
+    cogformer = torch.compile(cogformer, dynamic=True)
 
     outdir = Path(args.outdir) if args.outdir else Path(model_cfg["outdir"])
     outdir.mkdir(parents=True, exist_ok=True)
@@ -173,11 +177,10 @@ def main():
         n_rows = true_set.shape[1] // n_cols
         true_set = true_set.reshape(args.batch_size, n_rows, n_cols)
 
-        pred_set = cogformer.sample(
-            adapted["input_data"], adapted["param_indices"],
-            adapted["regressor_indices"], adapted["param_masks"],
-            steps=args.num_sample_steps, num_samples=args.num_samples,
-            solver=args.solver,
+        pred_set = chunked_sample(
+            cogformer, adapted, num_samples=args.num_samples,
+            steps=args.num_sample_steps, solver=args.solver,
+            samples_chunk_size=args.samples_chunk_size,
         )
         pred_set = pred_set.reshape(args.batch_size, args.num_samples, n_rows, n_cols)
 

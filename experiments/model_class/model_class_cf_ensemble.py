@@ -22,7 +22,7 @@ from cogformer.diagnostics.plot.ensemble_ecdf import ensemble_ecdf
 from cogformer.diagnostics.plot.ensemble_metrics import ensemble_metrics
 
 from ..configs import MODELS as _BASE_MODELS, ALL_VARIABLE_NAMES as ALL_PARAMS_VARIABLE_NAMES
-from ..utils import infer_free_fixed_intrinsics, build_encoder_input_dim
+from ..utils import infer_free_fixed_intrinsics, build_encoder_input_dim, chunked_sample
 
 
 DEFAULT_FIXED_VALUES = {
@@ -44,6 +44,8 @@ def parse_args():
     p.add_argument("--add_interaction", action="store_true", default=True)
     p.add_argument("--num_sample_steps", type=int, default=50)
     p.add_argument("--num_samples", type=int, default=200)
+    p.add_argument("--samples_chunk_size", type=int, default=None,
+                   help="Samples per ODE loop; peak GPU memory scales with batch_size * samples_chunk_size.")
     p.add_argument("--seed", type=int, default=0)
     p.add_argument("--free_prob", type=float, default=0.5)
     p.add_argument("--metrics", action="store_true", default=False)
@@ -113,8 +115,12 @@ def main():
     ).to(device)
 
     state = torch.load(Path(args.checkpoint), map_location=device)
+    if isinstance(state, dict) and "state_dict" in state:
+        state = state["state_dict"]
+    state = {k.removeprefix("_orig_mod."): v for k, v in state.items()}
     cogformer.load_state_dict(state)
     cogformer.eval()
+    cogformer = torch.compile(cogformer, dynamic=True)
 
     # Build balanced model-name list: floor(n_configs / n_families) per family,
     # distributing any remainder to the first families.
@@ -188,14 +194,10 @@ def main():
 
         adapted = adapter.adapt(samples, device=device)
 
-        pred_set = cogformer.sample(
-            adapted["input_data"],
-            adapted["param_indices"],
-            adapted["regressor_indices"],
-            adapted["param_masks"],
+        pred_set = chunked_sample(
+            cogformer, adapted, num_samples=args.num_samples,
             steps=args.num_sample_steps,
-            num_samples=args.num_samples,
-            model_ids=adapted["model_ids"],
+            samples_chunk_size=args.samples_chunk_size,
         )
 
         # Keep in global 8-param space — no local extraction
