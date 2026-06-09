@@ -311,6 +311,8 @@ if __name__ == "__main__":
     args = parse_args()
 
     logging.basicConfig(level=logging.INFO)
+    torch.set_float32_matmul_precision("high")
+    torch.backends.cuda.matmul.allow_tf32 = True
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
     max_num_regressors = args.max_num_regressors

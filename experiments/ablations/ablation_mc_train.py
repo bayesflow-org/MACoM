@@ -163,6 +163,7 @@ if __name__ == "__main__":
     adapter = Adapter()
 
     torch.set_float32_matmul_precision("high")
+    torch.backends.cuda.matmul.allow_tf32 = True
     cogformer = CogFormer(**cogformer_config).to(device).train()
     cogformer = torch.compile(cogformer, dynamic=True, mode=args.compile_mode)
 

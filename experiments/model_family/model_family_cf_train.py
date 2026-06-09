@@ -413,6 +413,7 @@ if __name__ == "__main__":
         )
 
     torch.set_float32_matmul_precision("high")
+    torch.backends.cuda.matmul.allow_tf32 = True
 
     model_family = ModelFamily(
         model=model_cfg["model_cls"](),

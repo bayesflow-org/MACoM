@@ -438,6 +438,7 @@ if __name__ == "__main__":
         num_workers=max(1, (os.cpu_count() or 1) // 2),
     )
     torch.set_float32_matmul_precision("high")
+    torch.backends.cuda.matmul.allow_tf32 = True
 
     adapter = Adapter()
     cogformer = CogFormer(**cogformer_config).to(device).train()

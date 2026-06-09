@@ -67,6 +67,8 @@ def parse_args():
 @torch.no_grad()
 def main():
     args = parse_args()
+    torch.set_float32_matmul_precision("high")
+    torch.backends.cuda.matmul.allow_tf32 = True
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
     # Reconstruct model class (same as training) to recover global param space

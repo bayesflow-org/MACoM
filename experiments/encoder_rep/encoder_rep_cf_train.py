@@ -262,8 +262,9 @@ def parse_args():
     parser.add_argument("--val_batch_size", type=int, default=500)
     parser.add_argument("--val_epoch_interval", type=int, default=1000,
                         help="Epochs between validation + checkpoint saves.")
-    parser.add_argument("--num_sim_workers", type=int, default=3,
-                        help="Number of parallel CPU simulation workers.")
+    parser.add_argument("--num_sim_workers", type=int, default=None,
+                        help="Parallel CPU simulation workers; each gets cpu_count//num_sim_workers numba threads. "
+                             "Defaults to max(3, cpu_count // 8) — ~8 numba threads/worker on any machine.")
     parser.add_argument("--fm_sample_steps", type=int, default=50)
     parser.add_argument("--fm_num_samples", type=int, default=100)
     parser.add_argument("--val_samples_chunk_size", type=int, default=4,
@@ -275,6 +276,7 @@ def parse_args():
 
 if __name__ == "__main__":
     args = parse_args()
+    num_sim_workers = args.num_sim_workers if args.num_sim_workers is not None else max(3, (os.cpu_count() or 24) // 8)
 
     logging.basicConfig(level=logging.INFO)
     torch.backends.cuda.matmul.allow_tf32 = True
@@ -415,7 +417,7 @@ if __name__ == "__main__":
         adapter=adapter,
         use_wandb=args.use_wandb,
         val_epoch_interval=args.val_epoch_interval,
-        num_sim_workers=args.num_sim_workers,
+        num_sim_workers=num_sim_workers,
     )
 
     is_dry_run = args.dry_run_epochs is not None

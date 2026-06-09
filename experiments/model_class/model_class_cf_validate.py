@@ -150,7 +150,8 @@ def parse_args():
 @torch.no_grad()
 def main():
     args = parse_args()
-
+    torch.set_float32_matmul_precision("high")
+    torch.backends.cuda.matmul.allow_tf32 = True
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
     # Rebuild ModelClass to access model_index, n_global_params, and local_to_global maps.
