@@ -19,8 +19,25 @@ MC_DIM=128   # seed_dim for model-class / encoder-rep runs
 OBS=500
 MIN_OBS=200
 MAX_OBS=1000
-BATCH=64
-MC_BATCH=64
+
+# Batch size — conservative scaling by VRAM.
+# CogFormer's O(N²) decoder self-attention saturates GPU memory bandwidth at
+# small batch sizes, so throughput per step is roughly flat regardless of batch.
+# Larger batches are a gradient-quality lever: only increase them if you also
+# reduce EPOCHS proportionally (e.g., 4× batch → ¼ epochs for similar cost).
+#   ≥45 GB → 128,  ≥16 GB → 128,  otherwise → 64
+if command -v nvidia-smi &>/dev/null; then
+    _VRAM_MB=$(nvidia-smi --query-gpu=memory.total --format=csv,noheader,nounits 2>/dev/null | head -1)
+else
+    _VRAM_MB=0
+fi
+if [ -z "${BATCH:-}" ]; then
+    if   [ "${_VRAM_MB:-0}" -ge 16000 ]; then BATCH=128;  MC_BATCH=128
+    else                                       BATCH=64;   MC_BATCH=64
+    fi
+fi
+unset _VRAM_MB
+
 VAL_BATCH=200
 
 # ── Training ───────────────────────────────────────────────────────────────────

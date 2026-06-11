@@ -1,6 +1,7 @@
 import os
 import threading
 import torch
+import torch.distributed as dist
 try:
     import wandb
 except Exception:
@@ -30,7 +31,7 @@ from cogformer.utils.plot_utils import cogformer_fm_colors
 from ..configs import MODELS as _BASE_MODELS
 from ..utils import (add_global_params, build_encoder_input_dim, chunked_sample,
                      infer_free_fixed_intrinsics, PrefetchQueue, train_step,
-                     add_architecture_args, add_training_args)
+                     add_architecture_args, add_training_args, recommend_sim_workers)
 from ..timing import RunTimer
 
 
@@ -59,7 +60,7 @@ CHECKPOINT_DIR = "./outputs/checkpoints/model_class/cf/"
 
 class CogFormerTrainer:
     def __init__(self, net, model_class, model_class_config, adapter, use_wandb=False, val_epoch_interval=2000,
-                 num_sim_workers=3):
+                 num_sim_workers=3, world_size=1, rank=0):
         self.net = net
         self.model_class = model_class      # main instance used in val_step
         self.model_class_config = model_class_config  # config dict for per-thread reconstruction
@@ -67,13 +68,17 @@ class CogFormerTrainer:
         self.use_wandb = use_wandb
         self.val_epoch_interval = val_epoch_interval
         self.num_sim_workers = num_sim_workers
+        self.world_size = world_size
+        self.rank = rank
+        self.is_distributed = world_size > 1
         self._local = threading.local()
 
     def _get_sim_mc(self):
         """Return a per-thread ModelClass so outer workers don't contend on one instance."""
         if not hasattr(self._local, "mc"):
             n_outer = self.num_sim_workers
-            n_inner = max(1, (os.cpu_count() or 1) // n_outer)
+            num_parallel = max(self.world_size, int(os.environ.get("NUM_GPU_JOBS", "1")))
+            n_inner = max(1, (os.cpu_count() or 1) // (n_outer * num_parallel))
             families = {}
             for name, cfg in self.model_class_config["families"].items():
                 families[name] = ModelFamily(
@@ -158,7 +163,11 @@ class CogFormerTrainer:
 
     def train(self, train_config, val_config, checkpoint_path="cogformer_model_class_fm.pt",
               fig_path="fig", resume=False, resume_start_epoch=0):
-        self._prepare_val_data(val_config)
+        if self.rank == 0:
+            self._prepare_val_data(val_config)
+        if self.is_distributed:
+            dist.barrier()
+
         checkpoint_dir = Path(CHECKPOINT_DIR)
         full_ckpt_path = checkpoint_dir / checkpoint_path
         device = train_config["device"]
@@ -178,7 +187,7 @@ class CogFormerTrainer:
                 # old format: raw state_dict OrderedDict
                 self.net.load_state_dict(ckpt)
                 start_epoch = resume_start_epoch
-            logging.info(f"[resumed] from epoch {start_epoch}, checkpoint: {full_ckpt_path}")
+            logging.info(f"[rank {self.rank}] resumed from epoch {start_epoch}, checkpoint: {full_ckpt_path}")
 
         # ── optimizer + scheduler (LR resumes at the right point) ─────────────
         optimizer = AdamW(self.net.parameters(), lr=train_config["learning_rate"], fused=True)
@@ -199,6 +208,7 @@ class CogFormerTrainer:
                     total=train_config["steps_per_epoch"],
                     desc=f"Epoch {epoch + 1}/{train_config['epochs']}",
                     miniters=100,
+                    disable=self.rank != 0,
                 )
                 for _ in range(train_config["steps_per_epoch"]):
                     adapted_cpu = prefetch.next()
@@ -217,26 +227,36 @@ class CogFormerTrainer:
                     pbar.update(1)
 
                 if (epoch + 1) % self.val_epoch_interval == 0:
-                    checkpoint_dir.mkdir(parents=True, exist_ok=True)
-                    torch.save({
-                        "state_dict": self.net.state_dict(),
-                        "epoch": epoch + 1,
-                        "optimizer_state": optimizer.state_dict(),
-                        "scheduler_state": scheduler.state_dict(),
-                    }, full_ckpt_path)
-                    self.val_step(val_config, global_step, fig_path)
+                    if self.is_distributed:
+                        dist.barrier()
+                    if self.rank == 0:
+                        checkpoint_dir.mkdir(parents=True, exist_ok=True)
+                        net_to_save = getattr(self.net, 'module', self.net)
+                        torch.save({
+                            "state_dict": net_to_save.state_dict(),
+                            "epoch": epoch + 1,
+                            "optimizer_state": optimizer.state_dict(),
+                            "scheduler_state": scheduler.state_dict(),
+                        }, full_ckpt_path)
+                        self.val_step(val_config, global_step, fig_path)
+                    if self.is_distributed:
+                        dist.barrier()
 
                 scheduler.step()
                 pbar.close()
 
-        checkpoint_dir.mkdir(parents=True, exist_ok=True)
-        torch.save({
-            "state_dict": self.net.state_dict(),
-            "epoch": train_config["epochs"],
-            "optimizer_state": optimizer.state_dict(),
-            "scheduler_state": scheduler.state_dict(),
-        }, full_ckpt_path)
-        logging.info(f"[saved] {full_ckpt_path}")
+        if self.is_distributed:
+            dist.barrier()
+        if self.rank == 0:
+            checkpoint_dir.mkdir(parents=True, exist_ok=True)
+            net_to_save = getattr(self.net, 'module', self.net)
+            torch.save({
+                "state_dict": net_to_save.state_dict(),
+                "epoch": train_config["epochs"],
+                "optimizer_state": optimizer.state_dict(),
+                "scheduler_state": scheduler.state_dict(),
+            }, full_ckpt_path)
+            logging.info(f"[saved] {full_ckpt_path}")
 
     @torch.no_grad()
     def val_step(self, config, global_step, fig_path):
@@ -331,11 +351,24 @@ def parse_args():
 
 if __name__ == "__main__":
     args = parse_args()
-    num_sim_workers = args.num_sim_workers if args.num_sim_workers is not None else max(3, (os.cpu_count() or 24) // 8)
+    num_sim_workers = args.num_sim_workers if args.num_sim_workers is not None else recommend_sim_workers()
 
     logging.basicConfig(level=logging.INFO)
     torch.backends.cuda.matmul.allow_tf32 = True
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
+    # DDP: torchrun sets LOCAL_RANK when launching with --nproc_per_node > 1
+    local_rank = int(os.environ.get("LOCAL_RANK", -1))
+    is_distributed = local_rank >= 0
+    if is_distributed:
+        dist.init_process_group("nccl")
+        world_size = dist.get_world_size()
+        rank = dist.get_rank()
+        device = torch.device(f"cuda:{local_rank}")
+        torch.cuda.set_device(device)
+    else:
+        world_size = 1
+        rank = 0
+        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
     max_num_regressors = args.max_num_regressors
     max_num_categories = args.max_num_categories
@@ -358,9 +391,12 @@ if __name__ == "__main__":
 
     encoder_input_dim = build_encoder_input_dim(max_num_regressors, max_num_categories, keep_intercept)
 
+    # Each process handles a local slice of the total batch; DDP averages gradients
+    local_batch = max(1, args.train_batch_size // world_size)
+
     train_config = {
         "epochs": args.epochs,
-        "batch_size": args.train_batch_size,
+        "batch_size": local_batch,
         "steps_per_epoch": args.steps_per_epoch,
         "learning_rate": args.lr,
         "gradient_clip_norm": 5.0,
@@ -402,9 +438,9 @@ if __name__ == "__main__":
     }
 
     logging.info(
-        f"Training ModelClass CogFormer: {train_config['epochs']} epochs, "
+        f"[rank {rank}] Training ModelClass CogFormer: {train_config['epochs']} epochs, "
         f"{train_config['steps_per_epoch']} steps/epoch, "
-        f"batch_size={train_config['batch_size']}, device={device}"
+        f"local_batch={local_batch} (total={args.train_batch_size}, world={world_size}), device={device}"
     )
 
     mask_randomizer_kwargs = {
@@ -441,14 +477,20 @@ if __name__ == "__main__":
     torch.set_float32_matmul_precision("high")
     cogformer = CogFormer(**cogformer_config).to(device).train()
     cogformer = torch.compile(cogformer, dynamic=True, mode=args.compile_mode)
+    if is_distributed:
+        from torch.nn.parallel import DistributedDataParallel as DDP
+        cogformer = DDP(cogformer, device_ids=[local_rank])
 
-    if args.use_wandb:
+    use_wandb = args.use_wandb and (rank == 0)
+    if use_wandb:
         wandb.init(
             project="cogformer-model-class",
             tags=["CogFormer", "ModelClass", "DDM", "RDM", "CDM"],
-            config={**train_config, "cogformer": cogformer_config},
+            config={**train_config, "cogformer": cogformer_config,
+                    "total_batch_size": args.train_batch_size, "world_size": world_size},
         )
 
+    # checkpoint name encodes total batch size, not per-process local_batch
     checkpoint_path = (
         f"cogformer_model_class_fm"
         f"_l{cogformer_config['decoder_num_layers']}"
@@ -456,7 +498,7 @@ if __name__ == "__main__":
         f"_p{cogformer_config['proj_dim']}"
         f"_s{cogformer_config['num_seeds']}"
         f"_d{cogformer_config['seed_dim']}"
-        f"_b{train_config['batch_size']}"
+        f"_b{args.train_batch_size}"
         f"_e{train_config['epochs']}"
         f"_t{train_config['steps_per_epoch']}.pt"
     )
@@ -473,9 +515,11 @@ if __name__ == "__main__":
         model_class=model_class,
         model_class_config=model_class_config,
         adapter=adapter,
-        use_wandb=args.use_wandb,
+        use_wandb=use_wandb,
         val_epoch_interval=args.val_epoch_interval,
         num_sim_workers=num_sim_workers,
+        world_size=world_size,
+        rank=rank,
     )
 
     is_dry_run = args.dry_run_epochs is not None
@@ -483,8 +527,18 @@ if __name__ == "__main__":
     if is_dry_run:
         train_config["epochs"] = args.dry_run_epochs
 
-    with RunTimer("mc_cf", dry_run=is_dry_run,
-                  total_epochs=total_epochs, dry_run_epochs=args.dry_run_epochs):
+    if rank == 0:
+        with RunTimer("mc_cf", dry_run=is_dry_run,
+                      total_epochs=total_epochs, dry_run_epochs=args.dry_run_epochs):
+            trainer.train(
+                train_config=train_config,
+                val_config=val_config,
+                checkpoint_path=checkpoint_path,
+                fig_path=fig_path,
+                resume=args.resume,
+                resume_start_epoch=args.resume_start_epoch,
+            )
+    else:
         trainer.train(
             train_config=train_config,
             val_config=val_config,
@@ -494,5 +548,7 @@ if __name__ == "__main__":
             resume_start_epoch=args.resume_start_epoch,
         )
 
-    if args.use_wandb:
+    if use_wandb:
         wandb.finish()
+    if is_distributed:
+        dist.destroy_process_group()

@@ -30,7 +30,8 @@ from cogformer.utils.plot_utils import cogformer_mc_colors
 
 from ..configs import MODELS as _BASE_MODELS
 from ..utils import (add_global_params, build_encoder_input_dim, chunked_sample,
-                     PrefetchQueue, train_step, add_architecture_args, add_training_args)
+                     PrefetchQueue, train_step, add_architecture_args, add_training_args,
+                     recommend_sim_workers)
 from ..timing import RunTimer
 
 
@@ -276,7 +277,7 @@ def parse_args():
 
 if __name__ == "__main__":
     args = parse_args()
-    num_sim_workers = args.num_sim_workers if args.num_sim_workers is not None else max(3, (os.cpu_count() or 24) // 8)
+    num_sim_workers = args.num_sim_workers if args.num_sim_workers is not None else recommend_sim_workers()
 
     logging.basicConfig(level=logging.INFO)
     torch.backends.cuda.matmul.allow_tf32 = True

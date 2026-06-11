@@ -1,9 +1,40 @@
 """Shared utility functions for CogFormer experiment scripts."""
 
+import math
+import os
 import numpy as np
 import torch
 from collections import deque
 from concurrent.futures import ThreadPoolExecutor
+
+
+def recommend_batch_size(base: int = 64) -> int:
+    """Suggest a batch size based on available GPU VRAM.
+
+    CogFormer's O(N²) decoder self-attention (N≈1267 tokens) saturates GPU memory
+    bandwidth even at small batch sizes, so throughput per step is roughly flat
+    regardless of batch size.  Larger batches are a *gradient quality* lever, not
+    a wall-clock speed lever — only use them if you also reduce epochs proportionally.
+
+    Formula: scale by sqrt(vram / 8 GB) so the increase is conservative.
+    Cap at 4× base to avoid OOM on attention-heavy architectures.
+    Falls back to base when no CUDA device is present.
+    """
+    if not torch.cuda.is_available():
+        return base
+    vram_gb = torch.cuda.get_device_properties(0).total_memory / (1024 ** 3)
+    scale = max(1.0, math.sqrt(vram_gb / 8.0))
+    return int(min(base * 4, 2 ** round(math.log2(base * scale))))
+
+
+def recommend_sim_workers() -> int:
+    """Number of outer PrefetchQueue workers scaled to available CPU cores.
+
+    Each outer worker spawns (cpu_count // n_outer) inner numba threads,
+    so the total thread count stays proportional to the machine.
+    """
+    cpu = os.cpu_count() or 4
+    return max(3, min(8, cpu // 6))
 
 
 class PrefetchQueue:
@@ -49,7 +80,8 @@ def train_step(net, adapted, config, optimizer, scheduler):
             adapted["param_masks"],
             model_ids=adapted.get("model_ids"),
         )
-        L = net.compute_loss(pred_velocity, target_velocity, adapted["param_masks"])
+        _module = getattr(net, 'module', net)  # handles DDP and DataParallel
+        L = _module.compute_loss(pred_velocity, target_velocity, adapted["param_masks"])
     L.backward()
     if config["gradient_clip_norm"] is not None:
         torch.nn.utils.clip_grad_norm_(net.parameters(), config["gradient_clip_norm"])
@@ -69,14 +101,14 @@ def add_architecture_args(parser):
     parser.add_argument("--pos_embedding_dim", type=int, default=32)
     parser.add_argument("--dropout", type=float, default=0.05)
     parser.add_argument("--layer_dropout", type=float, default=0.05)
-    parser.add_argument("--compile_mode", type=str, default="default",
+    parser.add_argument("--compile_mode", type=str, default="max-autotune-no-cudagraphs",
                         choices=["default", "reduce-overhead", "max-autotune", "max-autotune-no-cudagraphs"])
 
 
 def add_training_args(parser):
     """Register shared training schedule and design-space arguments."""
     parser.add_argument("--lr", type=float, default=1e-4)
-    parser.add_argument("--train_batch_size", type=int, default=64)
+    parser.add_argument("--train_batch_size", type=int, default=recommend_batch_size(64))
     parser.add_argument("--epochs", type=int, default=5000)
     parser.add_argument("--steps_per_epoch", type=int, default=100)
     parser.add_argument("--min_num_obs", type=int, default=200)

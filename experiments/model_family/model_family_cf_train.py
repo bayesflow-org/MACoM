@@ -1,6 +1,7 @@
 import os
 import threading
 import torch
+import torch.distributed as dist
 try:
     import wandb
 except Exception:
@@ -26,7 +27,7 @@ from cogformer.utils.plot_utils import cogformer_fm_colors
 from ..configs import MODELS as _BASE_MODELS, GLOBAL_PARAMS, GLOBAL_VARIABLE_NAMES
 from ..utils import (add_global_params, strip_global_params, build_encoder_input_dim,
                      chunked_sample, PrefetchQueue, train_step,
-                     add_architecture_args, add_training_args)
+                     add_architecture_args, add_training_args, recommend_sim_workers)
 from ..timing import RunTimer
 
 
@@ -48,7 +49,7 @@ MODELS = {
     "ddm": _build_train_config(
         _BASE_MODELS["ddm"],
         val_epoch_interval=2500,
-        wandb_project="cogformer-fm-ddm",
+        wandb_project="cogformer-model-family",
         checkpoint_dir="./outputs/checkpoints/model_family/cf/ddm/",
         checkpoint_prefix="cogformer_ddm_mf",
         fig_subdir="model_family/cf/ddm",
@@ -56,7 +57,7 @@ MODELS = {
     "cdm": _build_train_config(
         _BASE_MODELS["cdm"],
         val_epoch_interval=2500,
-        wandb_project="cogformer-fm-cdm",
+        wandb_project="cogformer-model-family",
         checkpoint_dir="./outputs/checkpoints/model_family/cf/cdm/",
         checkpoint_prefix="cogformer_cdm_mf",
         fig_subdir="model_family/cf/cdm",
@@ -64,7 +65,7 @@ MODELS = {
     "rdm": _build_train_config(
         _BASE_MODELS["rdm"],
         val_epoch_interval=2500,
-        wandb_project="cogformer-fm-rdm",
+        wandb_project="cogformer-model-family",
         checkpoint_dir="./outputs/checkpoints/model_family/cf/rdm/",
         checkpoint_prefix="cogformer_rdm_mf",
         fig_subdir="model_family/cf/rdm",
@@ -80,11 +81,18 @@ class CogFormerTrainer:
         model_family=None,
         adapter=None,
         use_wandb=False,
+        num_sim_workers=None,
+        world_size=1,
+        rank=0,
     ):
         self.net = net
         self.model_cfg = model_cfg
         self.adapter = adapter
         self.use_wandb = use_wandb
+        self.num_sim_workers = num_sim_workers if num_sim_workers is not None else recommend_sim_workers()
+        self.world_size = world_size
+        self.rank = rank
+        self.is_distributed = world_size > 1
         self._local = threading.local()
         if model_family is not None:
             self.model_family = model_family
@@ -138,7 +146,10 @@ class CogFormerTrainer:
         checkpoint_path="cogformer_fm.pt",
         fig_path="fig.pdf",
     ):
-        self._prepare_val_data(val_config)
+        if self.rank == 0:
+            self._prepare_val_data(val_config)
+        if self.is_distributed:
+            dist.barrier()
 
         global_step = 0
         optimizer = AdamW(self.net.parameters(), lr=train_config["learning_rate"], fused=True)
@@ -146,12 +157,14 @@ class CogFormerTrainer:
         val_interval = self.model_cfg["val_epoch_interval"]
         device = train_config["device"]
 
-        with PrefetchQueue(lambda: self._simulate_and_adapt(train_config)) as prefetch:
+        with PrefetchQueue(lambda: self._simulate_and_adapt(train_config),
+                           n_workers=self.num_sim_workers) as prefetch:
             for epoch in range(train_config["epochs"]):
                 pbar = tqdm(
                     total=train_config["steps_per_epoch"],
                     desc=f"Epoch {epoch + 1}/{train_config['epochs']}",
                     miniters=100,
+                    disable=self.rank != 0,
                 )
                 for _ in range(train_config["steps_per_epoch"]):
                     adapted_cpu = prefetch.next()
@@ -170,23 +183,34 @@ class CogFormerTrainer:
                     pbar.update(1)
 
                 if (epoch + 1) % val_interval == 0:
-                    checkpoint_dir = Path(self.model_cfg["checkpoint_dir"])
-                    checkpoint_dir.mkdir(parents=True, exist_ok=True)
-                    torch.save(self.net.state_dict(), checkpoint_dir / checkpoint_path)
-                    self.val_step(val_config, global_step, fig_path)
+                    if self.is_distributed:
+                        dist.barrier()
+                    if self.rank == 0:
+                        checkpoint_dir = Path(self.model_cfg["checkpoint_dir"])
+                        checkpoint_dir.mkdir(parents=True, exist_ok=True)
+                        net_to_save = getattr(self.net, 'module', self.net)
+                        torch.save(net_to_save.state_dict(), checkpoint_dir / checkpoint_path)
+                        self.val_step(val_config, global_step, fig_path)
+                    if self.is_distributed:
+                        dist.barrier()
 
                 scheduler.step()
                 pbar.close()
 
-        checkpoint_dir = Path(self.model_cfg["checkpoint_dir"])
-        checkpoint_dir.mkdir(parents=True, exist_ok=True)
-        torch.save(self.net.state_dict(), checkpoint_dir / checkpoint_path)
+        if self.is_distributed:
+            dist.barrier()
+        if self.rank == 0:
+            checkpoint_dir = Path(self.model_cfg["checkpoint_dir"])
+            checkpoint_dir.mkdir(parents=True, exist_ok=True)
+            net_to_save = getattr(self.net, 'module', self.net)
+            torch.save(net_to_save.state_dict(), checkpoint_dir / checkpoint_path)
 
     def _get_sim_mf(self):
-        """Return a per-thread ModelFamily so 3 outer workers don't contend on one pool."""
+        """Return a per-thread ModelFamily so outer workers don't contend on one pool."""
         if not hasattr(self._local, "mf"):
-            n_outer = 3
-            n_inner = max(1, (os.cpu_count() or 1) // n_outer)
+            n_outer = self.num_sim_workers
+            num_parallel = max(self.world_size, int(os.environ.get("NUM_GPU_JOBS", "1")))
+            n_inner = max(1, (os.cpu_count() or 1) // (n_outer * num_parallel))
             mf = ModelFamily(
                 name=self.model_cfg["name"],
                 model=self.model_cfg["model_cls"](),
@@ -302,12 +326,28 @@ def parse_args():
                              "in estimation. Use --no-estimate-global-params to disable.")
     parser.add_argument("--val_epoch_interval", type=int, default=None,
                         help="Override the model-default validation interval (epochs between val steps).")
+    parser.add_argument("--num_sim_workers", type=int, default=None,
+                        help="Parallel CPU simulation workers; each gets cpu_count//num_sim_workers numba threads. "
+                             "Defaults to recommend_sim_workers() — scales with cpu_count.")
     return parser.parse_args()
 
 
 if __name__ == "__main__":
     args = parse_args()
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
+    # DDP: torchrun sets LOCAL_RANK when launching with --nproc_per_node > 1
+    local_rank = int(os.environ.get("LOCAL_RANK", -1))
+    is_distributed = local_rank >= 0
+    if is_distributed:
+        dist.init_process_group("nccl")
+        world_size = dist.get_world_size()
+        rank = dist.get_rank()
+        device = torch.device(f"cuda:{local_rank}")
+        torch.cuda.set_device(device)
+    else:
+        world_size = 1
+        rank = 0
+        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
     model_cfg = MODELS[args.model]
     if not args.estimate_global_params:
@@ -315,7 +355,7 @@ if __name__ == "__main__":
     if args.val_epoch_interval is not None:
         model_cfg = dict(model_cfg)
         model_cfg["val_epoch_interval"] = args.val_epoch_interval
-    use_wandb = args.use_wandb
+    use_wandb = args.use_wandb and (rank == 0)
 
     max_num_regressors = args.max_num_regressors
     max_num_categories = args.max_num_categories
@@ -358,9 +398,12 @@ if __name__ == "__main__":
 
     encoder_input_dim = build_encoder_input_dim(max_num_regressors, max_num_categories, keep_intercept)
 
+    # Each process handles a local slice of the total batch; DDP averages gradients
+    local_batch = max(1, args.train_batch_size // world_size)
+
     train_config = {
         "epochs": args.epochs,
-        "batch_size": args.train_batch_size,
+        "batch_size": local_batch,
         "steps_per_epoch": args.steps_per_epoch,
         "learning_rate": args.lr,
         "gradient_clip_norm": 5.0,
@@ -400,16 +443,19 @@ if __name__ == "__main__":
     }
 
     logging.info(
-        f"Training {args.model.upper()} with {cogformer_config['decoder_layer_design']} over "
+        f"[rank {rank}] Training {args.model.upper()} with {cogformer_config['decoder_layer_design']} over "
         f"{train_config['epochs']} epochs, {train_config['steps_per_epoch']} steps/epoch, "
-        f"batch size {train_config['batch_size']}."
+        f"local_batch={local_batch} (total={args.train_batch_size}, world={world_size})."
     )
 
     if use_wandb:
         wandb.init(
             project=model_cfg["wandb_project"],
+            name=args.model.upper(),
             tags=["CogFormer", args.model.upper(), "ModelFamily"],
-            config={**train_config, **{"cogformer": cogformer_config}},
+            config={**train_config, **{"cogformer": cogformer_config,
+                                       "total_batch_size": args.train_batch_size,
+                                       "world_size": world_size}},
         )
 
     torch.set_float32_matmul_precision("high")
@@ -425,6 +471,9 @@ if __name__ == "__main__":
     adapter = Adapter()
     cogformer = CogFormer(**cogformer_config).to(device).train()
     cogformer = torch.compile(cogformer, dynamic=True, mode=args.compile_mode)
+    if is_distributed:
+        from torch.nn.parallel import DistributedDataParallel as DDP
+        cogformer = DDP(cogformer, device_ids=[local_rank])
 
     trainer = CogFormerTrainer(
         model_family=model_family,
@@ -432,9 +481,13 @@ if __name__ == "__main__":
         adapter=adapter,
         net=cogformer,
         use_wandb=use_wandb,
+        num_sim_workers=args.num_sim_workers,
+        world_size=world_size,
+        rank=rank,
     )
 
     ckpt_prefix = model_cfg["checkpoint_prefix"]
+    # checkpoint name encodes total batch size (args.train_batch_size), not the per-process local_batch
     checkpoint_path = (
         f"{ckpt_prefix}"
         f"_l{cogformer_config['decoder_num_layers']}"
@@ -443,7 +496,7 @@ if __name__ == "__main__":
         f"_s{cogformer_config['num_seeds']}"
         f"_d{cogformer_config['seed_dim']}"
         f"_o{val_sample_config['num_obs']}"
-        f"_b{train_config['batch_size']}"
+        f"_b{args.train_batch_size}"
         f"_e{train_config['epochs']}"
         f"_t{train_config['steps_per_epoch']}.pt"
     )
@@ -456,7 +509,7 @@ if __name__ == "__main__":
         f"_s{cogformer_config['num_seeds']}"
         f"_d{cogformer_config['seed_dim']}"
         f"_o{val_sample_config['num_obs']}"
-        f"_b{train_config['batch_size']}"
+        f"_b{args.train_batch_size}"
         f"_e{train_config['epochs']}"
         f"_t{train_config['steps_per_epoch']}_test.pdf"
     )
@@ -466,13 +519,24 @@ if __name__ == "__main__":
     if is_dry_run:
         train_config["epochs"] = args.dry_run_epochs
 
-    with RunTimer(f"mf_cf_{args.model}", dry_run=is_dry_run,
-                  total_epochs=total_epochs, dry_run_epochs=args.dry_run_epochs):
+    if rank == 0:
+        with RunTimer(f"mf_cf_{args.model}", dry_run=is_dry_run,
+                      total_epochs=total_epochs, dry_run_epochs=args.dry_run_epochs):
+            trainer.train(
+                train_config=train_config,
+                val_config=val_config,
+                checkpoint_path=checkpoint_path,
+                fig_path=fig_path,
+            )
+    else:
         trainer.train(
             train_config=train_config,
             val_config=val_config,
             checkpoint_path=checkpoint_path,
             fig_path=fig_path,
         )
+
     if use_wandb:
         wandb.finish()
+    if is_distributed:
+        dist.destroy_process_group()

@@ -27,7 +27,7 @@ from cogformer.utils.plot_utils import cogformer_fm_colors
 from ..configs import MODELS as _BASE_MODELS, GLOBAL_PARAMS, GLOBAL_VARIABLE_NAMES
 from ..utils import (add_global_params, strip_global_params, build_encoder_input_dim,
                      chunked_sample, PrefetchQueue, train_step,
-                     add_architecture_args, add_training_args)
+                     add_architecture_args, add_training_args, recommend_sim_workers)
 from ..timing import RunTimer
 
 HOLDOUT_TYPES = ["random", "variability", "interaction", "sparsity"]
@@ -56,7 +56,7 @@ _CHECKPOINT_PREFIXES = {
 
 class CogFormerTrainer:
     def __init__(self, net, model_cfg, model_family, adapter, holdout_type,
-                 val_epoch_interval=1000, use_wandb=False):
+                 val_epoch_interval=1000, use_wandb=False, num_sim_workers=None):
         self.net = net
         self.model_cfg = model_cfg
         self.model_family = model_family
@@ -64,12 +64,13 @@ class CogFormerTrainer:
         self.holdout_type = holdout_type
         self.val_epoch_interval = val_epoch_interval
         self.use_wandb = use_wandb
+        self.num_sim_workers = num_sim_workers if num_sim_workers is not None else recommend_sim_workers()
         self._local = threading.local()
 
     def _get_sim_mf(self):
-        """Return a per-thread ModelFamily so 3 outer workers don't contend on one pool."""
+        """Return a per-thread ModelFamily so outer workers don't contend on one pool."""
         if not hasattr(self._local, "mf"):
-            n_outer = 3
+            n_outer = self.num_sim_workers
             n_inner = max(1, (os.cpu_count() or 1) // n_outer)
             self._local.mf = ModelFamily(
                 name=self.model_cfg["name"],
@@ -140,7 +141,8 @@ class CogFormerTrainer:
         scheduler = CosineAnnealingLR(optimizer, T_max=train_config["epochs"])
         device = train_config["device"]
 
-        with PrefetchQueue(lambda: self._simulate_and_adapt(train_config)) as prefetch:
+        with PrefetchQueue(lambda: self._simulate_and_adapt(train_config),
+                           n_workers=self.num_sim_workers) as prefetch:
             for epoch in range(train_config["epochs"]):
                 pbar = tqdm(
                     total=train_config["steps_per_epoch"],
@@ -266,6 +268,9 @@ def parse_args():
                         help="[sparsity] Fixed free_prob used during training.")
     parser.add_argument("--estimate_global_params", action=argparse.BooleanOptionalAction,
                         default=True)
+    parser.add_argument("--num_sim_workers", type=int, default=None,
+                        help="Parallel CPU simulation workers; each gets cpu_count//num_sim_workers numba threads. "
+                             "Defaults to recommend_sim_workers() — scales with cpu_count.")
     return parser.parse_args()
 
 
@@ -452,6 +457,7 @@ if __name__ == "__main__":
         holdout_type=args.holdout_type,
         val_epoch_interval=args.val_epoch_interval,
         use_wandb=args.use_wandb,
+        num_sim_workers=args.num_sim_workers,
     )
 
     is_dry_run = args.dry_run_epochs is not None

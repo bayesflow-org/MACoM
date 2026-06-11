@@ -9,12 +9,17 @@ set -euo pipefail
 source "$(dirname "${BASH_SOURCE[0]}")/../shared_config.sh"
 
 export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
+# NCCL: disable P2P to avoid hang on systems where NVLink/PCIe P2P init stalls
+export NCCL_P2P_DISABLE=1
 
 DRY=()
 [[ -n "${DRY_EPOCHS:-}" ]] && DRY=(--dry_run_epochs "$DRY_EPOCHS")
 
 WANDB=()
 [[ -n "${USE_WANDB:-}" ]] && WANDB=(--use_wandb)
+
+SIM_WORKERS_ARG=()
+[[ -n "${NUM_SIM_WORKERS:-}" ]] && SIM_WORKERS_ARG=(--num_sim_workers "$NUM_SIM_WORKERS")
 
 # ── CF train ───────────────────────────────────────────────────────────────────
 echo "=== ModelClass: CF train ==="
@@ -36,7 +41,7 @@ python -m experiments.model_class.model_class_cf_train \
     --steps_per_epoch "$STEPS" \
     --lr 1e-4 --dropout 0.05 --layer_dropout 0.05 \
     --fm_sample_steps 50 --fm_num_samples 100 \
-    "${DRY[@]}" "${WANDB[@]}"
+    "${DRY[@]}" "${WANDB[@]}" "${SIM_WORKERS_ARG[@]}"
 
 # ── CF validate ────────────────────────────────────────────────────────────────
 echo "=== ModelClass: CF validate ==="
