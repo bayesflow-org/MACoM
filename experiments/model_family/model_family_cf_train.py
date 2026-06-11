@@ -1,5 +1,4 @@
 import os
-import threading
 import torch
 import torch.distributed as dist
 try:
@@ -26,8 +25,8 @@ from cogformer.utils.plot_utils import cogformer_fm_colors
 
 from ..configs import MODELS as _BASE_MODELS, GLOBAL_PARAMS, GLOBAL_VARIABLE_NAMES
 from ..utils import (add_global_params, strip_global_params, build_encoder_input_dim,
-                     chunked_sample, PrefetchQueue, train_step,
-                     add_architecture_args, add_training_args, recommend_sim_workers)
+                     chunked_sample, train_step, add_architecture_args, add_training_args,
+                     recommend_sim_workers, ModelFamilyDataset, make_sim_loader)
 from ..timing import RunTimer
 
 
@@ -73,6 +72,61 @@ MODELS = {
 }
 
 
+class _SimFn:
+    """Picklable simulation callable for spawn-mode worker processes.
+
+    Initializes its own ModelFamily on first call (per-process); _mf and _adapter
+    are reset to None by __getstate__ so they are not included in the pickle payload.
+    """
+
+    def __init__(self, model_cfg, train_config, num_sim_workers, world_size):
+        self._name = model_cfg["name"]
+        self._model_cls = model_cfg["model_cls"]
+        self._prior_fn = model_cfg["prior_fn"]
+        self._link_fn = model_cfg["link_fn"]
+        self._holdout_configs = model_cfg.get("holdout_configs")
+        self._train_context = model_cfg.get("train_context")
+        self._train_config = {k: v for k, v in train_config.items() if k != "device"}
+        self._n_sim = num_sim_workers
+        self._world = world_size
+        self._mf = None
+        self._adapter = None
+
+    def __getstate__(self):
+        d = dict(self.__dict__)
+        d["_mf"] = None
+        d["_adapter"] = None
+        return d
+
+    def _init(self):
+        from cogformer.simulator import ModelFamily
+        from cogformer.adapter import Adapter
+        num_par = max(self._world, int(os.environ.get("NUM_GPU_JOBS", "1")))
+        set_numba_threads((os.cpu_count() or 1) // (self._n_sim * num_par))
+        self._mf = ModelFamily(
+            name=self._name, model=self._model_cls(),
+            prior=self._prior_fn(), num_workers=1,
+        )
+        if self._holdout_configs:
+            self._mf.set_holdout_configs(self._holdout_configs)
+        self._adapter = Adapter()
+
+    def __call__(self):
+        if self._mf is None:
+            self._init()
+        c = self._train_config
+        samples = self._mf.batch_sample(
+            **c["model_family_config"],
+            **c["train_sample_config"],
+            prior=self._mf.prior,
+            batch_size=c["batch_size"],
+            flatten_param_outputs=True,
+            link_fun=self._link_fn(),
+            context=self._train_context,
+        )
+        return self._adapter.adapt(samples, device="cpu")
+
+
 class CogFormerTrainer:
     def __init__(
         self,
@@ -93,7 +147,6 @@ class CogFormerTrainer:
         self.world_size = world_size
         self.rank = rank
         self.is_distributed = world_size > 1
-        self._local = threading.local()
         if model_family is not None:
             self.model_family = model_family
         else:
@@ -157,45 +210,46 @@ class CogFormerTrainer:
         val_interval = self.model_cfg["val_epoch_interval"]
         device = train_config["device"]
 
-        with PrefetchQueue(lambda: self._simulate_and_adapt(train_config),
-                           n_workers=self.num_sim_workers) as prefetch:
-            for epoch in range(train_config["epochs"]):
-                pbar = tqdm(
-                    total=train_config["steps_per_epoch"],
-                    desc=f"Epoch {epoch + 1}/{train_config['epochs']}",
-                    miniters=100,
-                    disable=self.rank != 0,
-                )
-                for _ in range(train_config["steps_per_epoch"]):
-                    adapted_cpu = prefetch.next()
-                    adapted = {
-                        k: v.to(device, non_blocking=True) if isinstance(v, torch.Tensor) else v
-                        for k, v in adapted_cpu.items()
-                    }
-                    loss, current_lr = train_step(self.net, adapted, train_config, optimizer, scheduler)
-                    if self.use_wandb:
-                        wandb.log(
-                            {"train/loss": loss, "opt/lr": current_lr, "epoch": epoch + 1},
-                            step=global_step,
-                        )
-                    global_step += 1
-                    pbar.set_postfix(loss=f"{loss:.4f}", lr=f"{current_lr:.2e}")
-                    pbar.update(1)
+        dataset = ModelFamilyDataset(self.model_cfg, train_config,
+                                     self.num_sim_workers, self.world_size)
+        loader_iter = iter(make_sim_loader(dataset, self.num_sim_workers))
+        for epoch in range(train_config["epochs"]):
+            pbar = tqdm(
+                total=train_config["steps_per_epoch"],
+                desc=f"Epoch {epoch + 1}/{train_config['epochs']}",
+                miniters=100,
+                disable=self.rank != 0,
+            )
+            for _ in range(train_config["steps_per_epoch"]):
+                adapted_cpu = next(loader_iter)
+                adapted = {
+                    k: v.to(device, non_blocking=True) if isinstance(v, torch.Tensor) else v
+                    for k, v in adapted_cpu.items()
+                }
+                loss, current_lr = train_step(self.net, adapted, train_config, optimizer, scheduler)
+                if self.use_wandb:
+                    wandb.log(
+                        {"train/loss": loss, "opt/lr": current_lr, "epoch": epoch + 1},
+                        step=global_step,
+                    )
+                global_step += 1
+                pbar.set_postfix(loss=f"{loss:.4f}", lr=f"{current_lr:.2e}")
+                pbar.update(1)
 
-                if (epoch + 1) % val_interval == 0:
-                    if self.is_distributed:
-                        dist.barrier()
-                    if self.rank == 0:
-                        checkpoint_dir = Path(self.model_cfg["checkpoint_dir"])
-                        checkpoint_dir.mkdir(parents=True, exist_ok=True)
-                        net_to_save = getattr(self.net, 'module', self.net)
-                        torch.save(net_to_save.state_dict(), checkpoint_dir / checkpoint_path)
-                        self.val_step(val_config, global_step, fig_path)
-                    if self.is_distributed:
-                        dist.barrier()
+            if (epoch + 1) % val_interval == 0:
+                if self.is_distributed:
+                    dist.barrier()
+                if self.rank == 0:
+                    checkpoint_dir = Path(self.model_cfg["checkpoint_dir"])
+                    checkpoint_dir.mkdir(parents=True, exist_ok=True)
+                    net_to_save = getattr(self.net, 'module', self.net)
+                    torch.save(net_to_save.state_dict(), checkpoint_dir / checkpoint_path)
+                    self.val_step(val_config, global_step, fig_path)
+                if self.is_distributed:
+                    dist.barrier()
 
-                scheduler.step()
-                pbar.close()
+            scheduler.step()
+            pbar.close()
 
         if self.is_distributed:
             dist.barrier()
@@ -204,39 +258,6 @@ class CogFormerTrainer:
             checkpoint_dir.mkdir(parents=True, exist_ok=True)
             net_to_save = getattr(self.net, 'module', self.net)
             torch.save(net_to_save.state_dict(), checkpoint_dir / checkpoint_path)
-
-    def _get_sim_mf(self):
-        """Return a per-thread ModelFamily so outer workers don't contend on one pool."""
-        if not hasattr(self._local, "mf"):
-            n_outer = self.num_sim_workers
-            num_parallel = max(self.world_size, int(os.environ.get("NUM_GPU_JOBS", "1")))
-            n_inner = max(1, (os.cpu_count() or 1) // (n_outer * num_parallel))
-            mf = ModelFamily(
-                name=self.model_cfg["name"],
-                model=self.model_cfg["model_cls"](),
-                prior=self.model_cfg["prior_fn"](),
-                num_workers=n_inner,
-            )
-            if self.model_cfg.get("holdout_configs"):
-                mf.set_holdout_configs(self.model_cfg["holdout_configs"])
-            self._local.mf = mf
-        return self._local.mf
-
-    def _simulate_and_adapt(self, config):
-        mf = self._get_sim_mf()
-        link_fn = self.model_cfg["link_fn"]
-        samples = mf.batch_sample(
-            **config["model_family_config"],
-            **config["train_sample_config"],
-            prior=mf.prior,
-            batch_size=config["batch_size"],
-            flatten_param_outputs=True,
-            link_fun=link_fn(),
-            context=self.model_cfg.get("train_context"),
-        )
-        adapted = self.adapter.adapt(samples, device="cpu")
-        return {k: v.pin_memory() if isinstance(v, torch.Tensor) else v
-                for k, v in adapted.items()}
 
     @torch.no_grad()
     def val_step(self, config, global_step, fig_path):

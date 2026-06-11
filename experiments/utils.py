@@ -4,8 +4,7 @@ import math
 import os
 import numpy as np
 import torch
-from collections import deque
-from concurrent.futures import ThreadPoolExecutor
+import torch.utils.data
 
 
 def recommend_batch_size(base: int = 64) -> int:
@@ -28,43 +27,137 @@ def recommend_batch_size(base: int = 64) -> int:
 
 
 def recommend_sim_workers() -> int:
-    """Number of outer PrefetchQueue workers scaled to available CPU cores.
+    """Number of DataLoader simulation workers scaled to available CPU cores.
 
-    Each outer worker spawns (cpu_count // n_outer) inner numba threads,
-    so the total thread count stays proportional to the machine.
+    Each worker sets numba to (cpu_count // n_workers) threads and runs
+    ModelFamily with num_workers=1, so total thread count == cpu_count.
     """
     cpu = os.cpu_count() or 4
-    return max(3, min(8, cpu // 6))
+    return max(3, min(12, cpu // 4))
 
 
-class PrefetchQueue:
-    """Overlap CPU simulation with GPU training by keeping n_workers batches in flight.
+def set_numba_threads(n: int) -> None:
+    try:
+        import numba
+        numba.set_num_threads(max(1, n))
+    except ImportError:
+        pass
 
-    While the GPU processes batch i, batches i+1..i+n_workers simulate in parallel
-    threads, so the GPU never stalls waiting for data after the initial warm-up.
-    Each worker thread should use its own simulator instance to avoid contention;
-    pass a callable that handles this (e.g. via threading.local).
+
+def _identity_collate(x):
+    return x
+
+
+def make_sim_loader(dataset, num_workers):
+    """Build a DataLoader for an infinite simulation IterableDataset."""
+    use_mp = num_workers > 0
+    return torch.utils.data.DataLoader(
+        dataset,
+        batch_size=None,
+        collate_fn=_identity_collate,
+        num_workers=num_workers,
+        pin_memory=torch.cuda.is_available(),
+        **(dict(prefetch_factor=2, persistent_workers=True,
+                multiprocessing_context="spawn") if use_mp else {}),
+    )
+
+
+class ModelFamilyDataset(torch.utils.data.IterableDataset):
+    """Infinite simulation dataset for a single ModelFamily.
+
+    Each spawned worker initializes its own ModelFamily and Adapter on first
+    iteration, then yields pre-adapted CPU batches indefinitely.
     """
 
-    def __init__(self, sample_fn, n_workers: int = 3):
-        self._fn = sample_fn
-        self._executor = ThreadPoolExecutor(max_workers=n_workers)
-        self._queue = deque(self._executor.submit(self._fn) for _ in range(n_workers))
+    def __init__(self, model_cfg, train_config, num_workers, world_size=1):
+        self._name = model_cfg["name"]
+        self._model_cls = model_cfg["model_cls"]
+        self._prior_fn = model_cfg["prior_fn"]
+        self._link_fn = model_cfg["link_fn"]
+        self._holdout_configs = model_cfg.get("holdout_configs")
+        self._train_context = model_cfg.get("train_context")
+        self._batch_size = train_config["batch_size"]
+        self._mf_config = train_config["model_family_config"]
+        self._sample_config = train_config["train_sample_config"]
+        self._free_prob = train_config.get("train_free_prob")
+        self._slope_patterns = train_config.get("train_slope_patterns")
+        self._n_workers = num_workers
+        self._world = world_size
 
-    def next(self):
-        batch = self._queue.popleft().result()
-        self._queue.append(self._executor.submit(self._fn))
-        return batch
+    def __iter__(self):
+        from cogformer.simulator import ModelFamily
+        from cogformer.adapter import Adapter
+        info = torch.utils.data.get_worker_info()
+        n_workers = info.num_workers if info else 1
+        num_par = max(self._world, int(os.environ.get("NUM_GPU_JOBS", "1")))
+        set_numba_threads((os.cpu_count() or 1) // (n_workers * num_par))
+        mf = ModelFamily(
+            name=self._name, model=self._model_cls(),
+            prior=self._prior_fn(), num_workers=1,
+        )
+        if self._holdout_configs:
+            mf.set_holdout_configs(self._holdout_configs)
+        adapter = Adapter()
+        while True:
+            samples = mf.batch_sample(
+                **self._mf_config,
+                **self._sample_config,
+                prior=mf.prior,
+                batch_size=self._batch_size,
+                flatten_param_outputs=True,
+                link_fun=self._link_fn(),
+                context=self._train_context,
+                free_prob=self._free_prob,
+                allowed_slope_patterns=self._slope_patterns,
+            )
+            yield adapter.adapt(samples, device="cpu")
 
-    def shutdown(self):
-        self._executor.shutdown(wait=False, cancel_futures=True)
 
-    def __enter__(self):
-        return self
+class ModelClassDataset(torch.utils.data.IterableDataset):
+    """Infinite simulation dataset for a ModelClass (multiple ModelFamilies).
 
-    def __exit__(self, *_):
-        self.shutdown()
-        return False
+    Each spawned worker initializes its own ModelClass and Adapter on first iteration.
+    """
+
+    def __init__(self, model_class_config, train_config, num_workers, world_size=1):
+        self._families_cfg = model_class_config["families"]
+        self._link_fns = model_class_config["link_funs"]
+        self._batch_size = train_config["batch_size"]
+        self._mf_config = train_config["model_family_config"]
+        self._sample_config = train_config["train_sample_config"]
+        self._n_workers = num_workers
+        self._world = world_size
+
+    def __iter__(self):
+        from cogformer.simulator import ModelFamily, ModelClass
+        from cogformer.adapter import Adapter
+        info = torch.utils.data.get_worker_info()
+        n_workers = info.num_workers if info else 1
+        num_par = max(self._world, int(os.environ.get("NUM_GPU_JOBS", "1")))
+        set_numba_threads((os.cpu_count() or 1) // (n_workers * num_par))
+        families = {
+            name: ModelFamily(
+                model=cfg["model_cls"](), name=name,
+                prior=cfg["prior_fn"](),
+                intrinsic_params=cfg["intrinsic_params"],
+                mask_randomizer_kwargs=cfg["mask_randomizer_kwargs"],
+                num_workers=1,
+            )
+            for name, cfg in self._families_cfg.items()
+        }
+        mc = ModelClass(
+            model_families=families,
+            link_funs={k: fn() for k, fn in self._link_fns.items()},
+        )
+        adapter = Adapter()
+        while True:
+            samples = mc.batch_sample(
+                **self._mf_config,
+                **self._sample_config,
+                batch_size=self._batch_size,
+                flatten_param_outputs=True,
+            )
+            yield adapter.adapt(samples, device="cpu")
 
 
 def train_step(net, adapted, config, optimizer, scheduler):

@@ -1,5 +1,4 @@
 import os
-import threading
 import torch
 try:
     import wandb
@@ -30,8 +29,8 @@ from cogformer.utils.plot_utils import cogformer_mc_colors
 
 from ..configs import MODELS as _BASE_MODELS
 from ..utils import (add_global_params, build_encoder_input_dim, chunked_sample,
-                     PrefetchQueue, train_step, add_architecture_args, add_training_args,
-                     recommend_sim_workers)
+                     ModelClassDataset, make_sim_loader, train_step, add_architecture_args,
+                     add_training_args, recommend_sim_workers)
 from ..timing import RunTimer
 
 
@@ -65,39 +64,6 @@ class CogFormerTrainer:
         self.use_wandb = use_wandb
         self.val_epoch_interval = val_epoch_interval
         self.num_sim_workers = num_sim_workers
-        self._local = threading.local()
-
-    def _get_sim_mc(self):
-        """Return a per-thread ModelClass so outer workers don't contend on one instance."""
-        if not hasattr(self._local, "mc"):
-            n_outer = self.num_sim_workers
-            n_inner = max(1, (os.cpu_count() or 1) // n_outer)
-            families = {}
-            for name, cfg in self.model_class_config["families"].items():
-                families[name] = ModelFamily(
-                    model=cfg["model_cls"](),
-                    name=name,
-                    prior=cfg["prior_fn"](),
-                    intrinsic_params=cfg["intrinsic_params"],
-                    mask_randomizer_kwargs=cfg["mask_randomizer_kwargs"],
-                    num_workers=n_inner,
-                )
-            link_funs = {k: fn() for k, fn in self.model_class_config["link_funs"].items()}
-            self._local.mc = ModelClass(model_families=families, link_funs=link_funs)
-        return self._local.mc
-
-    def _simulate_and_adapt(self, config):
-        mc = self._get_sim_mc()
-        samples = mc.batch_sample(
-            **config["model_family_config"],
-            **config["train_sample_config"],
-            batch_size=config["batch_size"],
-            flatten_param_outputs=True,
-        )
-        adapted = self.adapter.adapt(samples, device="cpu")
-        return {k: v.pin_memory() if isinstance(v, torch.Tensor) else v
-                for k, v in adapted.items()}
-
     def _prepare_val_data(self, val_config):
         """Pre-generate fixed validation datasets for all model families once."""
         device = val_config["device"]
@@ -154,38 +120,38 @@ class CogFormerTrainer:
         scheduler = CosineAnnealingLR(optimizer, T_max=train_config["epochs"])
         device = train_config["device"]
 
-        with PrefetchQueue(lambda: self._simulate_and_adapt(train_config),
-                           n_workers=self.num_sim_workers) as prefetch:
-            for epoch in range(train_config["epochs"]):
-                pbar = tqdm(
-                    total=train_config["steps_per_epoch"],
-                    desc=f"Epoch {epoch + 1}/{train_config['epochs']}",
-                    miniters=100,
-                )
-                for _ in range(train_config["steps_per_epoch"]):
-                    adapted_cpu = prefetch.next()
-                    adapted = {
-                        k: v.to(device, non_blocking=True) if isinstance(v, torch.Tensor) else v
-                        for k, v in adapted_cpu.items()
-                    }
-                    loss, current_lr = train_step(self.net, adapted, train_config, optimizer, scheduler)
-                    if self.use_wandb:
-                        wandb.log(
-                            {"train/loss": loss, "opt/lr": current_lr, "epoch": epoch + 1},
-                            step=global_step,
-                        )
-                    global_step += 1
-                    pbar.set_postfix(loss=f"{loss:.4f}", lr=f"{current_lr:.2e}")
-                    pbar.update(1)
+        dataset = ModelClassDataset(self.model_class_config, train_config, self.num_sim_workers)
+        loader_iter = iter(make_sim_loader(dataset, self.num_sim_workers))
+        for epoch in range(train_config["epochs"]):
+            pbar = tqdm(
+                total=train_config["steps_per_epoch"],
+                desc=f"Epoch {epoch + 1}/{train_config['epochs']}",
+                miniters=100,
+            )
+            for _ in range(train_config["steps_per_epoch"]):
+                adapted_cpu = next(loader_iter)
+                adapted = {
+                    k: v.to(device, non_blocking=True) if isinstance(v, torch.Tensor) else v
+                    for k, v in adapted_cpu.items()
+                }
+                loss, current_lr = train_step(self.net, adapted, train_config, optimizer, scheduler)
+                if self.use_wandb:
+                    wandb.log(
+                        {"train/loss": loss, "opt/lr": current_lr, "epoch": epoch + 1},
+                        step=global_step,
+                    )
+                global_step += 1
+                pbar.set_postfix(loss=f"{loss:.4f}", lr=f"{current_lr:.2e}")
+                pbar.update(1)
 
-                if (epoch + 1) % self.val_epoch_interval == 0:
-                    checkpoint_dir = Path(CHECKPOINT_DIR)
-                    checkpoint_dir.mkdir(parents=True, exist_ok=True)
-                    torch.save(self.net.state_dict(), checkpoint_dir / checkpoint_path)
-                    self.val_step(val_config, global_step, fig_path)
+            if (epoch + 1) % self.val_epoch_interval == 0:
+                checkpoint_dir = Path(CHECKPOINT_DIR)
+                checkpoint_dir.mkdir(parents=True, exist_ok=True)
+                torch.save(self.net.state_dict(), checkpoint_dir / checkpoint_path)
+                self.val_step(val_config, global_step, fig_path)
 
-                scheduler.step()
-                pbar.close()
+            scheduler.step()
+            pbar.close()
 
         checkpoint_dir = Path(CHECKPOINT_DIR)
         checkpoint_dir.mkdir(parents=True, exist_ok=True)
