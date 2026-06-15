@@ -21,6 +21,9 @@ fi
 # NCCL: disable P2P to avoid hang on systems where NVLink/PCIe P2P init stalls;
 # falls back to shared memory which works fine for intra-node DDP.
 export NCCL_P2P_DISABLE=1
+# Reduce allocator fragmentation — important on this shared box where a co-tenant
+# can hold tens of GB, leaving us a tight, fragmented remainder.
+export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
 
 CF_DRY=()
 [[ -n "${DRY_EPOCHS:-}" ]] && CF_DRY=(--dry_run_epochs "$DRY_EPOCHS")
@@ -28,11 +31,22 @@ CF_DRY=()
 BF_DRY=()
 [[ -n "${MF_BF_DRY_EPOCHS:-}" ]] && BF_DRY=(--dry_run_epochs "$MF_BF_DRY_EPOCHS")
 
+# USE_WANDB controls CF (CogFormer) logging only. BF (BayesFlow baseline) logging
+# is opt-in via BF_USE_WANDB so a "CF-only" run doesn't also log the baselines.
 WANDB=()
 [[ -n "${USE_WANDB:-}" ]] && WANDB=(--use_wandb)
+BF_WANDB=()
+[[ -n "${BF_USE_WANDB:-}" ]] && BF_WANDB=(--use_wandb)
 
 SIM_WORKERS_ARG=()
 [[ -n "${NUM_SIM_WORKERS:-}" ]] && SIM_WORKERS_ARG=(--num_sim_workers "$NUM_SIM_WORKERS")
+
+# Phase/model selectors (space-separated; empty string skips the phase).
+# Defaults run everything, so calling this script with no overrides is unchanged.
+# run_all.sh sets these to schedule individual families across GPUs in waves.
+CF_MODELS="${CF_MODELS-ddm cdm rdm}"
+BF_MODELS="${BF_MODELS-ddm cdm rdm}"
+C2ST_MODELS="${C2ST_MODELS-ddm cdm rdm}"
 
 cf_train() {
     python -m experiments.model_family.model_family_cf_train \
@@ -48,7 +62,8 @@ cf_train() {
         --min_num_obs "$MIN_OBS" \
         --max_num_obs "$MAX_OBS" \
         --train_batch_size "$BATCH" \
-        --val_batch_size   "$VAL_BATCH" \
+        --val_batch_size   "${CF_VAL_BATCH:-50}" \
+        --val_samples_chunk_size "${CF_VAL_CHUNK:-1}" \
         --epochs          "$EPOCHS" \
         --steps_per_epoch "$STEPS" \
         --lr 1e-4 --dropout 0.05 --layer_dropout 0.05 \
@@ -71,31 +86,37 @@ cf_validate() {
 
 declare -A MF_CKPTS=([ddm]="$DDM_MF_CKPT" [cdm]="$CDM_MF_CKPT" [rdm]="$RDM_MF_CKPT")
 
-# ── CF train → validate per model (sequential DDP, each uses all GPUs) ────────
-echo "=== ModelFamily: CF (N_GPUS=${N_GPUS}, DDP) ==="
-for model in ddm cdm rdm; do
-    echo "  $model: train ..."
-    cf_train "$model"
-    echo "  $model: validate ..."
-    cf_validate "$model" "${MF_CKPTS[$model]}"
-done
+# ── CF train → validate per model (single GPU per job) ────────────────────────
+if [ -n "${CF_MODELS// }" ]; then
+    echo "=== ModelFamily: CF (N_GPUS=${N_GPUS}) — models: ${CF_MODELS} ==="
+    for model in $CF_MODELS; do
+        echo "  $model: train ..."
+        cf_train "$model"
+        echo "  $model: validate ..."
+        cf_validate "$model" "${MF_CKPTS[$model]}"
+    done
+fi
 
 # ── BF train → validate per model ─────────────────────────────────────────────
-echo "=== ModelFamily: BF ==="
-for model in ddm cdm rdm; do
-    for case in intercept_only fixed regressed; do
-        echo "  $model / $case: train ..."
-        python -m experiments.model_family.model_family_bf_train \
-            --model "$model" --case "$case" \
-            --epochs "$MF_BF_EPOCHS" --steps_per_epoch 100 --batch_size 64 \
-            "${BF_DRY[@]}" "${WANDB[@]}"
+if [ -n "${BF_MODELS// }" ]; then
+    echo "=== ModelFamily: BF — models: ${BF_MODELS} ==="
+    for model in $BF_MODELS; do
+        for case in intercept_only fixed regressed; do
+            echo "  $model / $case: train ..."
+            python -m experiments.model_family.model_family_bf_train \
+                --model "$model" --case "$case" \
+                --epochs "$MF_BF_EPOCHS" --steps_per_epoch 100 --batch_size 64 \
+                "${BF_DRY[@]}" "${BF_WANDB[@]}"
+        done
+        echo "  $model: validate ..."
+        python -m experiments.model_family.model_family_bf_validate --model "$model"
     done
-    echo "  $model: validate ..."
-    python -m experiments.model_family.model_family_bf_validate --model "$model"
-done
+fi
 
 # ── C2ST ───────────────────────────────────────────────────────────────────────
-echo "=== ModelFamily: C2ST ==="
-for model in ddm cdm rdm; do
-    python -m experiments.model_family.model_family_c2st --model "$model"
-done
+if [ -n "${C2ST_MODELS// }" ]; then
+    echo "=== ModelFamily: C2ST — models: ${C2ST_MODELS} ==="
+    for model in $C2ST_MODELS; do
+        python -m experiments.model_family.model_family_c2st --model "$model"
+    done
+fi

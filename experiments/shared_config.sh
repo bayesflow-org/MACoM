@@ -20,28 +20,20 @@ OBS=500
 MIN_OBS=200
 MAX_OBS=1000
 
-# Batch size — conservative scaling by VRAM.
-# CogFormer's O(N²) decoder self-attention saturates GPU memory bandwidth at
-# small batch sizes, so throughput per step is roughly flat regardless of batch.
-# Larger batches are a gradient-quality lever: only increase them if you also
-# reduce EPOCHS proportionally (e.g., 4× batch → ¼ epochs for similar cost).
-#   ≥45 GB → 128,  ≥16 GB → 128,  otherwise → 64
-if command -v nvidia-smi &>/dev/null; then
-    _VRAM_MB=$(nvidia-smi --query-gpu=memory.total --format=csv,noheader,nounits 2>/dev/null | head -1)
-else
-    _VRAM_MB=0
-fi
-if [ -z "${BATCH:-}" ]; then
-    if   [ "${_VRAM_MB:-0}" -ge 16000 ]; then BATCH=128;  MC_BATCH=128
-    else                                       BATCH=64;   MC_BATCH=64
-    fi
-fi
-unset _VRAM_MB
+# Batch size — set to the measured throughput peak, not the VRAM max.
+# CogFormer's O(N²) decoder self-attention saturates the GPU even at small batch,
+# so samples/sec PEAKS at batch=64 and DECLINES as batch grows (bench_batch.py on
+# RTX 6000 Ada, mask ON: 64→507, 128→468, 256→438 samples/s). batch=64 is also
+# the most simulation-budget-per-hour and uses ~8GB VRAM (huge OOM headroom).
+# To grow the simulation budget, raise EPOCHS/STEPS — not the batch.
+if [ -z "${BATCH:-}" ]; then BATCH=64; MC_BATCH=64; fi
 
 VAL_BATCH=200
 
 # ── Training ───────────────────────────────────────────────────────────────────
-EPOCHS=5000
+# EPOCHS=10000 at batch=64/steps=100 → 64M simulated datasets/model (matches the
+# old batch=128 × 5000ep budget) at slightly less wall-clock and 2× gradient updates.
+EPOCHS=10000
 STEPS=100
 MF_BF_EPOCHS=1000
 LCA_FFI_EPOCHS=500
