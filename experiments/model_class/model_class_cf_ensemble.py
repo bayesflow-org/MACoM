@@ -62,6 +62,10 @@ def parse_args():
     p.add_argument("--model_embed_dim", type=int, default=8)
     p.add_argument("--time_embedding_dim", type=int, default=32)
     p.add_argument("--pos_embedding_dim", type=int, default=32)
+    p.add_argument("--self_attn_padding_mask", action=argparse.BooleanOptionalAction,
+                   default=True,
+                   help="Must match the flag the checkpoint was trained with. Use "
+                        "--no-self_attn_padding_mask for checkpoints trained mask-off.")
     return p.parse_args()
 
 
@@ -112,6 +116,7 @@ def main():
         model_embed_dim=args.model_embed_dim,
         decoder_layer_design="mixed_attention",
         decoder_layer_kwargs={"mab_first": True},
+        self_attn_padding_mask=args.self_attn_padding_mask,  # must match training run
     ).to(device)
 
     state = torch.load(Path(args.checkpoint), map_location=device)

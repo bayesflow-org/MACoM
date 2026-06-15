@@ -21,9 +21,20 @@ WANDB=()
 SIM_WORKERS_ARG=()
 [[ -n "${NUM_SIM_WORKERS:-}" ]] && SIM_WORKERS_ARG=(--num_sim_workers "$NUM_SIM_WORKERS")
 
+# Decoder self-attention padding mask: must be IDENTICAL across train, finetune, and
+# every validate stage (it changes the forward pass, not the checkpoint state_dict keys).
+# Set SELF_ATTN_PADDING_MASK=false to drop it (~1.48x faster/step per the mask A/B).
+MASK_ARGS=()
+if [[ "${SELF_ATTN_PADDING_MASK:-true}" == "true" ]]; then
+    MASK_ARGS=(--self_attn_padding_mask)
+else
+    MASK_ARGS=(--no-self_attn_padding_mask)
+fi
+
 # ── CF train ───────────────────────────────────────────────────────────────────
 echo "=== ModelClass: CF train ==="
 python -m experiments.model_class.model_class_cf_train \
+    "${MASK_ARGS[@]}" \
     --encoder_num_layers "$ENC_LAYERS" \
     --decoder_num_layers "$DEC_LAYERS" \
     --encoder_num_heads  "$HEADS" \
@@ -46,6 +57,7 @@ python -m experiments.model_class.model_class_cf_train \
 # ── CF validate ────────────────────────────────────────────────────────────────
 echo "=== ModelClass: CF validate ==="
 python -m experiments.model_class.model_class_cf_validate \
+    "${MASK_ARGS[@]}" \
     --checkpoint "$MC_CKPT" \
     --encoder_num_layers "$ENC_LAYERS" \
     --decoder_num_layers "$DEC_LAYERS" \
@@ -61,6 +73,7 @@ python -m experiments.model_class.model_class_cf_validate \
 # ── LBA validate (zero-shot) ────────────────────────────────────────────────────
 echo "=== ModelClass: LBA validate (zero-shot) ==="
 python -m experiments.generalization.model_class_lba_cf_validate \
+    "${MASK_ARGS[@]}" \
     --checkpoint "$MC_CKPT" \
     --encoder_num_layers "$ENC_LAYERS" \
     --decoder_num_layers "$DEC_LAYERS" \
@@ -77,6 +90,7 @@ python -m experiments.generalization.model_class_lba_cf_validate \
 echo "=== ModelClass: LBA fine-tune ==="
 FT_SCHEME="${FINETUNE_SCHEME:-2}"
 python -m experiments.model_class.model_class_cf_finetune_lba \
+    "${MASK_ARGS[@]}" \
     --pretrained_checkpoint "$MC_CKPT" \
     --encoder_num_layers "$ENC_LAYERS" \
     --decoder_num_layers "$DEC_LAYERS" \
@@ -97,6 +111,7 @@ python -m experiments.model_class.model_class_cf_finetune_lba \
 # ── LBA fine-tune validate ─────────────────────────────────────────────────────
 echo "=== ModelClass: LBA fine-tune validate ==="
 python -m experiments.model_class.model_class_lba_finetune_validate \
+    "${MASK_ARGS[@]}" \
     --checkpoint "$LBA_FT_CKPT" \
     --encoder_num_layers "$ENC_LAYERS" \
     --decoder_num_layers "$DEC_LAYERS" \

@@ -325,6 +325,12 @@ def parse_args():
     parser.add_argument("--debug", action="store_true")
     parser.add_argument("--use_wandb", action="store_true")
     add_architecture_args(parser)
+    parser.add_argument("--self_attn_padding_mask", action=argparse.BooleanOptionalAction,
+                        default=True,
+                        help="Mask padded parameter tokens in decoder self-attention (default). "
+                             "Pass --no-self_attn_padding_mask to drop it: ~1.48x faster/step "
+                             "(FlashAttention fires) with near-neutral recovery per the A/B ablation. "
+                             "Inference scripts must be run with the matching flag.")
     parser.add_argument("--encoder_embed_dim", type=int, default=64)
     parser.add_argument("--ffn_expansion_factor", type=float, default=4.0,
                         help="FFN intermediate width multiplier.")
@@ -461,6 +467,7 @@ if __name__ == "__main__":
         "decoder_layer_kwargs": {"mab_first": True},
         "time_embedding_dim": args.time_embedding_dim,
         "pos_embedding_dim": args.pos_embedding_dim,
+        "self_attn_padding_mask": args.self_attn_padding_mask,
     }
 
     logging.info(

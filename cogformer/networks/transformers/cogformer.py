@@ -39,6 +39,7 @@ class CogFormer(nn.Module):
             model_embed_dim: int = 8,
             time_freq_trainable: bool = True,
             block_film: bool = False,
+            self_attn_padding_mask: bool = True,
     ):
         super().__init__()
 
@@ -78,6 +79,7 @@ class CogFormer(nn.Module):
             time_freq_trainable=time_freq_trainable,
             block_film=block_film,
             expansion_factor=ffn_expansion_factor,
+            self_attn_padding_mask=self_attn_padding_mask,
         )
 
     def forward(self, params, input_data, param_indices, regressor_indices, params_mask=None, model_ids=None):

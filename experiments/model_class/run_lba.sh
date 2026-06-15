@@ -20,10 +20,21 @@ WANDB=()
 
 FT_SCHEME="${FINETUNE_SCHEME:-2}"
 
+# Decoder self-attention padding mask: must MATCH the base MC checkpoint's training run
+# and stay identical across finetune + validate (changes the forward pass, not the
+# checkpoint state_dict keys). Set SELF_ATTN_PADDING_MASK=false for a mask-off base.
+MASK_ARGS=()
+if [[ "${SELF_ATTN_PADDING_MASK:-true}" == "true" ]]; then
+    MASK_ARGS=(--self_attn_padding_mask)
+else
+    MASK_ARGS=(--no-self_attn_padding_mask)
+fi
+
 # ── LBA validate (zero-shot) ────────────────────────────────────────────────────
 if [[ -z "${SKIP_ZERO_SHOT:-}" ]]; then
     echo "=== ModelClass: LBA validate (zero-shot) ==="
     python -m experiments.generalization.model_class_lba_cf_validate \
+        "${MASK_ARGS[@]}" \
         --checkpoint "$MC_CKPT" \
         --encoder_num_layers "$ENC_LAYERS" \
         --decoder_num_layers "$DEC_LAYERS" \
@@ -41,6 +52,7 @@ fi
 if [[ -z "${SKIP_FINETUNE:-}" ]]; then
     echo "=== ModelClass: LBA fine-tune (scheme ${FT_SCHEME}) ==="
     python -m experiments.model_class.model_class_cf_finetune_lba \
+        "${MASK_ARGS[@]}" \
         --pretrained_checkpoint "$MC_CKPT" \
         --encoder_num_layers "$ENC_LAYERS" \
         --decoder_num_layers "$DEC_LAYERS" \
@@ -63,6 +75,7 @@ fi
 if [[ -z "${SKIP_FT_VALIDATE:-}" ]]; then
     echo "=== ModelClass: LBA fine-tune validate ==="
     python -m experiments.model_class.model_class_lba_finetune_validate \
+        "${MASK_ARGS[@]}" \
         --checkpoint "$LBA_FT_CKPT" \
         --encoder_num_layers "$ENC_LAYERS" \
         --decoder_num_layers "$DEC_LAYERS" \

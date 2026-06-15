@@ -84,6 +84,17 @@ ARCH_ARGS=(
     --layer_dropout      "$LAYER_DROPOUT"
 )
 
+# Decoder self-attention padding mask. Default on (the architecture default).
+# Set SELF_ATTN_PADDING_MASK=false to drop it (~1.48x faster/step per the mask A/B).
+# Appended to ARCH_ARGS so train, validate, and ensemble stay consistent — they MUST
+# agree, since the flag changes the forward pass but not the checkpoint state_dict keys.
+# Note: set it via this env var, NOT as a CLI passthrough (that reaches train only).
+if [[ "${SELF_ATTN_PADDING_MASK:-true}" == "true" ]]; then
+    ARCH_ARGS+=(--self_attn_padding_mask)
+else
+    ARCH_ARGS+=(--no-self_attn_padding_mask)
+fi
+
 EXTRA_TRAIN_ARGS=("$@")
 
 echo "============================================================"

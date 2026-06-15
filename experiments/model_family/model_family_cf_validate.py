@@ -87,6 +87,10 @@ def parse_args():
     p.add_argument("--layer_dropout", type=float, default=0.05)
     p.add_argument("--time_embedding_dim", type=int, default=32)
     p.add_argument("--pos_embedding_dim", type=int, default=32)
+    p.add_argument("--self_attn_padding_mask", action=argparse.BooleanOptionalAction,
+                   default=True,
+                   help="Must match the flag the checkpoint was trained with. Use "
+                        "--no-self_attn_padding_mask for checkpoints trained mask-off.")
     p.add_argument("--estimate_global_params", action=argparse.BooleanOptionalAction,
                    default=True,
                    help="Include global parameters (e.g. pi) in estimation. "
@@ -150,6 +154,7 @@ def main():
         decoder_layer_kwargs={"mab_first": True},
         time_embedding_dim=args.time_embedding_dim,
         pos_embedding_dim=args.pos_embedding_dim,
+        self_attn_padding_mask=args.self_attn_padding_mask,  # must match training run
     ).to(device)
 
     state = torch.load(Path(args.checkpoint), map_location=device)

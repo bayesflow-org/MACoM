@@ -291,6 +291,12 @@ def parse_args():
                         help="Epoch to resume from when checkpoint lacks epoch metadata (old format).")
 
     add_architecture_args(parser)
+    parser.add_argument("--self_attn_padding_mask", action=argparse.BooleanOptionalAction,
+                        default=True,
+                        help="Mask padded parameter tokens in decoder self-attention (default). "
+                             "Pass --no-self_attn_padding_mask to drop it: ~1.48x faster/step "
+                             "(FlashAttention fires) with near-neutral recovery per the A/B ablation. "
+                             "Finetune/inference scripts must be run with the matching flag.")
     parser.add_argument("--encoder_embed_dim", type=int, default=64)
     parser.add_argument("--ffn_expansion_factor", type=float, default=4.0)
     parser.add_argument("--seed_dim", type=int, default=128)
@@ -401,6 +407,7 @@ if __name__ == "__main__":
         "model_embed_dim": args.model_embed_dim,
         "decoder_layer_design": "mixed_attention",
         "decoder_layer_kwargs": {"mab_first": True},
+        "self_attn_padding_mask": args.self_attn_padding_mask,
     }
 
     logging.info(

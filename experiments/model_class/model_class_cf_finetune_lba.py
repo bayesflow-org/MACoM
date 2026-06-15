@@ -276,6 +276,11 @@ def parse_args():
     parser.add_argument("--model_embed_dim", type=int, default=8)
     parser.add_argument("--time_embedding_dim", type=int, default=32)
     parser.add_argument("--pos_embedding_dim", type=int, default=32)
+    parser.add_argument("--self_attn_padding_mask", action=argparse.BooleanOptionalAction,
+                        default=True,
+                        help="Must match the flag the --pretrained_checkpoint base was trained "
+                             "with, else finetuning eats a regime re-adaptation cost. Use "
+                             "--no-self_attn_padding_mask for a mask-off base.")
 
     # Optimizer — smaller defaults than pretraining
     parser.add_argument("--lr", type=float, default=1e-5)
@@ -373,6 +378,7 @@ if __name__ == "__main__":
         "model_embed_dim":     args.model_embed_dim,
         "decoder_layer_design": "mixed_attention",
         "decoder_layer_kwargs": {"mab_first": True},
+        "self_attn_padding_mask": args.self_attn_padding_mask,
     }
 
     lba_with_pi = _ALL_WITH_PI["lba"]

@@ -32,9 +32,16 @@ class Decoder(nn.Module):
             time_freq_trainable: bool = True,
             block_film: bool = False,
             expansion_factor: float = 4.0,
+            self_attn_padding_mask: bool = True,
     ):
         super().__init__()
         assert num_layers >= 1, "num_layers must be >= 1"
+
+        # When False, self-attention does not receive a key_padding_mask. This lets
+        # the fused FlashAttention kernel fire (a boolean mask forces the slower
+        # mem-efficient path), at the cost of active tokens attending to padded
+        # cells. Inactive token *outputs* are still zeroed after each layer.
+        self.self_attn_padding_mask = self_attn_padding_mask
 
         if layer_kwargs is None:
             layer_kwargs = {}
@@ -120,8 +127,13 @@ class Decoder(nn.Module):
             If provided (e.g. pre-computed once before an ODE loop), the sinusoidal embedding
             forward passes are skipped.
         """
-        # key_padding_mask for self-attention: True = inactive token, should be ignored
-        key_padding_mask = (query_mask <= 0) if query_mask is not None else None
+        # key_padding_mask for self-attention: True = inactive token, should be ignored.
+        # Disabled when self_attn_padding_mask is False (FlashAttention A/B).
+        key_padding_mask = (
+            (query_mask <= 0)
+            if (query_mask is not None and self.self_attn_padding_mask)
+            else None
+        )
 
         # Sinusoidal embeddings for positional indices (skip if pre-computed)
         if param_embedding is None:
