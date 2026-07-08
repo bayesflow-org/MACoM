@@ -102,7 +102,9 @@ DDM_CONFIG = {
     "benchmark_configs": DDM_BENCHMARK_CONFIGS,
     "val_scenarios": [
         ("interaction", DDM_BENCHMARK_CONFIGS["interaction"], {"max_num_categories": 2}),
-        ("fixed", DDM_BENCHMARK_CONFIGS["fixed"], {"max_num_categories": 2, "skip_global": True}),
+        # No skip_global: training designs always include global params, so a mask
+        # without pi is out-of-distribution and biases a/v recovery downward.
+        ("fixed", DDM_BENCHMARK_CONFIGS["fixed"], {"max_num_categories": 2}),
         ("two_factor", DDM_BENCHMARK_CONFIGS["two_factor"], {"max_num_categories": 3}),
     ],
     "holdout_configs": [
@@ -190,7 +192,7 @@ CDM_CONFIG = {
     "benchmark_configs": CDM_BENCHMARK_CONFIGS,
     "val_scenarios": [
         ("interaction", CDM_BENCHMARK_CONFIGS["interaction"], {"max_num_categories": 2}),
-        ("fixed", CDM_BENCHMARK_CONFIGS["fixed"], {"max_num_categories": 2, "skip_global": True}),
+        ("fixed", CDM_BENCHMARK_CONFIGS["fixed"], {"max_num_categories": 2}),
         ("two_factor", CDM_BENCHMARK_CONFIGS["two_factor"], {"max_num_categories": 3}),
     ],
     "holdout_configs": [
@@ -278,7 +280,7 @@ RDM_CONFIG = {
     "benchmark_configs": RDM_BENCHMARK_CONFIGS,
     "val_scenarios": [
         ("interaction", RDM_BENCHMARK_CONFIGS["interaction"], {"max_num_categories": 2}),
-        ("fixed", RDM_BENCHMARK_CONFIGS["fixed"], {"max_num_categories": 2, "skip_global": True}),
+        ("fixed", RDM_BENCHMARK_CONFIGS["fixed"], {"max_num_categories": 2}),
         ("two_factor", RDM_BENCHMARK_CONFIGS["two_factor"], {"max_num_categories": 3}),
     ],
     "holdout_configs": [
@@ -367,7 +369,7 @@ LBA_CONFIG = {
     "benchmark_configs": LBA_BENCHMARK_CONFIGS,
     "val_scenarios": [
         ("interaction", LBA_BENCHMARK_CONFIGS["interaction"], {"max_num_categories": 2}),
-        ("fixed", LBA_BENCHMARK_CONFIGS["fixed"], {"max_num_categories": 2, "skip_global": True}),
+        ("fixed", LBA_BENCHMARK_CONFIGS["fixed"], {"max_num_categories": 2}),
         ("two_factor", LBA_BENCHMARK_CONFIGS["two_factor"], {"max_num_categories": 3}),
     ],
     "holdout_configs": [

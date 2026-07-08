@@ -166,6 +166,15 @@ class CogFormerTrainer:
         self._val_data = []
         for tag, design_config, scenario_opts in self.model_cfg["val_scenarios"]:
             max_cats = scenario_opts.get("max_num_categories", training_max_cats)
+            # The encoder input dim is built from the training max_num_categories, so a
+            # scenario needing more category columns produces wider tokens than the model
+            # accepts and would crash val_step. Skip it rather than break the whole run.
+            if max_cats > training_max_cats:
+                logging.warning(
+                    f"[val] skipping scenario '{tag}': needs max_num_categories={max_cats} "
+                    f"> training max_num_categories={training_max_cats}; model input dim too small."
+                )
+                continue
             model_family_cfg = {**val_config["model_family_config"], "max_num_categories": max_cats}
             samples = self.model_family.batch_sample(
                 **model_family_cfg,
@@ -356,6 +365,10 @@ def parse_args():
     parser.add_argument("--num_sim_workers", type=int, default=None,
                         help="Parallel CPU simulation workers; each gets cpu_count//num_sim_workers numba threads. "
                              "Defaults to recommend_sim_workers() — scales with cpu_count.")
+    parser.add_argument("--checkpoint_dir", type=str, default=None,
+                        help="Override the model-default checkpoint output directory. The checkpoint "
+                             "filename does NOT encode max_num_categories/max_num_regressors, so use this "
+                             "to keep runs with a non-default design space from clobbering existing checkpoints.")
     return parser.parse_args()
 
 
@@ -382,6 +395,9 @@ if __name__ == "__main__":
     if args.val_epoch_interval is not None:
         model_cfg = dict(model_cfg)
         model_cfg["val_epoch_interval"] = args.val_epoch_interval
+    if args.checkpoint_dir is not None:
+        model_cfg = dict(model_cfg)
+        model_cfg["checkpoint_dir"] = args.checkpoint_dir
     use_wandb = args.use_wandb and (rank == 0)
 
     max_num_regressors = args.max_num_regressors

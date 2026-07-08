@@ -317,12 +317,18 @@ def parse_args():
     parser.add_argument("--val_samples_chunk_size", type=int, default=4,
                         help="Samples per ODE loop during validation; peak GPU memory scales with "
                              "batch_size * val_samples_chunk_size.")
+    parser.add_argument("--checkpoint_dir", type=str, default=None,
+                        help="Override the default checkpoint output directory (CHECKPOINT_DIR). The "
+                             "checkpoint filename does NOT encode max_num_categories/max_num_regressors, "
+                             "so use this to keep a non-default design space from clobbering existing checkpoints.")
 
     return parser.parse_args()
 
 
 if __name__ == "__main__":
     args = parse_args()
+    if args.checkpoint_dir is not None:
+        CHECKPOINT_DIR = args.checkpoint_dir
     num_sim_workers = args.num_sim_workers if args.num_sim_workers is not None else recommend_sim_workers()
 
     logging.basicConfig(level=logging.INFO)

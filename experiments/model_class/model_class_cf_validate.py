@@ -242,6 +242,11 @@ def main():
         global_indices = model_class.local_to_global[model_name]
 
         for cfg_name, design_config in model_cfg["benchmarks"].items():
+            n_main_effects = sum(1 for k in design_config if k != "1" and ":" not in k)
+            if n_main_effects > args.max_num_regressors:
+                print(f"Skipping {model_name} / {cfg_name}: needs {n_main_effects} regressors, "
+                      f"model trained with max_num_regressors={args.max_num_regressors}")
+                continue
             print(f"Preparing data: {model_name} / {cfg_name}")
             outdir = Path(args.outdir) / model_name.lower() / cfg_name
             outdir.mkdir(parents=True, exist_ok=True)
