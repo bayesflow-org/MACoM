@@ -5,7 +5,7 @@ from scipy.stats import norm
 
 def _pi_sampler() -> float:
     """Sample pi directly from Beta(1, 10) — no link function applied."""
-    return float(np.random.beta(1, 10))
+    return float(np.random.beta(0.5, 50))
 
 
 def cdm_priors():
