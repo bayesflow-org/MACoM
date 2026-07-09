@@ -2,6 +2,14 @@
 
 import math
 import os
+
+# Expandable segments let the CUDA caching allocator grow/shrink segments instead
+# of binning fixed-size blocks. With per-batch shape variation (num_obs and, after
+# token compaction, token count) the binned allocator fragments — reserved-but-
+# unallocated memory creeps up and can OOM despite free VRAM. Must be set before
+# the first CUDA allocation; setdefault respects an explicit user override.
+os.environ.setdefault("PYTORCH_CUDA_ALLOC_CONF", "expandable_segments:True")
+
 import numpy as np
 import torch
 import torch.utils.data
@@ -29,11 +37,14 @@ def recommend_batch_size(base: int = 64) -> int:
 def recommend_sim_workers() -> int:
     """Number of DataLoader simulation workers scaled to available CPU cores.
 
-    Each worker sets numba to (cpu_count // n_workers) threads and runs
-    ModelFamily with num_workers=1, so total thread count == cpu_count.
+    Prefer many workers with ONE numba thread each over few workers with many:
+    multi-threaded numba pays a fork-join sync on every simulate() call (once per
+    batch element), which measured 2.4x slower than element-level process
+    parallelism at equal core counts (24-core box: 6w x 4t = 3.3 batches/s,
+    20w x 1t = 7.8 batches/s). Leave a few cores for the main process and GPU feeding.
     """
     cpu = os.cpu_count() or 4
-    return max(3, min(12, cpu // 4))
+    return max(3, cpu - 4)
 
 
 def set_numba_threads(n: int) -> None:
