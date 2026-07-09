@@ -40,6 +40,8 @@ class CogFormer(nn.Module):
             time_freq_trainable: bool = True,
             block_film: bool = False,
             self_attn_padding_mask: bool = True,
+            output_conditioning: str = "concat",
+            block_conditioning: str = "concat",
     ):
         super().__init__()
 
@@ -80,6 +82,8 @@ class CogFormer(nn.Module):
             block_film=block_film,
             expansion_factor=ffn_expansion_factor,
             self_attn_padding_mask=self_attn_padding_mask,
+            output_conditioning=output_conditioning,
+            block_conditioning=block_conditioning,
         )
 
     def forward(self, params, input_data, param_indices, regressor_indices, params_mask=None, model_ids=None):

@@ -30,6 +30,8 @@ def ensemble_coverage(
     interval_type: str = "central",
     difference: bool = True,
     ci_alpha: float = 0.07,
+    global_params: list[str] = None,
+    global_only: bool = False,
 ) -> plt.Figure:
     """
     Overlay empirical coverage plots for multiple design configs on a shared
@@ -99,6 +101,21 @@ def ensemble_coverage(
 
     num_rows = max(m.shape[0] for m in parameter_masks)
     num_cols = parameter_masks[0].shape[1]
+
+    # Global parameters (e.g. pi) are estimated jointly but presented separately.
+    # Slice columns to exclude them from the grid, or keep only them when global_only.
+    if global_params and intrinsic_params is not None:
+        global_cols = {i for i, p in enumerate(intrinsic_params) if p in global_params}
+        keep = [c for c in range(num_cols) if (c in global_cols) == global_only]
+        if not keep:
+            return None
+        keep = np.array(keep, dtype=int)
+        parameter_masks = [m[:, keep] for m in parameter_masks]
+        true_list = [t[..., keep] for t in true_list]
+        pred_list = [p[..., keep] for p in pred_list]
+        variable_names = [variable_names[c] for c in keep]
+        intrinsic_params = [intrinsic_params[c] for c in keep]
+        num_cols = len(keep)
 
     if figsize is None:
         figsize = (3 * num_cols, 3 * num_rows)
@@ -210,6 +227,15 @@ def ensemble_coverage(
     _add_mask_legend(fig, parameter_masks, colors, labels, num_rows, num_cols,
                      label_fontsize=legend_fontsize, thumb_scale=thumb_scale)
     return fig
+
+
+def global_ensemble_coverage(*args, global_params, **kwargs):
+    """Ensemble coverage for global parameters (e.g. ``pi``) only, plotted
+    separately from the coefficient matrix. Thin wrapper over
+    :func:`ensemble_coverage` with ``global_only=True``. Returns ``None`` when no
+    global parameter is active.
+    """
+    return ensemble_coverage(*args, global_params=global_params, global_only=True, **kwargs)
 
 
 if __name__ == "__main__":

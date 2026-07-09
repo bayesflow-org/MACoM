@@ -22,8 +22,22 @@ def adaptive_recovery(
     uncertainty_agg: Callable = credible_interval,
     title_fontsize: int = 20,
     label_fontsize: int = 14,
-    figsize: tuple = None
+    figsize: tuple = None,
+    global_params: list[str] = None,
+    global_only: bool = False,
 ):
+    """Coefficient-matrix recovery grid.
+
+    ``global_params`` (e.g. the contamination probability ``pi``) are estimated
+    jointly but presented separately. When given:
+
+    - ``global_only=False`` (default): those columns are *excluded* from the grid.
+    - ``global_only=True``: only those columns are kept (used by
+      :func:`global_recovery`).
+
+    Returns ``None`` if the selected column set is empty (e.g. ``global_only`` with
+    no active global params), so callers can skip saving/logging.
+    """
     if variable_names is None:
         variable_names = design_config["1"]
 
@@ -80,6 +94,15 @@ def adaptive_recovery(
     # Compact: drop rows and columns that are entirely N/A
     row_idx = np.where(np.any(parameter_mask[:num_rows], axis=1))[0]
     col_idx = np.where(np.any(parameter_mask[:num_rows], axis=0))[0]
+
+    # Global parameters (e.g. pi) are estimated jointly but presented separately.
+    # Exclude their columns from the matrix, or keep only them when global_only.
+    if global_params and intrinsic_params is not None:
+        global_cols = {i for i, p in enumerate(intrinsic_params) if p in global_params}
+        keep = (lambda c: c in global_cols) if global_only else (lambda c: c not in global_cols)
+        col_idx = np.array([c for c in col_idx if keep(c)], dtype=int)
+    if col_idx.size == 0:
+        return None
     parameter_mask = parameter_mask[np.ix_(row_idx, col_idx)]
     true_f  = true[..., row_idx, :][..., col_idx]  # keep original for ref below
     pred_f  = pred[..., row_idx, :][..., col_idx] if pred.ndim >= 3 else pred
@@ -155,6 +178,50 @@ def adaptive_recovery(
 
     fig.tight_layout()
     return fig
+
+
+def global_recovery(
+    true: np.ndarray,
+    pred: np.ndarray,
+    design_config: dict,
+    intrinsic_params: list[str],
+    max_num_categories: int,
+    global_params: list[str],
+    parameter_mask: np.ndarray = None,
+    variable_names: list[str] = None,
+    global_color: str = "#4e2a84",
+    uncertainty_agg: Callable = credible_interval,
+    title_fontsize: int = 20,
+    label_fontsize: int = 14,
+    figsize: tuple = None,
+):
+    """Recovery panel(s) for global parameters (e.g. the contamination probability
+    ``pi``), plotted separately from the coefficient matrix.
+
+    Thin wrapper over :func:`adaptive_recovery` with ``global_only=True`` — it
+    reuses the same scatter rendering but keeps only the global-parameter columns.
+    Returns ``None`` when no global parameter is active, so callers can skip
+    saving/logging.
+    """
+    return adaptive_recovery(
+        true=true,
+        pred=pred,
+        design_config=design_config,
+        intrinsic_params=intrinsic_params,
+        max_num_categories=max_num_categories,
+        parameter_mask=parameter_mask,
+        variable_names=variable_names,
+        intercept_color=global_color,
+        main_effect_color=global_color,
+        interaction_color=global_color,
+        uncertainty_agg=uncertainty_agg,
+        title_fontsize=title_fontsize,
+        label_fontsize=label_fontsize,
+        figsize=figsize,
+        global_params=global_params,
+        global_only=True,
+    )
+
 
 if __name__ == "__main__":
     debug = True

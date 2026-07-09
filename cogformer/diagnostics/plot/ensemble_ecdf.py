@@ -31,6 +31,8 @@ def ensemble_ecdf(
     prob: float = 0.95,
     difference: bool = True,
     band_alpha: float = 0.07,
+    global_params: list[str] = None,
+    global_only: bool = False,
 ) -> plt.Figure:
     """
     Overlay ECDF calibration plot for multiple design configs on a shared
@@ -101,6 +103,21 @@ def ensemble_ecdf(
 
     num_rows = max(m.shape[0] for m in parameter_masks)
     num_cols = parameter_masks[0].shape[1]
+
+    # Global parameters (e.g. pi) are estimated jointly but presented separately.
+    # Slice columns to exclude them from the grid, or keep only them when global_only.
+    if global_params and intrinsic_params is not None:
+        global_cols = {i for i, p in enumerate(intrinsic_params) if p in global_params}
+        keep = [c for c in range(num_cols) if (c in global_cols) == global_only]
+        if not keep:
+            return None
+        keep = np.array(keep, dtype=int)
+        parameter_masks = [m[:, keep] for m in parameter_masks]
+        true_list = [t[..., keep] for t in true_list]
+        pred_list = [p[..., keep] for p in pred_list]
+        variable_names = [variable_names[c] for c in keep]
+        intrinsic_params = [intrinsic_params[c] for c in keep]
+        num_cols = len(keep)
 
     # Shared confidence band — requires all configs to have the same batch size
     num_datasets = true_list[0].shape[0]
@@ -239,6 +256,14 @@ def ensemble_ecdf(
         frameon=True,
     )
     return fig
+
+
+def global_ensemble_ecdf(*args, global_params, **kwargs):
+    """Ensemble ECDF for global parameters (e.g. ``pi``) only, plotted separately
+    from the coefficient matrix. Thin wrapper over :func:`ensemble_ecdf` with
+    ``global_only=True``. Returns ``None`` when no global parameter is active.
+    """
+    return ensemble_ecdf(*args, global_params=global_params, global_only=True, **kwargs)
 
 
 if __name__ == "__main__":

@@ -9,12 +9,18 @@ import matplotlib.pyplot as plt
 from cogformer.simulator import ModelFamily
 from cogformer.adapter import Adapter
 from cogformer.networks.transformers.cogformer import CogFormer
-from cogformer.diagnostics.plot.adaptive_posterior import adaptive_posterior
-from cogformer.diagnostics.plot.adaptive_recovery import adaptive_recovery
-from cogformer.diagnostics.plot.adaptive_coverage import adaptive_coverage
-from cogformer.diagnostics.plot.adaptive_ecdf import adaptive_ecdf
-from cogformer.diagnostics.plot.adaptive_metrics import adaptive_metrics as plot_adaptive_metrics
-from cogformer.diagnostics.metric.adaptive_metrics import adaptive_metrics as compute_adaptive_metrics
+from cogformer.diagnostics.plot.adaptive_posterior import adaptive_posterior, global_posterior
+from cogformer.diagnostics.plot.adaptive_recovery import adaptive_recovery, global_recovery
+from cogformer.diagnostics.plot.adaptive_coverage import adaptive_coverage, global_coverage
+from cogformer.diagnostics.plot.adaptive_ecdf import adaptive_ecdf, global_ecdf
+from cogformer.diagnostics.plot.adaptive_metrics import (
+    adaptive_metrics as plot_adaptive_metrics,
+    global_metrics as plot_global_metrics,
+)
+from cogformer.diagnostics.metric.adaptive_metrics import (
+    adaptive_metrics as compute_adaptive_metrics,
+    global_metrics as compute_global_metrics,
+)
 from cogformer.utils.plot_utils import cogformer_fm_colors
 
 from ..configs import MODELS as _BASE_MODELS, GLOBAL_PARAMS, GLOBAL_VARIABLE_NAMES
@@ -111,6 +117,7 @@ def main():
     model_name = args.model
     intrinsic_params = model_cfg["intrinsic_params"]
     variable_names = model_cfg["variable_names"]
+    global_params = model_cfg.get("global_params") or None
     default_fixed_values = model_cfg["default_fixed_values"]
     link_fn = model_cfg["link_fn"]
     outdir_root = Path(args.outdir) if args.outdir else Path(model_cfg["outdir"])
@@ -278,11 +285,29 @@ def main():
             intercept_color=colors["intercept"],
             main_effect_color=colors["main_effect"],
             interaction_color=colors["interaction"],
+            global_params=global_params,
         )
         figpath = outdir / f"{model_name}_family_{cfg_name}_fm_mixed_recovery.pdf"
         fig.savefig(figpath, bbox_inches="tight")
         plt.close(fig)
         logging.info(f"[saved] {figpath}")
+
+        # Global parameters (e.g. pi) are estimated jointly but plotted separately.
+        glob_fig = global_recovery(
+            true=true_set, pred=pred_set,
+            design_config=design_config,
+            intrinsic_params=intrinsic_params,
+            max_num_categories=model_family_config["max_num_categories"],
+            global_params=global_params,
+            parameter_mask=params_mask,
+            variable_names=variable_names,
+            global_color=colors["intercept"],
+        )
+        if glob_fig is not None:
+            glob_path = outdir / f"{model_name}_family_{cfg_name}_fm_mixed_recovery_global.pdf"
+            glob_fig.savefig(glob_path, bbox_inches="tight")
+            plt.close(glob_fig)
+            logging.info(f"[saved] {glob_path}")
 
         coverage = adaptive_coverage(
             true=true_set, pred=pred_set,
@@ -294,11 +319,23 @@ def main():
             intercept_color=colors["intercept"],
             main_effect_color=colors["main_effect"],
             interaction_color=colors["interaction"],
+            global_params=global_params,
         )
         coverage_path = outdir / f"{model_name}_family_{cfg_name}_fm_mixed_coverage.pdf"
         coverage.savefig(coverage_path, bbox_inches="tight")
         plt.close(coverage)
         logging.info(f"[saved] {coverage_path}")
+
+        # Global parameters (e.g. pi): separate coverage panel.
+        cov_glob = global_coverage(
+            true=true_set, pred=pred_set, design_config=design_config,
+            variable_names=variable_names, global_params=global_params,
+            intrinsic_params=intrinsic_params, parameter_mask=params_mask,
+            max_num_categories=model_family_config["max_num_categories"],
+        )
+        if cov_glob is not None:
+            cov_glob.savefig(outdir / f"{model_name}_family_{cfg_name}_fm_mixed_coverage_global.pdf", bbox_inches="tight")
+            plt.close(cov_glob)
 
         ecdf = adaptive_ecdf(
             true=true_set, pred=pred_set,
@@ -311,11 +348,23 @@ def main():
             main_effect_color=colors["main_effect"],
             interaction_color=colors["interaction"],
             difference=True,
+            global_params=global_params,
         )
         ecdf_path = outdir / f"{model_name}_family_{cfg_name}_fm_mixed_ecdf.pdf"
         ecdf.savefig(ecdf_path, bbox_inches="tight")
         plt.close(ecdf)
         logging.info(f"[saved] {ecdf_path}")
+
+        # Global parameters (e.g. pi): separate ECDF panel.
+        ecdf_glob = global_ecdf(
+            true=true_set, pred=pred_set, design_config=design_config,
+            variable_names=variable_names, global_params=global_params,
+            intrinsic_params=intrinsic_params, parameter_mask=params_mask,
+            max_num_categories=model_family_config["max_num_categories"], difference=True,
+        )
+        if ecdf_glob is not None:
+            ecdf_glob.savefig(outdir / f"{model_name}_family_{cfg_name}_fm_mixed_ecdf_global.pdf", bbox_inches="tight")
+            plt.close(ecdf_glob)
 
         metrics_fig = plot_adaptive_metrics(
             true=true_set, pred=pred_set,
@@ -328,11 +377,24 @@ def main():
             main_effect_color=colors["main_effect"],
             interaction_color=colors["interaction"],
             skip_log_gamma=args.skip_log_gamma,
+            global_params=global_params,
         )
         metrics_fig_path = outdir / f"{model_name}_family_{cfg_name}_fm_mixed_metrics.pdf"
         metrics_fig.savefig(metrics_fig_path, bbox_inches="tight")
         plt.close(metrics_fig)
         logging.info(f"[saved] {metrics_fig_path}")
+
+        # Global parameters (e.g. pi): separate metric heatmap.
+        metrics_glob = plot_global_metrics(
+            true=true_set, pred=pred_set, design_config=design_config,
+            intrinsic_params=intrinsic_params,
+            max_num_categories=model_family_config["max_num_categories"],
+            global_params=global_params, parameter_mask=params_mask,
+            variable_names=variable_names, skip_log_gamma=args.skip_log_gamma,
+        )
+        if metrics_glob is not None:
+            metrics_glob.savefig(outdir / f"{model_name}_family_{cfg_name}_fm_mixed_metrics_global.pdf", bbox_inches="tight")
+            plt.close(metrics_glob)
 
         metrics_df = compute_adaptive_metrics(
             true=true_set, pred=pred_set,
@@ -342,10 +404,22 @@ def main():
             parameter_mask=params_mask,
             variable_names=variable_names,
             skip_log_gamma=args.skip_log_gamma,
+            global_params=global_params,
         )
         metrics_csv_path = outdir / f"{model_name}_family_{cfg_name}_fm_mixed_metrics.csv"
         metrics_df.to_csv(metrics_csv_path)
         logging.info(f"[saved] {metrics_csv_path}")
+
+        # Global parameters (e.g. pi): separate metrics CSV.
+        metrics_glob_df = compute_global_metrics(
+            true=true_set, pred=pred_set, design_config=design_config,
+            intrinsic_params=intrinsic_params,
+            max_num_categories=model_family_config["max_num_categories"],
+            global_params=global_params, parameter_mask=params_mask,
+            variable_names=variable_names, skip_log_gamma=args.skip_log_gamma,
+        )
+        if not metrics_glob_df.empty:
+            metrics_glob_df.to_csv(outdir / f"{model_name}_family_{cfg_name}_fm_mixed_metrics_global.csv")
 
         if not args.skip_posteriors:
             for i in range(min(10, args.batch_size)):
@@ -359,10 +433,21 @@ def main():
                     intercept_color=colors["intercept"],
                     main_effect_color=colors["main_effect"],
                     interaction_color=colors["interaction"],
+                    global_params=global_params,
                 )
                 posterior_path = outdir / f"{model_name}_family_{cfg_name}_fm_mixed_posterior_{i}.pdf"
                 posterior.savefig(posterior_path, bbox_inches="tight")
                 plt.close(posterior.fig)
+
+                # Global parameters (e.g. pi): separate posterior panel.
+                post_glob = global_posterior(
+                    samples=pred_set[i], design_config=design_config,
+                    intrinsic_params=intrinsic_params, max_num_categories=args.max_num_categories,
+                    global_params=global_params, parameter_mask=params_mask, unfold=False,
+                )
+                if post_glob is not None:
+                    post_glob.savefig(outdir / f"{model_name}_family_{cfg_name}_fm_mixed_posterior_global_{i}.pdf", bbox_inches="tight")
+                    plt.close(post_glob.fig)
 
     logging.info("Done.")
 

@@ -30,11 +30,17 @@ from cogformer.simulator.benchmarks.ssms.priors import ddm_priors, rdm_priors, c
 from cogformer.simulator.benchmarks.ssms.link_funs import ddm_link_fun, rdm_link_fun, cdm_link_fun, lba_link_fun
 from cogformer.adapter import Adapter
 from cogformer.networks.transformers.cogformer import CogFormer
-from cogformer.diagnostics.plot.adaptive_recovery import adaptive_recovery
-from cogformer.diagnostics.plot.adaptive_coverage import adaptive_coverage
-from cogformer.diagnostics.plot.adaptive_ecdf import adaptive_ecdf
-from cogformer.diagnostics.plot.adaptive_metrics import adaptive_metrics as plot_adaptive_metrics
-from cogformer.diagnostics.metric.adaptive_metrics import adaptive_metrics as compute_adaptive_metrics
+from cogformer.diagnostics.plot.adaptive_recovery import adaptive_recovery, global_recovery
+from cogformer.diagnostics.plot.adaptive_coverage import adaptive_coverage, global_coverage
+from cogformer.diagnostics.plot.adaptive_ecdf import adaptive_ecdf, global_ecdf
+from cogformer.diagnostics.plot.adaptive_metrics import (
+    adaptive_metrics as plot_adaptive_metrics,
+    global_metrics as plot_global_metrics,
+)
+from cogformer.diagnostics.metric.adaptive_metrics import (
+    adaptive_metrics as compute_adaptive_metrics,
+    global_metrics as compute_global_metrics,
+)
 from cogformer.utils.plot_utils import cogformer_mc_colors
 
 from ..configs import MODELS as _BASE_MODELS, LBA_CONFIG
@@ -335,11 +341,35 @@ def main():
                 intercept_color=colors["intercept"],
                 main_effect_color=colors["main_effect"],
                 interaction_color=colors["interaction"],
+                global_params=GLOBAL_PARAMS,
                 **kwargs,
             )
             fig.savefig(outdir / f"{tag}_{name}.pdf", bbox_inches="tight")
             plt.close(fig)
             logging.info(f"[saved] {outdir / f'{tag}_{name}.pdf'}")
+
+        # Global parameters (e.g. pi) are estimated jointly but plotted separately.
+        for gfn, name, gkwargs in [
+            (global_recovery,     "recovery", {}),
+            (global_coverage,     "coverage", {}),
+            (global_ecdf,         "ecdf",     {"difference": True}),
+            (plot_global_metrics, "metrics",  {"skip_log_gamma": args.skip_log_gamma}),
+        ]:
+            gfig = gfn(
+                true=true_set, pred=pred_set,
+                design_config=design_config,
+                intrinsic_params=intrinsic_params,
+                max_num_categories=args.max_num_categories,
+                global_params=GLOBAL_PARAMS,
+                parameter_mask=params_mask,
+                variable_names=variable_names,
+                global_color=colors["intercept"],
+                **gkwargs,
+            )
+            if gfig is not None:
+                gfig.savefig(outdir / f"{tag}_{name}_global.pdf", bbox_inches="tight")
+                plt.close(gfig)
+                logging.info(f"[saved] {outdir / f'{tag}_{name}_global.pdf'}")
 
         metrics_df = compute_adaptive_metrics(
             true=true_set, pred=pred_set,
@@ -349,9 +379,20 @@ def main():
             parameter_mask=params_mask,
             variable_names=variable_names,
             skip_log_gamma=args.skip_log_gamma,
+            global_params=GLOBAL_PARAMS,
         )
         metrics_df.to_csv(outdir / f"{tag}_metrics.csv")
         logging.info(f"[saved] {outdir / f'{tag}_metrics.csv'}")
+
+        # Global parameters (e.g. pi): separate metrics CSV.
+        metrics_glob_df = compute_global_metrics(
+            true=true_set, pred=pred_set, design_config=design_config,
+            intrinsic_params=intrinsic_params, max_num_categories=args.max_num_categories,
+            global_params=GLOBAL_PARAMS, parameter_mask=params_mask,
+            variable_names=variable_names, skip_log_gamma=args.skip_log_gamma,
+        )
+        if not metrics_glob_df.empty:
+            metrics_glob_df.to_csv(outdir / f"{tag}_metrics_global.csv")
 
     logging.info("Done.")
 

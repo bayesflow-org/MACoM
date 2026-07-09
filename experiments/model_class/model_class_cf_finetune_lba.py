@@ -32,7 +32,7 @@ from cogformer.simulator.benchmarks.ssms.priors import ddm_priors, rdm_priors, c
 from cogformer.simulator.benchmarks.ssms.link_funs import ddm_link_fun, rdm_link_fun, cdm_link_fun, lba_link_fun
 from cogformer.adapter import Adapter
 from cogformer.networks.transformers.cogformer import CogFormer
-from cogformer.diagnostics.plot.adaptive_recovery import adaptive_recovery
+from cogformer.diagnostics.plot.adaptive_recovery import adaptive_recovery, global_recovery
 from cogformer.utils.plot_utils import cogformer_fm_colors
 
 from ..configs import MODELS as _BASE_MODELS
@@ -236,6 +236,7 @@ class LBAFinetuner:
             intercept_color=colors["intercept"],
             main_effect_color=colors["main_effect"],
             interaction_color=colors["interaction"],
+            global_params=GLOBAL_PARAMS,
         )
 
         figures_dir = Path("./outputs/figures/model_class/cf/lba_finetune/recovery")
@@ -248,6 +249,26 @@ class LBAFinetuner:
             wandb.log({"val/LBA/recovery": wandb.Image(recovery_fig)}, step=global_step)
 
         plt.close(recovery_fig)
+
+        # Global parameters (e.g. pi) are estimated jointly but plotted separately.
+        global_fig = global_recovery(
+            true=true_set,
+            pred=pred_set,
+            design_config=design_config,
+            intrinsic_params=intrinsic_params,
+            max_num_categories=model_family_config["max_num_categories"],
+            global_params=GLOBAL_PARAMS,
+            parameter_mask=params_mask,
+            variable_names=variable_names,
+            global_color=colors["intercept"],
+        )
+        if global_fig is not None:
+            global_name = f"lba_{fig_path}_recovery_global.pdf"
+            global_fig.savefig(figures_dir / global_name, bbox_inches="tight")
+            logging.info(f"[saved] {figures_dir / global_name}")
+            if self.use_wandb:
+                wandb.log({"val/LBA/recovery_global": wandb.Image(global_fig)}, step=global_step)
+            plt.close(global_fig)
         self.net.train()
 
     @staticmethod

@@ -27,7 +27,9 @@ def ensemble_recovery(
     legend_fontsize: int = 17,
     thumb_scale: float = 1.0,
     alpha: float = 0.5,
-    figsize: tuple = None
+    figsize: tuple = None,
+    global_params: list[str] = None,
+    global_only: bool = False,
 ):
     """
     Overlay recovery plot for multiple design configs on a shared parameter matrix grid.
@@ -92,6 +94,21 @@ def ensemble_recovery(
     # Grid dimensions: max num_rows across all masks, fixed num_cols
     num_rows = max(m.shape[0] for m in parameter_masks)
     num_cols = parameter_masks[0].shape[1]
+
+    # Global parameters (e.g. pi) are estimated jointly but presented separately.
+    # Slice columns to exclude them from the grid, or keep only them when global_only.
+    if global_params and intrinsic_params is not None:
+        global_cols = {i for i, p in enumerate(intrinsic_params) if p in global_params}
+        keep = [c for c in range(num_cols) if (c in global_cols) == global_only]
+        if not keep:
+            return None
+        keep = np.array(keep, dtype=int)
+        parameter_masks = [m[:, keep] for m in parameter_masks]
+        true_list = [t[..., keep] for t in true_list]
+        pred_list = [p[..., keep] for p in pred_list]
+        variable_names = [variable_names[c] for c in keep]
+        intrinsic_params = [intrinsic_params[c] for c in keep]
+        num_cols = len(keep)
 
     # Default colors from husl palette
     if colors is None:
@@ -233,6 +250,15 @@ def ensemble_recovery(
                      label_fontsize=legend_fontsize, pixel_alphas=pixel_alpha_maps,
                      thumb_scale=thumb_scale)
     return fig
+
+
+def global_ensemble_recovery(*args, global_params, **kwargs):
+    """Ensemble recovery for global parameters (e.g. ``pi``) only, plotted
+    separately from the coefficient matrix. Thin wrapper over
+    :func:`ensemble_recovery` with ``global_only=True``. Returns ``None`` when no
+    global parameter is active.
+    """
+    return ensemble_recovery(*args, global_params=global_params, global_only=True, **kwargs)
 
 
 if __name__ == "__main__":

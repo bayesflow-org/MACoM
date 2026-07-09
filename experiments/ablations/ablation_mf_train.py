@@ -51,8 +51,24 @@ def parse_args():
         "--block_film",
         action="store_true",
         default=False,
-        help="Apply FiLM modulation after every decoder attention block, in addition to the "
-             "output head. (default: False)",
+        help="Apply per-block time conditioning after every decoder attention block, in "
+             "addition to the output head. Mechanism set by --block_conditioning. (default: False)",
+    )
+    parser.add_argument(
+        "--output_conditioning",
+        type=str,
+        default="concat",
+        choices=["concat", "film"],
+        help="Output-head time conditioning: 'concat' (small MLP over [hidden; time]) or "
+             "'film' (feature-wise affine modulation). (default: concat)",
+    )
+    parser.add_argument(
+        "--block_conditioning",
+        type=str,
+        default="concat",
+        choices=["concat", "film"],
+        help="Per-block time conditioning mechanism when --block_film is set: 'concat' (residual "
+             "small MLP over [hidden; time]) or 'film' (affine modulation). (default: concat)",
     )
 
     add_training_args(parser)
@@ -102,7 +118,9 @@ def _build_variant_tag(args) -> str:
     else:
         parts.append(args.decoder_layer_design.replace("_attention", ""))
     if args.block_film:
-        parts.append("bfilm")
+        parts.append("bfilm" if args.block_conditioning == "film" else "bmlp")
+    if args.output_conditioning != "concat":
+        parts.append("ofilm")
     if not args.time_freq_trainable:
         parts.append("fixed_freq")
     return ("_" + "_".join(parts)) if parts else ""
@@ -204,6 +222,8 @@ if __name__ == "__main__":
         "pos_embedding_dim": args.pos_embedding_dim,
         "time_freq_trainable": args.time_freq_trainable,
         "block_film": args.block_film,
+        "output_conditioning": args.output_conditioning,
+        "block_conditioning": args.block_conditioning,
     }
 
     if args.use_wandb:

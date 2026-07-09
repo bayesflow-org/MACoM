@@ -20,7 +20,7 @@ np.set_printoptions(suppress=True)
 from cogformer.simulator import ModelFamily
 from cogformer.adapter import Adapter
 from cogformer.networks.transformers.cogformer import CogFormer
-from cogformer.diagnostics.plot.adaptive_recovery import adaptive_recovery
+from cogformer.diagnostics.plot.adaptive_recovery import adaptive_recovery, global_recovery
 from cogformer.utils.plot_utils import cogformer_fm_colors
 
 from ..configs import MODELS as _BASE_MODELS, GLOBAL_PARAMS, GLOBAL_VARIABLE_NAMES
@@ -273,6 +273,7 @@ class CogFormerTrainer:
         model_name = self.model_cfg["name"].lower()
         params = self.model_cfg["intrinsic_params"]
         param_names = self.model_cfg["variable_names"]
+        global_params = self.model_cfg.get("global_params") or None
         fig_subdir = self.model_cfg["fig_subdir"]
 
         colors = cogformer_fm_colors()
@@ -313,6 +314,7 @@ class CogFormerTrainer:
                 intercept_color=colors["intercept"],
                 main_effect_color=colors["main_effect"],
                 interaction_color=colors["interaction"],
+                global_params=global_params,
             )
             out_rec = rec_dir / f"{model_name}_val_recovery_{tag}.pdf"
             rec_fig.savefig(out_rec, bbox_inches="tight")
@@ -323,6 +325,28 @@ class CogFormerTrainer:
                     step=global_step,
                 )
             plt.close(rec_fig)
+
+            # Global parameters (e.g. pi) are estimated jointly but plotted separately.
+            glob_fig = global_recovery(
+                true=true_set,
+                pred=pred_set,
+                design_config=design_config,
+                intrinsic_params=params,
+                max_num_categories=default_max_cats,
+                global_params=global_params,
+                parameter_mask=params_mask,
+                variable_names=param_names,
+                global_color=colors["intercept"],
+            )
+            if glob_fig is not None:
+                out_glob = rec_dir / f"{model_name}_val_recovery_global_{tag}.pdf"
+                glob_fig.savefig(out_glob, bbox_inches="tight")
+                if self.use_wandb:
+                    wandb.log(
+                        {f"val/recovery_global_{tag}": wandb.Image(glob_fig)},
+                        step=global_step,
+                    )
+                plt.close(glob_fig)
 
         self.net.train()
 

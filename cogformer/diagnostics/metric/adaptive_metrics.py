@@ -160,10 +160,18 @@ def adaptive_metrics(
     num_null_draws: int = 1000,
     log_gamma_quantile: float = 0.05,
     skip_log_gamma: bool = True,
+    global_params: list[str] = None,
+    global_only: bool = False,
 ) -> pd.DataFrame:
     """
     Compute adaptive diagnostic metrics for all active parameters in the
     unfolded design-config layout.
+
+    ``global_params`` (e.g. the contamination probability ``pi``) are estimated
+    jointly but presented separately: with ``global_only=False`` (default) rows for
+    those parameters are excluded; with ``global_only=True`` only those rows are
+    returned. The result may be an empty DataFrame if no matching parameter is
+    active.
 
     Metrics computed per active parameter
     --------------------------------------
@@ -260,6 +268,11 @@ def adaptive_metrics(
             if parameter_mask[r, c] != 1.0:
                 continue
 
+            # Global parameters (e.g. pi) are reported separately from the matrix.
+            is_global = bool(global_params) and intrinsic_params[c] in global_params
+            if is_global != global_only:
+                continue
+
             param_label = (
                 col_labels[c]
                 if row_suffix is None
@@ -281,3 +294,29 @@ def adaptive_metrics(
             records[param_label] = entry
 
     return pd.DataFrame.from_dict(records, orient="index")
+
+
+def global_metrics(
+    true: np.ndarray,
+    pred: np.ndarray,
+    design_config: dict,
+    intrinsic_params: list[str],
+    max_num_categories: int,
+    global_params: list[str],
+    **kwargs,
+) -> pd.DataFrame:
+    """Diagnostic metrics for global parameters (e.g. ``pi``) only, reported
+    separately from the coefficient matrix. Thin wrapper over
+    :func:`adaptive_metrics` with ``global_only=True``. May return an empty
+    DataFrame when no global parameter is active.
+    """
+    return adaptive_metrics(
+        true=true,
+        pred=pred,
+        design_config=design_config,
+        intrinsic_params=intrinsic_params,
+        max_num_categories=max_num_categories,
+        global_params=global_params,
+        global_only=True,
+        **kwargs,
+    )

@@ -33,6 +33,8 @@ class Decoder(nn.Module):
             block_film: bool = False,
             expansion_factor: float = 4.0,
             self_attn_padding_mask: bool = True,
+            output_conditioning: str = "concat",
+            block_conditioning: str = "concat",
     ):
         super().__init__()
         assert num_layers >= 1, "num_layers must be >= 1"
@@ -46,7 +48,7 @@ class Decoder(nn.Module):
         if layer_kwargs is None:
             layer_kwargs = {}
 
-        self.time_embedding = FourierEmbedding(time_embedding_dim, trainable=time_freq_trainable)
+        self.time_embedding = SinusoidalEmbedding(time_embedding_dim)
         self.pos_embedding = SinusoidalEmbedding(pos_embedding_dim)
 
         # input: theta_t (1) + param_embedding (pos_embedding_dim) + reg_embedding (pos_embedding_dim)
@@ -110,15 +112,36 @@ class Decoder(nn.Module):
                 **layer_kwargs
             )
 
-        self.output_proj = TimeMLP(input_dim=proj_dim, time_embedding_dim=time_embedding_dim)
+        self.output_proj = TimeMLP(
+            input_dim=proj_dim,
+            time_embedding_dim=time_embedding_dim,
+            conditioning=output_conditioning,
+        )
         self.num_heads = num_heads
 
+        # Per-block time conditioning applied after each attention layer.
+        # block_film toggles it on; block_conditioning selects the mechanism:
+        #   "film"   : FiLM affine modulation, out = (1 + gamma) * out + beta
+        #   "concat" : residual small MLP over [out ; time_embedding]
         self.block_film = block_film
+        self.block_conditioning = block_conditioning
         if block_film:
-            self.film_layers = nn.ModuleList([
-                nn.Linear(time_embedding_dim, 2 * proj_dim)
-                for _ in range(num_layers)
-            ])
+            assert block_conditioning in ("film", "concat"), \
+                f"block_conditioning must be 'film' or 'concat', got {block_conditioning!r}"
+            if block_conditioning == "film":
+                self.film_layers = nn.ModuleList([
+                    nn.Linear(time_embedding_dim, 2 * proj_dim)
+                    for _ in range(num_layers)
+                ])
+            else:
+                self.block_mlp_layers = nn.ModuleList([
+                    nn.Sequential(
+                        nn.Linear(proj_dim + time_embedding_dim, proj_dim),
+                        nn.Mish(),
+                        nn.Linear(proj_dim, proj_dim),
+                    )
+                    for _ in range(num_layers)
+                ])
 
     def velocity(self, theta_t, query, key, t, query_mask=None, model_embedding=None,
                  param_embedding=None, regressor_embedding=None):
@@ -159,8 +182,11 @@ class Decoder(nn.Module):
                 out = out * query_mask[..., None]
 
             if self.block_film:
-                gamma, beta = self.film_layers[i](time_embedding).chunk(2, dim=-1)
-                out = (1 + gamma) * out + beta
+                if self.block_conditioning == "film":
+                    gamma, beta = self.film_layers[i](time_embedding).chunk(2, dim=-1)
+                    out = (1 + gamma) * out + beta
+                else:
+                    out = out + self.block_mlp_layers[i](torch.cat([out, time_embedding], dim=-1))
                 if query_mask is not None:
                     out = out * query_mask[..., None]
 

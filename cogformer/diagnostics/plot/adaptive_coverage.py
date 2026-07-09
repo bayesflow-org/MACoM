@@ -120,9 +120,17 @@ def adaptive_coverage(
     prob: float = 0.95,
     interval_type: str = "central",
     difference: bool = False,
+    global_params: list = None,
+    global_only: bool = False,
 ) -> plt.Figure:
     """
     Adaptive (masked) empirical coverage plot over a regressor-by-parameter grid.
+
+    ``global_params`` (e.g. the contamination probability ``pi``) are estimated
+    jointly but presented separately. With ``global_only=False`` (default) their
+    columns are excluded from the grid; with ``global_only=True`` only those
+    columns are kept (used by :func:`global_coverage`). Returns ``None`` if the
+    selected column set is empty.
     """
 
     if parameter_mask is None:
@@ -178,6 +186,16 @@ def adaptive_coverage(
     # Compact: drop rows and columns that are entirely N/A
     row_idx = np.where(np.any(parameter_mask[:num_rows], axis=1))[0]
     col_idx = np.where(np.any(parameter_mask[:num_rows], axis=0))[0]
+
+    # Global parameters (e.g. pi) are estimated jointly but presented separately.
+    # Exclude their columns from the matrix, or keep only them when global_only.
+    if global_params and intrinsic_params is not None:
+        global_cols = {i for i, p in enumerate(intrinsic_params) if p in global_params}
+        keep = (lambda c: c in global_cols) if global_only else (lambda c: c not in global_cols)
+        col_idx = np.array([c for c in col_idx if keep(c)], dtype=int)
+    if col_idx.size == 0:
+        return None
+
     parameter_mask = parameter_mask[np.ix_(row_idx, col_idx)]
     true = true[:, row_idx, :][:, :, col_idx]
     pred = pred[:, :, row_idx, :][:, :, :, col_idx]
@@ -304,6 +322,40 @@ def adaptive_coverage(
         )
         fig.subplots_adjust(bottom=0.1)
     return fig
+
+
+def global_coverage(
+    true: np.ndarray,
+    pred: np.ndarray,
+    design_config: dict,
+    variable_names: list,
+    global_params: list,
+    intrinsic_params: list = None,
+    parameter_mask: np.ndarray = None,
+    max_num_categories: int = 2,
+    global_color: str = "#4e2a84",
+    **kwargs,
+) -> plt.Figure:
+    """Coverage panel(s) for global parameters (e.g. ``pi``), plotted separately
+    from the coefficient matrix. Thin wrapper over :func:`adaptive_coverage` with
+    ``global_only=True``. Returns ``None`` when no global parameter is active.
+    """
+    return adaptive_coverage(
+        true=true,
+        pred=pred,
+        design_config=design_config,
+        variable_names=variable_names,
+        intrinsic_params=intrinsic_params,
+        parameter_mask=parameter_mask,
+        max_num_categories=max_num_categories,
+        intercept_color=global_color,
+        main_effect_color=global_color,
+        interaction_color=global_color,
+        global_params=global_params,
+        global_only=True,
+        **kwargs,
+    )
+
 
 if __name__ == "__main__":
 

@@ -39,9 +39,17 @@ def adaptive_metrics(
     tick_fontsize: int = 13,
     annot_fontsize: int = 11,
     fmt: str = ".3f",
+    global_params: list[str] = None,
+    global_only: bool = False,
 ) -> plt.Figure:
     """
     Heatmap visualization of four adaptive diagnostic metrics arranged in a 2×2 grid.
+
+    ``global_params`` (e.g. the contamination probability ``pi``) are estimated
+    jointly but presented separately: with ``global_only=False`` (default) their
+    columns are excluded from the heatmaps; with ``global_only=True`` only those
+    are kept (used by :func:`global_metrics`). Returns ``None`` if no column is
+    selected.
 
     Each subplot shows a ``num_rows × num_cols`` heatmap (rows = regressors/intercept,
     cols = intrinsic parameters), colour-coded by metric value. Inactive cells are
@@ -180,6 +188,16 @@ def adaptive_metrics(
     # Compact: drop rows and columns that are entirely N/A
     row_idx = np.where(np.any(parameter_mask, axis=1))[0]
     col_idx = np.where(np.any(parameter_mask, axis=0))[0]
+
+    # Global parameters (e.g. pi) are estimated jointly but presented separately.
+    # Exclude their columns from the heatmaps, or keep only them when global_only.
+    if global_params and intrinsic_params is not None:
+        global_cols = {i for i, p in enumerate(intrinsic_params) if p in global_params}
+        keep = (lambda c: c in global_cols) if global_only else (lambda c: c not in global_cols)
+        col_idx = np.array([c for c in col_idx if keep(c)], dtype=int)
+    if col_idx.size == 0:
+        return None
+
     parameter_mask = parameter_mask[np.ix_(row_idx, col_idx)]
     for key in grids:
         grids[key] = grids[key][np.ix_(row_idx, col_idx)]
@@ -272,6 +290,40 @@ def adaptive_metrics(
 
     fig.tight_layout()
     return fig
+
+
+def global_metrics(
+    true: np.ndarray,
+    pred: np.ndarray,
+    design_config: dict,
+    intrinsic_params: list[str],
+    max_num_categories: int,
+    global_params: list[str],
+    parameter_mask: np.ndarray = None,
+    variable_names: list[str] = None,
+    global_color: str = "#4e2a84",
+    **kwargs,
+) -> plt.Figure:
+    """Diagnostic-metric heatmap(s) for global parameters (e.g. ``pi``), plotted
+    separately from the coefficient matrix. Thin wrapper over
+    :func:`adaptive_metrics` with ``global_only=True``. Returns ``None`` when no
+    global parameter is active.
+    """
+    return adaptive_metrics(
+        true=true,
+        pred=pred,
+        design_config=design_config,
+        intrinsic_params=intrinsic_params,
+        max_num_categories=max_num_categories,
+        parameter_mask=parameter_mask,
+        variable_names=variable_names,
+        intercept_color=global_color,
+        main_effect_color=global_color,
+        interaction_color=global_color,
+        global_params=global_params,
+        global_only=True,
+        **kwargs,
+    )
 
 
 if __name__ == "__main__":

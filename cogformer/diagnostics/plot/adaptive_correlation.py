@@ -66,10 +66,19 @@ def compute_r_matrix(
     return r_matrix, parameter_mask
 
 
-def _compact(r_matrix, parameter_mask, row_labels, row_colors, variable_names):
-    """Drop all-NaN rows and columns for display; return compacted versions."""
+def _compact(r_matrix, parameter_mask, row_labels, row_colors, variable_names,
+             global_cols=None, global_only=False):
+    """Drop all-NaN rows and columns for display; return compacted versions.
+
+    ``global_cols`` (a set of column indices for global params like ``pi``) are
+    excluded, or kept exclusively when ``global_only`` — so global params can be
+    rendered separately from the coefficient matrix.
+    """
     row_idx = np.where(np.any(parameter_mask, axis=1))[0]
     col_idx = np.where(np.any(parameter_mask, axis=0))[0]
+    if global_cols is not None:
+        keep = (lambda c: c in global_cols) if global_only else (lambda c: c not in global_cols)
+        col_idx = np.array([c for c in col_idx if keep(c)], dtype=int)
     return (
         r_matrix[np.ix_(row_idx, col_idx)],
         parameter_mask[np.ix_(row_idx, col_idx)],
@@ -231,8 +240,16 @@ def adaptive_correlation(
     tick_fontsize: int = 13,
     annot_fontsize: int = 11,
     fmt: str = ".2f",
+    global_params: list[str] = None,
+    global_only: bool = False,
 ) -> plt.Figure:
     """Heatmap of Pearson r, identical to the r values in adaptive_recovery scatter panels.
+
+    ``global_params`` (e.g. the contamination probability ``pi``) are estimated
+    jointly but presented separately: with ``global_only=False`` (default) their
+    columns are excluded from the heatmap; with ``global_only=True`` only those are
+    kept (used by :func:`global_correlation`). Returns ``None`` if no column is
+    selected.
 
     true : (B, num_rows, num_cols)
     pred : (B, num_samples, num_rows, num_cols) or (B, num_rows, num_cols)
@@ -250,10 +267,17 @@ def adaptive_correlation(
         design_config, num_rows, intercept_color, main_effect_color, interaction_color
     )
 
+    global_cols = (
+        {i for i, p in enumerate(intrinsic_params) if p in global_params}
+        if global_params else None
+    )
     r_matrix, parameter_mask, row_labels, row_colors, col_labels = _compact(
-        r_matrix, parameter_mask, row_labels, row_colors, variable_names
+        r_matrix, parameter_mask, row_labels, row_colors, variable_names,
+        global_cols=global_cols, global_only=global_only,
     )
     num_rows, num_cols = r_matrix.shape
+    if num_cols == 0:
+        return None
 
     cell_size = 1.0
     if figsize is None:
@@ -269,3 +293,37 @@ def adaptive_correlation(
     ax.tick_params(axis="y", labelsize=label_fontsize)
     fig.tight_layout()
     return fig
+
+
+def global_correlation(
+    true: np.ndarray,
+    pred: np.ndarray,
+    design_config: dict,
+    intrinsic_params: list[str],
+    max_num_categories: int,
+    global_params: list[str],
+    parameter_mask: np.ndarray = None,
+    variable_names: list[str] = None,
+    global_color: str = "#4e2a84",
+    **kwargs,
+) -> plt.Figure:
+    """Recovery-correlation heatmap for global parameters (e.g. ``pi``) only,
+    plotted separately from the coefficient matrix. Thin wrapper over
+    :func:`adaptive_correlation` with ``global_only=True``. Returns ``None`` when
+    no global parameter is active.
+    """
+    return adaptive_correlation(
+        true=true,
+        pred=pred,
+        design_config=design_config,
+        intrinsic_params=intrinsic_params,
+        max_num_categories=max_num_categories,
+        parameter_mask=parameter_mask,
+        variable_names=variable_names,
+        intercept_color=global_color,
+        main_effect_color=global_color,
+        interaction_color=global_color,
+        global_params=global_params,
+        global_only=True,
+        **kwargs,
+    )

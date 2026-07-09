@@ -191,6 +191,8 @@ def adaptive_posterior(
     prior_color: str = "0.3",
     prior_alpha: float = 0.12,
     target_color: str = "black",
+    global_params: list[str] = None,
+    global_only: bool = False,
 ):
     """
     Pairplot of posterior samples with adaptive "patching" consistent with adaptive_recovery.
@@ -201,6 +203,11 @@ def adaptive_posterior(
         If False, omits the upper triangle entirely (diag + lower only).
     show_prior : bool
         If True and `priors` is provided, draws prior samples behind posterior.
+    global_params : list[str], optional
+        Intrinsic params estimated jointly but presented separately (e.g. ``pi``).
+        With ``global_only=False`` (default) their columns are excluded from the
+        pairplot; with ``global_only=True`` only those columns are kept (used by
+        :func:`global_posterior`). Returns ``None`` if no column is selected.
     """
     if col_labels is None and variable_names is not None:
         col_labels = variable_names
@@ -234,6 +241,38 @@ def adaptive_posterior(
         col_labels=col_labels,
     )
 
+    # Global parameters (e.g. pi) are estimated jointly but presented separately.
+    # Classify each unfolded column by its intrinsic param, then exclude those
+    # columns (or keep only them when global_only).
+    global_names = set()
+    if global_params:
+        _cl = col_labels if col_labels is not None else intrinsic_params
+        _names_all = unfolded_names(
+            design_config=design_config,
+            intrinsic_params=intrinsic_params,
+            max_num_categories=max_num_categories,
+            col_labels=_cl,
+        )
+        _ncl = len(_cl)
+        global_names = {
+            _names_all[i] for i in range(len(_names_all))
+            if intrinsic_params[i % _ncl] in global_params
+        }
+
+        if global_only:
+            keep_cols = [c for c in active_cols if c in global_names]
+            if not keep_cols:
+                return None
+            df_post = df_post.loc[:, keep_cols]
+            active_cols = keep_cols
+            patched_cols = []
+        else:
+            df_post = df_post.loc[:, [c for c in df_post.columns if c not in global_names]]
+            active_cols = [c for c in active_cols if c not in global_names]
+            patched_cols = [c for c in patched_cols if c not in global_names]
+            if df_post.shape[1] == 0:
+                return None
+
     # Build targets lookup: col_name -> scalar value for one dataset
     targets_dict = None
     if targets is not None:
@@ -266,6 +305,8 @@ def adaptive_posterior(
             unfold=unfold,
             col_labels=col_labels,
         )
+        # Keep prior columns aligned with the (global-filtered) posterior columns.
+        df_prior = df_prior.loc[:, [c for c in df_prior.columns if c in df_post.columns]]
 
     colors = {
         "intercept": intercept_color,
@@ -371,6 +412,34 @@ def adaptive_posterior(
         g.figure.legend(handles=handles, loc="upper right", frameon=False)
 
     return g
+
+
+def global_posterior(
+    samples,
+    design_config: dict,
+    intrinsic_params: list[str],
+    max_num_categories: int,
+    global_params: list[str],
+    global_color: str = "#4e2a84",
+    **kwargs,
+):
+    """Posterior pairplot for global parameters (e.g. ``pi``) only, plotted
+    separately from the coefficient matrix. Thin wrapper over
+    :func:`adaptive_posterior` with ``global_only=True``. Returns ``None`` when no
+    global parameter is active.
+    """
+    return adaptive_posterior(
+        samples=samples,
+        design_config=design_config,
+        intrinsic_params=intrinsic_params,
+        max_num_categories=max_num_categories,
+        intercept_color=global_color,
+        main_effect_color=global_color,
+        interaction_color=global_color,
+        global_params=global_params,
+        global_only=True,
+        **kwargs,
+    )
 
 
 if __name__ == "__main__":
