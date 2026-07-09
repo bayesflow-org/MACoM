@@ -110,7 +110,7 @@ class ModelFamilyDataset(torch.utils.data.IterableDataset):
                 free_prob=self._free_prob,
                 allowed_slope_patterns=self._slope_patterns,
             )
-            yield adapter.adapt(samples, device="cpu")
+            yield adapter.adapt(samples, device="cpu", compact_tokens=True)
 
 
 class ModelClassDataset(torch.utils.data.IterableDataset):
@@ -157,7 +157,7 @@ class ModelClassDataset(torch.utils.data.IterableDataset):
                 batch_size=self._batch_size,
                 flatten_param_outputs=True,
             )
-            yield adapter.adapt(samples, device="cpu")
+            yield adapter.adapt(samples, device="cpu", compact_tokens=True)
 
 
 def train_step(net, adapted, config, optimizer, scheduler):
@@ -227,21 +227,34 @@ def chunked_sample(model, adapted, num_samples, steps, solver="euler",
     model_ids       = adapted.get("model_ids")
 
     if samples_chunk_size is None or samples_chunk_size >= num_samples:
-        return model.sample(
+        pred = model.sample(
             input_data, param_indices, regressor_idx, params_mask,
             num_samples=num_samples, steps=steps, solver=solver,
             model_ids=model_ids,
         )
+    else:
+        chunks = []
+        for s_start in range(0, num_samples, samples_chunk_size):
+            s_count = min(samples_chunk_size, num_samples - s_start)
+            chunks.append(model.sample(
+                input_data, param_indices, regressor_idx, params_mask,
+                num_samples=s_count, steps=steps, solver=solver,
+                model_ids=model_ids,
+            ))
+        pred = np.concatenate(chunks, axis=1)
 
-    chunks = []
-    for s_start in range(0, num_samples, samples_chunk_size):
-        s_count = min(samples_chunk_size, num_samples - s_start)
-        chunks.append(model.sample(
-            input_data, param_indices, regressor_idx, params_mask,
-            num_samples=s_count, steps=steps, solver=solver,
-            model_ids=model_ids,
-        ))
-    return np.concatenate(chunks, axis=1)
+    # Batches adapted with compact_tokens=True carry only active design rows;
+    # scatter predictions back to the canonical row layout for downstream analysis.
+    if "row_gather_indices" in adapted:
+        from cogformer.adapter import Adapter
+        pred = Adapter.scatter_to_design_rows(
+            pred,
+            adapted["row_gather_indices"].cpu().numpy(),
+            adapted["num_active_rows"].cpu().numpy(),
+            adapted["num_design_rows"],
+            adapted["n_params"],
+        )
+    return pred
 
 
 def infer_free_fixed_intrinsics(

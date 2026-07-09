@@ -50,11 +50,52 @@ class Adapter:
             return batch
 
     @staticmethod
+    def scatter_to_design_rows(
+        pred: np.ndarray,
+        row_gather_indices: np.ndarray,
+        num_active_rows: np.ndarray,
+        num_design_rows: int,
+        n_params: int,
+    ) -> np.ndarray:
+        """Scatter predictions on compacted tokens back to the canonical design-row layout.
+
+        pred : (batch, num_samples, compact_rows * n_params, ...) — output of
+            CogFormer.sample on a batch adapted with compact_tokens=True.
+        Returns (batch, num_samples, num_design_rows * n_params, ...) with zeros at
+        rows that were inactive (their coefficients are masked everywhere downstream).
+        """
+        pred = np.asarray(pred)
+        gather = np.asarray(row_gather_indices)
+        active = np.asarray(num_active_rows).astype(np.int64)
+        batch_size, num_samples = pred.shape[0], pred.shape[1]
+        compact_rows = pred.shape[2] // n_params
+        tail = pred.shape[3:]
+
+        src = pred.reshape(batch_size, num_samples, compact_rows, n_params, *tail)
+        out = np.zeros((batch_size, num_samples, num_design_rows, n_params, *tail), dtype=pred.dtype)
+        for i in range(batch_size):
+            k = int(active[i])
+            out[i, :, gather[i, :k]] = src[i, :, :k].swapaxes(0, 1)
+        return out.reshape(batch_size, num_samples, num_design_rows * n_params, *tail)
+
+    @staticmethod
     def adapt(
         samples: dict,
         device: str | torch.device = torch.device("cuda"),
         max_alternatives: int = 4,
+        compact_tokens: bool = False,
     ) -> dict:
+        """Convert a simulator batch into network-ready tensors.
+
+        compact_tokens : if True, drop design rows whose coefficients are fully masked
+            (padding from unused regressor slots, category levels, and interaction
+            blocks) and keep only active rows, padded to the batch maximum (rounded up
+            to a multiple of 8). Decoder cost scales ~quadratically with the token
+            count, so this is a large training speedup; the factorized identity codes
+            plus the canonical row index in the fifth channel keep dropped-row layouts
+            unambiguous. Use scatter_to_design_rows to map sampled predictions back to
+            the canonical layout.
+        """
         design_matrices = samples["design_matrices"]
         rts = samples["sim_data"]["rts"]
         choices = samples["sim_data"]["choices"]
@@ -89,33 +130,70 @@ class Adapter:
             np.concatenate([design_matrices, rts, choices_normalized, alt_col, fav_col, theta_col], axis=-1)
         ).to(torch.float32)
 
-        n_tokens = samples["param_masks"].shape[-1] // n_params
-        row_codes = Adapter._resolve_position_codes(samples, n_tokens)  # (B, n_tokens, 4)
+        n_rows = samples["param_masks"].shape[-1] // n_params
+        row_codes = Adapter._resolve_position_codes(samples, n_rows)  # (B, n_rows, 4)
+        masks_np = np.asarray(samples["param_masks"], dtype=np.float32).reshape(batch_size, n_rows, n_params)
+        matrices_np = np.asarray(samples["param_matrices"], dtype=np.float32).reshape(batch_size, n_rows, n_params)
+        # Canonical design-row index per row; stays the design-column pointer even
+        # after compaction (the fifth identity channel must keep pointing at the
+        # encoder-side column the coefficient belongs to).
+        row_index = np.broadcast_to(np.arange(n_rows, dtype=np.int64)[None, :], (batch_size, n_rows))
+
+        extra: dict = {}
+        if compact_tokens:
+            row_active = masks_np.any(axis=-1)                       # (B, n_rows)
+            num_active = row_active.sum(axis=1).astype(np.int64)
+            compact_rows = max(int(num_active.max()), 1)
+            compact_rows = min(-(-compact_rows // 8) * 8, n_rows)    # multiple of 8 caps recompile variety
+            gather = np.zeros((batch_size, compact_rows), dtype=np.int64)
+            for i in range(batch_size):
+                idx = np.flatnonzero(row_active[i])[:compact_rows]
+                gather[i, :idx.shape[0]] = idx
+            pad = np.arange(compact_rows)[None, :] >= num_active[:, None]
+
+            row_codes = np.take_along_axis(row_codes, gather[..., None], axis=1)
+            masks_np = np.take_along_axis(masks_np, gather[..., None], axis=1)
+            matrices_np = np.take_along_axis(matrices_np, gather[..., None], axis=1)
+            row_index = gather.copy()
+            row_codes[pad] = 0
+            masks_np[pad] = 0.0
+            matrices_np[pad] = 0.0
+            row_index[pad] = 0
+
+            extra = {
+                "row_gather_indices": Adapter.to_torch(gather),
+                "num_active_rows": Adapter.to_torch(num_active),
+                "num_design_rows": n_rows,
+            }
+            n_rows = compact_rows
 
         # Token order matches the flattened param outputs: design rows outermost,
         # intrinsic params innermost. Each token carries its factorized identity
-        # (reg_a, reg_b, slot_a, slot_b) plus the raw padded design-row index as a
+        # (reg_a, reg_b, slot_a, slot_b) plus the canonical design-row index as a
         # fifth channel — an unnormalized positional signal for token-to-column
         # binding that, unlike the factors, is allowed to vary with layout.
-        param_idx = np.tile(np.arange(n_params, dtype=np.int64), n_tokens)[..., None]
+        param_idx = np.tile(np.arange(n_params, dtype=np.int64), n_rows)[..., None]
         parameter_indices = Adapter.to_torch(
             np.tile(param_idx, (batch_size, 1, 1)), copy=True
         )
 
-        row_pos = np.repeat(np.arange(n_tokens, dtype=np.int64), n_params)[None, :, None]
         regressor_indices = Adapter.to_torch(
             np.concatenate(
                 [
                     np.repeat(row_codes, n_params, axis=1),
-                    np.broadcast_to(row_pos, (batch_size, n_tokens * n_params, 1)),
+                    np.repeat(row_index, n_params, axis=1)[..., None],
                 ],
                 axis=-1,
             ),
             copy=True,
         )
 
-        param_masks = Adapter.to_torch(samples["param_masks"]).to(torch.float32)
-        param_matrices = Adapter.to_torch(samples["param_matrices"]).to(torch.float32)
+        param_masks = torch.from_numpy(
+            np.ascontiguousarray(masks_np.reshape(batch_size, n_rows * n_params))
+        )
+        param_matrices = torch.from_numpy(
+            np.ascontiguousarray(matrices_np.reshape(batch_size, n_rows * n_params))
+        )
 
         raw_ids = samples.get("model_ids", None)
         model_ids = (
@@ -130,6 +208,8 @@ class Adapter:
             "param_masks": param_masks,
             "param_matrices": param_matrices,
             "model_ids": model_ids,
+            "n_params": n_params,
+            **extra,
         }
 
         return Adapter.to_device(out, device)
