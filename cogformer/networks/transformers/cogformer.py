@@ -35,6 +35,9 @@ class CogFormer(nn.Module):
             decoder_layer_kwargs: dict = None,
             time_embedding_dim: int = 32,
             pos_embedding_dim: int = 32,
+            param_vocab_size: int = 16,
+            regressor_vocab_size: int = 8,
+            category_vocab_size: int = 8,
             num_models: int | None = None,
             model_embed_dim: int = 8,
             time_freq_trainable: bool = True,
@@ -77,6 +80,9 @@ class CogFormer(nn.Module):
             layer_kwargs=decoder_layer_kwargs,
             time_embedding_dim=time_embedding_dim,
             pos_embedding_dim=pos_embedding_dim,
+            param_vocab_size=param_vocab_size,
+            regressor_vocab_size=regressor_vocab_size,
+            category_vocab_size=category_vocab_size,
             model_embedding_dim=self._model_embed_dim,
             time_freq_trainable=time_freq_trainable,
             block_film=block_film,
@@ -132,7 +138,7 @@ class CogFormer(nn.Module):
 
         with torch.autocast(device_type=device.type, dtype=amp_dtype, enabled=use_amp):
             encoder_tokens = self.encoder(input_data)                               # (B, num_seeds, seed_dim)
-            pos_embeddings = torch.cat([param_indices, regressor_indices], dim=-1)  # (B, num_tokens, 2)
+            pos_embeddings = torch.cat([param_indices, regressor_indices], dim=-1)  # (B, num_tokens, 6)
 
             model_emb = None
             if self.model_embedding is not None and model_ids is not None:
@@ -140,13 +146,12 @@ class CogFormer(nn.Module):
                 model_emb = model_emb.unsqueeze(1).expand(-1, num_tokens, -1)       # (B, num_tokens, embed_dim)
 
             enc_k  = encoder_tokens.repeat_interleave(num_samples, dim=0)           # (B*S, num_seeds, seed_dim)
-            pos_q  = pos_embeddings.repeat_interleave(num_samples, dim=0)           # (B*S, num_tokens, 2)
+            pos_q  = pos_embeddings.repeat_interleave(num_samples, dim=0)           # (B*S, num_tokens, 6)
             mask_q = params_mask.repeat_interleave(num_samples, dim=0) if params_mask is not None else None
             emb_q  = model_emb.repeat_interleave(num_samples, dim=0) if model_emb is not None else None
 
-            # Pre-compute positional embeddings — constant across all ODE steps
-            param_emb = self.decoder.pos_embedding(pos_q[..., :1])  # (B*S, num_tokens, pos_embedding_dim)
-            reg_emb   = self.decoder.pos_embedding(pos_q[..., 1:])  # (B*S, num_tokens, pos_embedding_dim)
+            # Pre-compute identity embeddings — constant across all ODE steps
+            param_emb, reg_emb = self.decoder.embed_positions(pos_q)  # each (B*S, num_tokens, pos_embedding_dim)
 
         # Lazily compile decoder.velocity (torch.compile(cogformer) only wraps forward())
         if not hasattr(self, '_compiled_vel'):

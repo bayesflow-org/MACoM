@@ -158,6 +158,7 @@ def main():
             n_params=n_params,
             max_num_regressors=args.max_num_regressors,
             max_num_categories=args.max_num_categories,
+            design_config=design_config,
             num_alternatives=2,
         )
 

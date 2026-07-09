@@ -17,6 +17,7 @@ from .design_utils import (
     sample_parameter_matrix,
     normalize_design_config,
     design_config_signature,
+    build_position_codes,
 )
 
 from ..utils.simulator_utils import softplus, inspect
@@ -298,6 +299,10 @@ class ModelFamily:
             "obs": obs,
             "discrete_mask": discrete_mask,
             "regressor_mask": regressor_mask,
+            "position_codes": build_position_codes(
+                design_config=design_config,
+                max_num_categories=max_num_categories,
+            ),
             "max_num_regressors": max_num_regressors,
             "keep_intercept": has_intercept_col,
             "num_alternatives": int(ctx.get("num_alternatives", 2)),
@@ -433,6 +438,7 @@ class ModelFamily:
         param_masks = np.zeros(param_outputs_shape, dtype=np.float32)
         param_matrices = np.zeros(param_outputs_shape, dtype=np.float32)
         regressor_masks = np.zeros((batch_size, max_num_cols), dtype=np.float32)
+        position_codes = np.zeros((batch_size, max_num_cols, 4), dtype=np.int64)
         discrete_masks = -np.ones((batch_size, max_total_regressors))
         num_obs_array = np.zeros((batch_size, 1))
         num_regressors_array = np.zeros((batch_size, 1))
@@ -462,6 +468,7 @@ class ModelFamily:
                 param_matrices[i, :num_cols, :num_params] = b["param_matrix"]
 
             regressor_masks[i, :num_cols] = b["regressor_mask"]
+            position_codes[i, :num_cols] = b["position_codes"]
             discrete_masks[i, :b["discrete_mask"].shape[0]] = b["discrete_mask"]
             num_obs_array[i] = b["num_obs"]
             num_regressors_array[i] = b["num_regressors"]
@@ -502,6 +509,11 @@ class ModelFamily:
                 wide_dm[:, :, wc_idx] = design_matrices[:, :, nc_idx]
             design_matrices = wide_dm
 
+            wide_pc = np.zeros((batch_size, wide_cols, 4), dtype=np.int64)
+            for nc_idx, wc_idx in col_map.items():
+                wide_pc[:, wc_idx] = position_codes[:, nc_idx]
+            position_codes = wide_pc
+
             src_pm  = param_masks.reshape(batch_size, max_num_cols, num_params)
             src_pmx = param_matrices.reshape(batch_size, max_num_cols, num_params)
             dst_pm  = np.zeros((batch_size, wide_cols, num_params))
@@ -525,6 +537,7 @@ class ModelFamily:
             "param_matrices": param_matrices,
             "sim_data": sim_data,
             "regressor_masks": regressor_masks,
+            "position_codes": position_codes,
             "discrete_masks": discrete_masks,
             "num_obs": num_obs_array,
             "num_regressors": num_regressors_array,

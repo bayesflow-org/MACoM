@@ -197,6 +197,7 @@ def main():
             n_params=n_global_params,
             max_num_regressors=args.max_num_regressors,
             max_num_categories=args.max_num_categories,
+            design_config=design_config,
             num_alternatives=2,
             model_id=ddm_model_id,
         )

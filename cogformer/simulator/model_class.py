@@ -187,6 +187,7 @@ class ModelClass:
         param_masks = np.zeros((batch_size, max_num_cols, n_global))
         param_matrices = np.zeros((batch_size, max_num_cols, n_global))
         regressor_masks = np.zeros((batch_size, max_num_cols))
+        position_codes = np.zeros((batch_size, max_num_cols, 4), dtype=np.int64)
         discrete_masks = -np.ones((batch_size, max_total_regressors))
         num_obs_array = np.zeros((batch_size, 1))
         num_regressors_array = np.zeros((batch_size, 1))
@@ -218,6 +219,7 @@ class ModelClass:
             # Copy common fields into global arrays at the correct batch positions
             design_matrices[indices, :local_n_obs, :] = local["design_matrices"]
             regressor_masks[indices] = local["regressor_masks"]
+            position_codes[indices] = local["position_codes"]
             discrete_masks[indices] = local["discrete_masks"]
             num_obs_array[indices] = local["num_obs"]
             num_regressors_array[indices] = local["num_regressors"]
@@ -254,6 +256,7 @@ class ModelClass:
             "param_matrices": param_matrices,
             "sim_data": sim_data,
             "regressor_masks": regressor_masks,
+            "position_codes": position_codes,
             "discrete_masks": discrete_masks,
             "num_obs": num_obs_array,
             "num_regressors": num_regressors_array,

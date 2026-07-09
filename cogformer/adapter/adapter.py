@@ -2,18 +2,36 @@ import torch
 import numpy as np
 from collections.abc import Mapping, Sequence
 
+from cogformer.simulator.design_utils import build_position_codes
+
 
 class Adapter:
 
     @staticmethod
-    def _build_position_indices(
-        n_params: int,
-        n_tokens: int,
-    ) -> tuple[np.ndarray, np.ndarray]:
-        """Return (parameter_indices, regressor_indices), each shape (n_tokens * n_params, 1)."""
-        param_idx = np.tile(np.linspace(0.0, 1.0, n_params), n_tokens)[..., None]
-        reg_idx = np.repeat(np.linspace(0.0, 1.0, n_tokens), n_params)[..., None]
-        return param_idx, reg_idx
+    def _resolve_position_codes(samples: dict, n_tokens: int) -> np.ndarray:
+        """Return per-design-row factorized codes, shape (batch_size, n_tokens, 4) int64.
+
+        Prefers the simulator-emitted "position_codes"; falls back to rebuilding them
+        from per-element design configs (e.g. batches saved to disk before the key
+        existed). Padding rows keep the all-zero "none" code.
+        """
+        codes = samples.get("position_codes")
+        if codes is not None:
+            return np.asarray(codes, dtype=np.int64)
+
+        design_configs = samples.get("design_configs")
+        max_num_categories = samples.get("max_num_categories")
+        if design_configs is None or max_num_categories is None:
+            raise KeyError(
+                "Adapter needs 'position_codes' (or 'design_configs' + 'max_num_categories' "
+                "to rebuild them) in the samples dict."
+            )
+        batch_size = len(design_configs)
+        codes = np.zeros((batch_size, n_tokens, 4), dtype=np.int64)
+        for i, dc in enumerate(design_configs):
+            element_codes = build_position_codes(dc, max_num_categories=max_num_categories)
+            codes[i, :element_codes.shape[0]] = element_codes
+        return codes
 
     @staticmethod
     def to_torch(x: np.ndarray, copy: bool = False) -> torch.Tensor:
@@ -72,18 +90,29 @@ class Adapter:
         ).to(torch.float32)
 
         n_tokens = samples["param_masks"].shape[-1] // n_params
-        param_idx, reg_idx = Adapter._build_position_indices(
-            n_params=n_params,
-            n_tokens=n_tokens,
+        row_codes = Adapter._resolve_position_codes(samples, n_tokens)  # (B, n_tokens, 4)
+
+        # Token order matches the flattened param outputs: design rows outermost,
+        # intrinsic params innermost. Each token carries its factorized identity
+        # (reg_a, reg_b, slot_a, slot_b) plus the raw padded design-row index as a
+        # fifth channel — an unnormalized positional signal for token-to-column
+        # binding that, unlike the factors, is allowed to vary with layout.
+        param_idx = np.tile(np.arange(n_params, dtype=np.int64), n_tokens)[..., None]
+        parameter_indices = Adapter.to_torch(
+            np.tile(param_idx, (batch_size, 1, 1)), copy=True
         )
 
-        parameter_indices = Adapter.to_torch(
-            np.tile(param_idx, (batch_size, 1, 1))
-        ).to(torch.float32)
-
+        row_pos = np.repeat(np.arange(n_tokens, dtype=np.int64), n_params)[None, :, None]
         regressor_indices = Adapter.to_torch(
-            np.tile(reg_idx, (batch_size, 1, 1))
-        ).to(torch.float32)
+            np.concatenate(
+                [
+                    np.repeat(row_codes, n_params, axis=1),
+                    np.broadcast_to(row_pos, (batch_size, n_tokens * n_params, 1)),
+                ],
+                axis=-1,
+            ),
+            copy=True,
+        )
 
         param_masks = Adapter.to_torch(samples["param_masks"]).to(torch.float32)
         param_matrices = Adapter.to_torch(samples["param_matrices"]).to(torch.float32)

@@ -255,17 +255,67 @@ def build_parameter_mask(
     for key in inter_keys:
         if category_counts:
             a, b = key.split(":")
-            active = min(category_counts.get(a, 1) * category_counts.get(b, 1), inter_block_width)
+            count_a = min(category_counts.get(a, 1), block_width)
+            count_b = min(category_counts.get(b, 1), block_width)
         else:
-            active = inter_block_width
+            count_a = count_b = block_width
+        # Identifiable interaction rows form the sub-grid {(i, j): i < count_a, j < count_b}
+        # of the row-major (i * block_width + j) flattening — non-contiguous whenever
+        # count_b < block_width, so a contiguous range would activate zero-column rows
+        # while masking real cross-products.
         for intrinsic in design_config[key]:
             if intrinsic in intrinsic_params and intrinsic not in fixed_set:
                 param_index = intrinsic_params.index(intrinsic)
-                for r in range(row_idx, row_idx + active):
-                    mask[r, param_index] = 1.0
+                for i in range(count_a):
+                    for j in range(count_b):
+                        mask[row_idx + i * block_width + j, param_index] = 1.0
         row_idx += inter_block_width
 
     return mask
+
+
+def build_position_codes(
+    design_config: dict[str, list[str]],
+    max_num_categories: int = 3,
+) -> np.ndarray:
+    """
+    Build factorized identity codes for each design row, aligned with the row layout
+    of build_design_matrix / build_parameter_mask (intercept, then main-effect blocks
+    in config order, then interaction blocks in config order).
+
+    Each row gets an int64 code (reg_a, reg_b, slot_a, slot_b):
+      intercept                     : (0, 0, 0, 0)
+      main effect u_r, block col c  : (r, 0, c + 1, 0)      — slot 1 = first design column
+                                      (category-2 contrast for discrete, the value column
+                                      for continuous regressors)
+      interaction u_a:u_b at (i, j) : (a, b, i + 1, j + 1)  — row-major i * block_width + j
+    Regressor ids are 1-based positions in main-key order; 0 everywhere means "none",
+    so padding rows can safely carry the all-zero code.
+
+    Returns shape (num_rows, 4).
+    """
+    block_width = max_num_categories - 1
+    regressor_keys = [k for k in design_config if k != "1"]
+    main_keys = [k for k in regressor_keys if ":" not in k]
+    inter_keys = [k for k in regressor_keys if ":" in k]
+    main_id = {k: i + 1 for i, k in enumerate(main_keys)}
+
+    rows: list[tuple[int, int, int, int]] = []
+    if "1" in design_config:
+        rows.append((0, 0, 0, 0))
+    for key in main_keys:
+        r = main_id[key]
+        rows.extend((r, 0, c, 0) for c in range(1, block_width + 1))
+    for key in inter_keys:
+        a, b = key.split(":")
+        reg_a, reg_b = main_id.get(a, 0), main_id.get(b, 0)
+        rows.extend(
+            (reg_a, reg_b, i, j)
+            for i in range(1, block_width + 1)
+            for j in range(1, block_width + 1)
+        )
+
+    return np.asarray(rows, dtype=np.int64).reshape(-1, 4)
 
 
 def normalize_design_config(

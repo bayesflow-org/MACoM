@@ -20,7 +20,7 @@ Categorical regressors (dummy-coded) occupy columns 0..(n_dummies-1) of their bl
 Interaction blocks hold the outer product of each pair of parent blocks.
 """
 import numpy as np
-from cogformer.simulator.design_utils import build_parameter_mask
+from cogformer.simulator.design_utils import build_parameter_mask, build_position_codes
 
 
 def _regressor_keys(design_config: dict) -> list[str]:
@@ -130,6 +130,7 @@ def build_subject_batch(
     n_params: int,
     max_num_regressors: int,
     max_num_categories: int,
+    design_config: dict,
     num_alternatives: int = 2,
     model_id: int | None = None,
 ) -> dict:
@@ -141,12 +142,20 @@ def build_subject_batch(
     rts, choices : (num_obs,) arrays — real observations
     design_matrix : (num_obs, max_num_cols)
     param_mask : flat (max_num_cols * n_params,) array
+    design_config : dict — used to build factorized position codes; must be the same
+        config the design matrix and param mask were built from
     """
     rts = np.asarray(rts, dtype=np.float32).reshape(-1, 1)
     choices = np.asarray(choices, dtype=np.float32).reshape(-1, 1)
     num_obs = rts.shape[0]
 
+    max_num_cols = len(param_mask) // n_params
+    codes = build_position_codes(design_config, max_num_categories=max_num_categories)
+    position_codes = np.zeros((max_num_cols, 4), dtype=np.int64)
+    position_codes[:codes.shape[0]] = codes
+
     batch = {
+        "position_codes":   position_codes[np.newaxis],           # (1, max_num_cols, 4)
         "design_matrices":  design_matrix[np.newaxis],            # (1, num_obs, max_num_cols)
         "sim_data": {
             "rts":     rts[np.newaxis],                           # (1, num_obs, 1)

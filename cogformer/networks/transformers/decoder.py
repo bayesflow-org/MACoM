@@ -29,6 +29,9 @@ class Decoder(nn.Module):
             time_embedding_dim: int = 32,
             pos_embedding_dim: int = 32,
             model_embedding_dim: int = 0,
+            param_vocab_size: int = 16,
+            regressor_vocab_size: int = 8,
+            category_vocab_size: int = 8,
             time_freq_trainable: bool = True,
             block_film: bool = False,
             expansion_factor: float = 4.0,
@@ -49,7 +52,21 @@ class Decoder(nn.Module):
             layer_kwargs = {}
 
         self.time_embedding = SinusoidalEmbedding(time_embedding_dim)
-        self.pos_embedding = SinusoidalEmbedding(pos_embedding_dim)
+
+        # Factorized coefficient-identity embeddings. Each token identifies its
+        # coefficient as (param, reg_a, reg_b, slot_a, slot_b) integer indices; 0 = "none".
+        # The regressor table is shared across both positions (pairs are canonically
+        # ordered a < b), while the two slot positions get separate tables because
+        # interaction rows (i, j) and (j, i) are distinct coefficients.
+        self.param_embedding = nn.Embedding(param_vocab_size, pos_embedding_dim)
+        self.regressor_embedding = nn.Embedding(regressor_vocab_size, pos_embedding_dim)
+        self.category_embedding = nn.Embedding(category_vocab_size, pos_embedding_dim)
+        self.category_embedding_b = nn.Embedding(category_vocab_size, pos_embedding_dim)
+        # Fused positional term over the raw (unnormalized) design-row index: gives
+        # tokens an unambiguous pointer to their design column even when the same
+        # factorized code sits at different padded positions across batch elements
+        # (possible with interaction blocks under heterogeneous regressor counts).
+        self.row_embedding = SinusoidalEmbedding(pos_embedding_dim)
 
         # input: theta_t (1) + param_embedding (pos_embedding_dim) + reg_embedding (pos_embedding_dim)
         #        + t_embedding (time_embedding_dim) [+ model_embedding (model_embed_dim)]
@@ -143,12 +160,28 @@ class Decoder(nn.Module):
                     for _ in range(num_layers)
                 ])
 
+    def embed_positions(self, query):
+        """Embed factorized coefficient identities.
+
+        query : (B, T, 6) int64 — (param, reg_a, reg_b, slot_a, slot_b, row_pos) per token.
+        Returns (param_embedding, regressor_embedding), each (B, T, pos_embedding_dim).
+        """
+        param_embedding = self.param_embedding(query[..., 0])
+        regressor_embedding = (
+            self.regressor_embedding(query[..., 1])
+            + self.regressor_embedding(query[..., 2])
+            + self.category_embedding(query[..., 3])
+            + self.category_embedding_b(query[..., 4])
+            + self.row_embedding(query[..., 5:6].float())
+        )
+        return param_embedding, regressor_embedding
+
     def velocity(self, theta_t, query, key, t, query_mask=None, model_embedding=None,
                  param_embedding=None, regressor_embedding=None):
         """
         param_embedding, regressor_embedding : optional pre-computed positional embeddings.
-            If provided (e.g. pre-computed once before an ODE loop), the sinusoidal embedding
-            forward passes are skipped.
+            If provided (e.g. pre-computed once before an ODE loop), the embedding
+            lookups are skipped.
         """
         # key_padding_mask for self-attention: True = inactive token, should be ignored.
         # Disabled when self_attn_padding_mask is False (FlashAttention A/B).
@@ -158,11 +191,9 @@ class Decoder(nn.Module):
             else None
         )
 
-        # Sinusoidal embeddings for positional indices (skip if pre-computed)
-        if param_embedding is None:
-            param_embedding = self.pos_embedding(query[..., :1])     # (B, T, pos_embedding_dim)
-        if regressor_embedding is None:
-            regressor_embedding = self.pos_embedding(query[..., 1:]) # (B, T, pos_embedding_dim)
+        # Factorized identity embeddings (skip if pre-computed)
+        if param_embedding is None or regressor_embedding is None:
+            param_embedding, regressor_embedding = self.embed_positions(query)
         time_embedding = self.time_embedding(t)                      # (B, T, time_embedding_dim)
 
         components = [theta_t, param_embedding, regressor_embedding, time_embedding]

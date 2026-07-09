@@ -38,8 +38,12 @@ def make_fake_batch(bs, num_obs):
     rng = np.random.default_rng(num_obs * 1000 + bs)
     return {
         "input_data":        torch.from_numpy(rng.standard_normal((bs, num_obs, ENCODER_INPUT_DIM)).astype(np.float32)),
-        "param_indices":     torch.from_numpy(rng.uniform(0, 1, (bs, N_TOKENS, 1)).astype(np.float32)),
-        "regressor_indices": torch.from_numpy(rng.uniform(0, 1, (bs, N_TOKENS, 1)).astype(np.float32)),
+        "param_indices":     torch.from_numpy(rng.integers(0, 8, (bs, N_TOKENS, 1))),
+        "regressor_indices": torch.from_numpy(np.concatenate([
+                                 rng.integers(0, 4, (bs, N_TOKENS, 2)),      # reg_a, reg_b
+                                 rng.integers(0, 4, (bs, N_TOKENS, 2)),      # slot_a, slot_b
+                                 rng.integers(0, N_TOKENS, (bs, N_TOKENS, 1)),  # row_pos
+                             ], axis=-1)),
         "param_masks":       torch.ones(bs, N_TOKENS, dtype=torch.float32),
         "param_matrices":    torch.from_numpy(rng.standard_normal((bs, N_TOKENS, 1)).astype(np.float32)),
         "model_ids":         None,
