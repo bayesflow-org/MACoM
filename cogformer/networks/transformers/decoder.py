@@ -29,9 +29,9 @@ class Decoder(nn.Module):
             time_embedding_dim: int = 32,
             pos_embedding_dim: int = 32,
             model_embedding_dim: int = 0,
-            param_vocab_size: int = 16,
-            regressor_vocab_size: int = 8,
-            category_vocab_size: int = 8,
+            num_param_indices: int = 16,
+            num_regressor_indices: int = 8,
+            num_category_indices: int = 8,
             time_freq_trainable: bool = True,
             block_film: bool = False,
             expansion_factor: float = 4.0,
@@ -58,10 +58,10 @@ class Decoder(nn.Module):
         # The regressor table is shared across both positions (pairs are canonically
         # ordered a < b), while the two slot positions get separate tables because
         # interaction rows (i, j) and (j, i) are distinct coefficients.
-        self.param_embedding = nn.Embedding(param_vocab_size, pos_embedding_dim)
-        self.regressor_embedding = nn.Embedding(regressor_vocab_size, pos_embedding_dim)
-        self.category_embedding = nn.Embedding(category_vocab_size, pos_embedding_dim)
-        self.category_embedding_b = nn.Embedding(category_vocab_size, pos_embedding_dim)
+        self.param_embedding = nn.Embedding(num_param_indices, pos_embedding_dim)
+        self.regressor_embedding = nn.Embedding(num_regressor_indices, pos_embedding_dim)
+        self.category_embedding = nn.Embedding(num_category_indices, pos_embedding_dim)
+        self.category_embedding_b = nn.Embedding(num_category_indices, pos_embedding_dim)
         # Fused positional term over the raw (unnormalized) design-row index: gives
         # tokens an unambiguous pointer to their design column even when the same
         # factorized code sits at different padded positions across batch elements
