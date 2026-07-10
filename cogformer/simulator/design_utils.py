@@ -318,6 +318,71 @@ def build_position_codes(
     return np.asarray(rows, dtype=np.int64).reshape(-1, 4)
 
 
+def build_row_labels(
+    design_config: dict[str, list[str]],
+    max_num_categories: int = 3,
+    math: bool = True,
+    return_kinds: bool = False,
+) -> list[str] | tuple[list[str], list[str]]:
+    """Human-readable labels for each design-matrix ROW (coefficient), aligned with
+    the row order of :func:`build_parameter_mask` / :func:`build_position_codes`:
+    intercept, then main-effect blocks (``block_width`` rows each) in config order,
+    then interaction blocks (``block_width ** 2`` rows, row-major ``(i, j)``) in
+    config order.
+
+    Category slots use 1-based contrast indices (matching :func:`build_column_labels`),
+    and are only shown when there is more than one contrast (``block_width > 1``):
+
+      - intercept                          -> ``1``
+      - main effect ``u_r``, contrast ``c``      -> ``u_r``        (+ ``| c_c``)
+      - interaction ``u_a:u_b``, contrast ``(i, j)`` -> ``u_a:u_b``    (+ ``| c_{i,j}``)
+
+    The interaction suffix carries the full ``(i, j)`` category pair — one index per
+    interacting regressor — rather than a flat running count, so each row names the
+    exact cross-product cell it represents.
+
+    Args:
+        math         : wrap labels in ``$…$`` for LaTeX rendering (matplotlib mathtext).
+        return_kinds : also return a parallel list of row kinds, each one of
+                       ``"intercept"``, ``"main"``, ``"interaction"`` — convenient for
+                       mapping rows to per-kind colors.
+    """
+    block_width = max_num_categories - 1
+    keys = [k for k in design_config if k != "1"]
+    main_keys = [k for k in keys if ":" not in k]
+    inter_keys = [k for k in keys if ":" in k]
+
+    def wrap(body: str) -> str:
+        return f"${body}$" if math else body
+
+    def main_suffix(c: int) -> str:
+        if block_width <= 1:
+            return ""
+        return fr"$ | c_{{{c}}}$" if math else f" | c_{c}"
+
+    def inter_suffix(i: int, j: int) -> str:
+        if block_width <= 1:
+            return ""
+        return fr"$ | c_{{{i},{j}}}$" if math else f" | c_{i},{j}"
+
+    labels: list[str] = []
+    kinds: list[str] = []
+    if "1" in design_config:
+        labels.append(wrap("1"))
+        kinds.append("intercept")
+    for key in main_keys:
+        for c in range(1, block_width + 1):
+            labels.append(wrap(key) + main_suffix(c))
+            kinds.append("main")
+    for key in inter_keys:
+        for i in range(1, block_width + 1):
+            for j in range(1, block_width + 1):
+                labels.append(wrap(key) + inter_suffix(i, j))
+                kinds.append("interaction")
+
+    return (labels, kinds) if return_kinds else labels
+
+
 def normalize_design_config(
     design_config: dict,
     max_num_regressors: int,

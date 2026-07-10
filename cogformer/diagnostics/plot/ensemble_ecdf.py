@@ -4,7 +4,7 @@ import matplotlib.pyplot as plt
 import matplotlib.patches as mpatches
 import matplotlib.lines as mlines
 
-from cogformer.simulator.design_utils import build_parameter_mask, build_design_matrix, build_random_design_config
+from cogformer.simulator.design_utils import build_parameter_mask, build_design_matrix, build_random_design_config, build_row_labels
 from cogformer.diagnostics.plot.adaptive_ecdf import compute_ecdf_bands
 from cogformer.utils.plot_utils import _add_mask_legend
 
@@ -128,23 +128,13 @@ def ensemble_ecdf(
 
     fig, axarr = plt.subplots(num_rows, num_cols, figsize=figsize, squeeze=False)
 
-    # Row labels from first design config
-    first_dc = design_configs[0]
-    regressor_keys_0 = list(first_dc.keys())
+    # Row labels from the widest design config (most rows), aligned with the mask layout
+    # (intercept, main-effect blocks, then interaction (i, j) blocks).
+    _label_dc = design_configs[int(np.argmax([m.shape[0] for m in parameter_masks]))]
+    row_labels_all = build_row_labels(_label_dc, max_num_categories)
 
     for r in range(num_rows):
-        if r == 0:
-            ylabel = r"$1$"
-        else:
-            category_id = (r - 1) % (max_num_categories - 1) + 1
-            regressor_id = (r - 1) // (max_num_categories - 1) + 1
-            if regressor_id < len(regressor_keys_0):
-                regressor_key = regressor_keys_0[regressor_id]
-                ylabel = fr"${regressor_key}$" + (
-                    fr"$ | c_{category_id}$" if max_num_categories > 2 else ""
-                )
-            else:
-                ylabel = f"Row {r}"
+        ylabel = row_labels_all[r] if r < len(row_labels_all) else f"Row {r}"
 
         for c in range(num_cols):
             ax = axarr[r, c]

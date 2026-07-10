@@ -4,7 +4,7 @@ import seaborn as sns
 import matplotlib.pyplot as plt
 
 from cogformer.utils.plot_utils import cogformer_cm_colors
-from cogformer.simulator.design_utils import build_parameter_mask, build_design_matrix, build_random_design_config
+from cogformer.simulator.design_utils import build_parameter_mask, build_design_matrix, build_random_design_config, build_row_labels
 
 
 from matplotlib.patches import Patch
@@ -62,26 +62,22 @@ def unfolded_names(
         Optional display labels for columns (e.g. LaTeX r"$v$").
         If None, uses intrinsic_params.
     """
-    regressor_keys = list(design_config.keys())
-
-    num_regressors = len([k for k in regressor_keys if k != "1"])
-    num_rows = 1 + num_regressors * (max_num_categories - 1)
-
     if col_labels is None:
         col_labels = intrinsic_params
     num_cols = len(col_labels)
 
+    # Row-major over the parameter-mask layout (intercept, main-effect blocks, then
+    # interaction (i, j) blocks) so names align with parameter_mask.reshape(-1).
+    row_labels, row_kinds = build_row_labels(design_config, max_num_categories, return_kinds=True)
+
     names = []
-    for r in range(num_rows):
-        if r == 0:
-            for c in range(num_cols):
-                names.append(col_labels[c])
+    for coef, kind in zip(row_labels, row_kinds):
+        if kind == "intercept":
+            # intercept row: named by the column parameter alone (a bare name with no
+            # " -- " is what effect_type_from_unfolded_name treats as the intercept)
+            names.extend(col_labels[c] for c in range(num_cols))
         else:
-            category_id = (r - 1) % (max_num_categories - 1) + 1
-            regressor_id = (r - 1) // (max_num_categories - 1) + 1
-            regressor_key = regressor_keys[regressor_id]
-            for c in range(num_cols):
-                names.append(f"{col_labels[c]} -- ${regressor_key}$ | $c_{{{category_id}}}$")
+            names.extend(f"{col_labels[c]} -- {coef}" for c in range(num_cols))
 
     return names
 

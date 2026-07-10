@@ -41,10 +41,10 @@ class CogFormer(nn.Module):
             num_models: int | None = None,
             model_embed_dim: int = 8,
             time_freq_trainable: bool = True,
-            block_film: bool = False,
+            block_film: bool = True,
             self_attn_padding_mask: bool = True,
-            output_conditioning: str = "concat",
-            block_conditioning: str = "concat",
+            output_conditioning: str = "linear",
+            block_conditioning: str = "film",
     ):
         super().__init__()
 

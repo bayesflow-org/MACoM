@@ -4,7 +4,7 @@ import matplotlib.colors as mcolors
 from matplotlib.patches import Rectangle
 import seaborn as sns
 
-from cogformer.simulator.design_utils import build_parameter_mask, expand_design_config_to_mask
+from cogformer.simulator.design_utils import build_parameter_mask, expand_design_config_to_mask, build_row_labels
 from cogformer.diagnostics.metric.adaptive_metrics import (
     _rmse,
     _contraction,
@@ -159,31 +159,11 @@ def adaptive_metrics(
     # ------------------------------------------------------------------
     # Row / column axis labels (built before compact filtering)
     # ------------------------------------------------------------------
-    row_labels = []
-    row_colors = []
-    _r = 0
-    if "1" in regressor_keys:
-        row_labels.append(r"$1$")
-        row_colors.append(intercept_color)
-        _r += 1
-    for key in main_keys:
-        for _ in range(block_width):
-            row_labels.append(fr"${key}$")
-            row_colors.append(main_effect_color)
-            _r += 1
-            if _r >= num_rows:
-                break
-        if _r >= num_rows:
-            break
-    for key in inter_keys_dc:
-        for _ in range(block_width ** 2):
-            row_labels.append(fr"${key}$")
-            row_colors.append(interaction_color)
-            _r += 1
-            if _r >= num_rows:
-                break
-        if _r >= num_rows:
-            break
+    row_labels, row_kinds = build_row_labels(design_config, max_num_categories, return_kinds=True)
+    _kind_color = {"intercept": intercept_color, "main": main_effect_color, "interaction": interaction_color}
+    row_colors = [_kind_color[k] for k in row_kinds]
+    row_labels = row_labels[:num_rows]
+    row_colors = row_colors[:num_rows]
 
     # Compact: drop rows and columns that are entirely N/A
     row_idx = np.where(np.any(parameter_mask, axis=1))[0]

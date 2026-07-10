@@ -33,11 +33,11 @@ class Decoder(nn.Module):
             num_regressor_indices: int = 8,
             num_category_indices: int = 8,
             time_freq_trainable: bool = True,
-            block_film: bool = False,
+            block_film: bool = True,
             expansion_factor: float = 4.0,
             self_attn_padding_mask: bool = True,
-            output_conditioning: str = "concat",
-            block_conditioning: str = "concat",
+            output_conditioning: str = "linear",
+            block_conditioning: str = "film",
     ):
         super().__init__()
         assert num_layers >= 1, "num_layers must be >= 1"

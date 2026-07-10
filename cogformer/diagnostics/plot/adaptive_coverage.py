@@ -1,7 +1,7 @@
 import numpy as np
 from scipy.stats import beta
 import matplotlib.pyplot as plt
-from cogformer.simulator.design_utils import build_parameter_mask, expand_design_config_to_mask
+from cogformer.simulator.design_utils import build_parameter_mask, expand_design_config_to_mask, build_row_labels
 from cogformer.utils.plot_utils import cogformer_cm_colors
 
 
@@ -145,43 +145,14 @@ def adaptive_coverage(
 
     design_config = expand_design_config_to_mask(design_config, parameter_mask, max_num_categories)
     batch_size, num_draws, num_rows, num_cols = pred.shape
-    regressor_keys = list(design_config.keys())
-    block_width = max_num_categories - 1
-    main_keys = [k for k in regressor_keys if k != "1" and ":" not in k]
-    inter_keys = [k for k in regressor_keys if ":" in k]
-    n_design_rows = (
-        (1 if "1" in regressor_keys else 0)
-        + len(main_keys) * block_width
-        + len(inter_keys) * block_width ** 2
-    )
-    num_rows = min(num_rows, n_design_rows)
-
-    # Pre-generate labels before compact filtering
-    row_ylabels = []
-    row_tints   = []
-    _r = 0
-    if "1" in regressor_keys:
-        row_ylabels.append(r"$1$")
-        row_tints.append(intercept_color)
-        _r += 1
-    for key in main_keys:
-        for cat_id in range(1, block_width + 1):
-            row_ylabels.append(fr"${key}$" + (fr"$ | c_{cat_id}$" if max_num_categories > 2 else ""))
-            row_tints.append(main_effect_color)
-            _r += 1
-            if _r >= num_rows:
-                break
-        if _r >= num_rows:
-            break
-    for key in inter_keys:
-        for cat_id in range(1, block_width ** 2 + 1):
-            row_ylabels.append(fr"${key}$" + (fr"$ | c_{cat_id}$" if max_num_categories > 2 else ""))
-            row_tints.append(interaction_color)
-            _r += 1
-            if _r >= num_rows:
-                break
-        if _r >= num_rows:
-            break
+    # Row labels + tints, aligned with the parameter-mask row layout
+    # (intercept, main-effect blocks, then interaction (i, j) blocks).
+    row_ylabels, row_kinds = build_row_labels(design_config, max_num_categories, return_kinds=True)
+    _kind_color = {"intercept": intercept_color, "main": main_effect_color, "interaction": interaction_color}
+    row_tints = [_kind_color[k] for k in row_kinds]
+    num_rows = min(num_rows, len(row_ylabels))
+    row_ylabels = row_ylabels[:num_rows]
+    row_tints = row_tints[:num_rows]
 
     # Compact: drop rows and columns that are entirely N/A
     row_idx = np.where(np.any(parameter_mask[:num_rows], axis=1))[0]

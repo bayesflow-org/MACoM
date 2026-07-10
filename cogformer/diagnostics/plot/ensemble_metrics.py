@@ -4,7 +4,7 @@ import matplotlib.colors as mcolors
 from matplotlib.patches import Rectangle
 import seaborn as sns
 
-from cogformer.simulator.design_utils import build_parameter_mask, build_design_matrix, build_random_design_config
+from cogformer.simulator.design_utils import build_parameter_mask, build_design_matrix, build_random_design_config, build_row_labels
 from cogformer.diagnostics.metric.adaptive_metrics import (
     _rmse,
     _contraction,
@@ -197,26 +197,14 @@ def ensemble_metrics(
                 mean_grids[m][r, c] = float(np.mean(v))
                 std_grids[m][r, c]  = float(np.std(v, ddof=1) if n > 1 else 0.0)
 
-    # Row labels and colors (from the widest config = first design config)
-    first_dc = design_configs[0]
-    regressor_keys_0 = list(first_dc.keys())
-    row_labels = []
-    row_colors = []
-    for r in range(num_rows):
-        if r == 0:
-            row_labels.append(r"$1$")
-            row_colors.append(intercept_color)
-        else:
-            regressor_id = (r - 1) // (max_num_categories - 1) + 1
-            if regressor_id < len(regressor_keys_0):
-                regressor_key = regressor_keys_0[regressor_id]
-                row_labels.append(fr"${regressor_key}$")
-                row_colors.append(
-                    interaction_color if ":" in regressor_key else main_effect_color
-                )
-            else:
-                row_labels.append(f"Row {r}")
-                row_colors.append(main_effect_color)
+    # Row labels + colors from the widest design config (most rows), aligned with the
+    # mask layout (intercept, main-effect blocks, then interaction (i, j) blocks).
+    _label_dc = design_configs[int(np.argmax([m.shape[0] for m in parameter_masks]))]
+    _labels_all, _kinds_all = build_row_labels(_label_dc, max_num_categories, return_kinds=True)
+    _kind_color = {"intercept": intercept_color, "main": main_effect_color, "interaction": interaction_color}
+    row_labels = [_labels_all[r] if r < len(_labels_all) else f"Row {r}" for r in range(num_rows)]
+    row_colors = [_kind_color[_kinds_all[r]] if r < len(_kinds_all) else main_effect_color
+                  for r in range(num_rows)]
 
     col_labels = variable_names if variable_names is not None else intrinsic_params
 

@@ -4,7 +4,7 @@ import matplotlib.colors as mcolors
 from matplotlib.patches import Rectangle
 import seaborn as sns
 
-from cogformer.simulator.design_utils import build_parameter_mask, expand_design_config_to_mask
+from cogformer.simulator.design_utils import build_parameter_mask, expand_design_config_to_mask, build_row_labels
 
 
 def compute_r_matrix(
@@ -88,32 +88,14 @@ def _compact(r_matrix, parameter_mask, row_labels, row_colors, variable_names,
     )
 
 
-def _build_row_labels(design_config, num_rows, intercept_color, main_effect_color, interaction_color):
-    regressor_keys = list(design_config.keys())
-    block_width = None  # inferred below from design_config structure
-    main_keys = [k for k in regressor_keys if k != "1" and ":" not in k]
-    inter_keys = [k for k in regressor_keys if ":" in k]
-    row_labels, row_colors = [], []
-    _r = 0
-    if "1" in regressor_keys:
-        row_labels.append(r"$1$")
-        row_colors.append(intercept_color)
-        _r += 1
-    # infer block_width from total rows
-    # just iterate up to num_rows
-    for key in main_keys:
-        r_start = len(row_labels)
-        while len(row_labels) < num_rows and len(row_labels) - r_start < 100:
-            row_labels.append(fr"${key}$")
-            row_colors.append(main_effect_color)
-            if len(row_labels) >= num_rows:
-                break
-    for key in inter_keys:
-        r_start = len(row_labels)
-        while len(row_labels) < num_rows:
-            row_labels.append(fr"${key}$")
-            row_colors.append(interaction_color)
-    return row_labels[:num_rows], row_colors[:num_rows]
+def _build_row_labels(design_config, num_rows, max_num_categories,
+                      intercept_color, main_effect_color, interaction_color):
+    """Row labels + colors aligned with the parameter-mask row layout
+    (intercept, main-effect blocks, then interaction (i, j) blocks)."""
+    labels, kinds = build_row_labels(design_config, max_num_categories, return_kinds=True)
+    kind_color = {"intercept": intercept_color, "main": main_effect_color, "interaction": interaction_color}
+    colors = [kind_color[k] for k in kinds]
+    return labels[:num_rows], colors[:num_rows]
 
 
 def _heatmap_axes(ax, r_matrix, parameter_mask, row_labels, row_colors, col_labels,
@@ -189,7 +171,8 @@ def adaptive_correlation_delta(
     num_rows, num_cols = parameter_mask.shape
 
     row_labels, row_colors = _build_row_labels(
-        design_config, num_rows, intercept_color, main_effect_color, interaction_color
+        design_config, num_rows, max_num_categories,
+        intercept_color, main_effect_color, interaction_color
     )
 
     delta = r_matrix_b - r_matrix_a
@@ -264,7 +247,8 @@ def adaptive_correlation(
     num_rows = parameter_mask.shape[0]
 
     row_labels, row_colors = _build_row_labels(
-        design_config, num_rows, intercept_color, main_effect_color, interaction_color
+        design_config, num_rows, max_num_categories,
+        intercept_color, main_effect_color, interaction_color
     )
 
     global_cols = (
