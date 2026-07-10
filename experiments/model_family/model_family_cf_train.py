@@ -517,10 +517,11 @@ if __name__ == "__main__":
     )
 
     if use_wandb:
+        design_tag = f"r{max_num_regressors}c{max_num_categories}"
         wandb.init(
             project=model_cfg["wandb_project"],
-            name=args.model.upper(),
-            tags=["CogFormer", args.model.upper(), "ModelFamily"],
+            name=f"{args.model.upper()}_{design_tag}",
+            tags=["CogFormer", args.model.upper(), "ModelFamily", design_tag, "factorized-emb"],
             config={**train_config, **{"cogformer": cogformer_config,
                                        "total_batch_size": args.train_batch_size,
                                        "world_size": world_size}},
