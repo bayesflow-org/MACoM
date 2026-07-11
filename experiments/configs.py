@@ -101,16 +101,19 @@ DDM_CONFIG = {
     "default_fixed_values": {"s_v": 0.0, "s_tau": 0.0},
     "benchmark_configs": DDM_BENCHMARK_CONFIGS,
     "val_scenarios": [
-        # Intercept-only baseline: no active regressors (category count does not apply).
-        # No skip_global: training designs always include global params, so a mask
-        # without pi is out-of-distribution and biases a/v recovery downward.
-        ("intercept_only", DDM_BENCHMARK_CONFIGS["intercept_only"], {"max_num_categories": 2}),
-        # 2 main regressors, no interaction; K pinned at 2, random continuous/categorical mix.
-        ("fixed_regressed", DDM_BENCHMARK_CONFIGS["fixed_regressed"], {"max_num_categories": 2}),
-        # 2 main regressors + their interaction, validated at exactly the training
-        # max_num_categories (K): u_1 categorical (K levels), u_2 continuous, so the
-        # interaction is a continuous x categorical effect.
-        ("interaction", DDM_BENCHMARK_CONFIGS["interaction"],
+        # OG benchmark cases + one mixed-predictor case. Continuous cases pin K=2 (category
+        # count is cosmetic for continuous regressors) and force an all-continuous mix, so
+        # every batch shares one parameter mask (homogeneous -> no padding-cell artifact).
+        # No skip_global: training designs always include global params, so a mask without
+        # pi is out-of-distribution and biases recovery downward.
+        ("intercept_only",  DDM_BENCHMARK_CONFIGS["intercept_only"],  {"max_num_categories": 2}),
+        ("fixed",           DDM_BENCHMARK_CONFIGS["fixed"],           {"max_num_categories": 2}),
+        ("regressed",       DDM_BENCHMARK_CONFIGS["regressed"],       {"max_num_categories": 2, "categorical_regressors": []}),
+        ("fixed_regressed", DDM_BENCHMARK_CONFIGS["fixed_regressed"], {"max_num_categories": 2, "categorical_regressors": []}),
+        ("interaction",     DDM_BENCHMARK_CONFIGS["interaction"],     {"max_num_categories": 2, "categorical_regressors": []}),
+        # Mixed predictor: interaction design with u_1 categorical (K = training max via
+        # exact-K) and u_2 continuous -> a categorical x continuous interaction.
+        ("mixed_predictor", DDM_BENCHMARK_CONFIGS["interaction"],
          {"exact_num_categories": True, "categorical_regressors": ["u_1"]}),
     ],
     "holdout_configs": [
@@ -197,12 +200,13 @@ CDM_CONFIG = {
     "default_fixed_values": {"s_v": 0.0, "s_tau": 0.0},
     "benchmark_configs": CDM_BENCHMARK_CONFIGS,
     "val_scenarios": [
-        # Intercept-only baseline (category count does not apply).
-        ("intercept_only", CDM_BENCHMARK_CONFIGS["intercept_only"], {"max_num_categories": 2}),
-        # 2 main regressors, no interaction; K pinned at 2, random continuous/categorical mix.
-        ("fixed_regressed", CDM_BENCHMARK_CONFIGS["fixed_regressed"], {"max_num_categories": 2}),
-        # interaction at exactly training K: u_1 categorical, u_2 continuous (see DDM notes).
-        ("interaction", CDM_BENCHMARK_CONFIGS["interaction"],
+        # OG cases (continuous regressors, K=2) + mixed predictor (see DDM notes).
+        ("intercept_only",  CDM_BENCHMARK_CONFIGS["intercept_only"],  {"max_num_categories": 2}),
+        ("fixed",           CDM_BENCHMARK_CONFIGS["fixed"],           {"max_num_categories": 2}),
+        ("regressed",       CDM_BENCHMARK_CONFIGS["regressed"],       {"max_num_categories": 2, "categorical_regressors": []}),
+        ("fixed_regressed", CDM_BENCHMARK_CONFIGS["fixed_regressed"], {"max_num_categories": 2, "categorical_regressors": []}),
+        ("interaction",     CDM_BENCHMARK_CONFIGS["interaction"],     {"max_num_categories": 2, "categorical_regressors": []}),
+        ("mixed_predictor", CDM_BENCHMARK_CONFIGS["interaction"],
          {"exact_num_categories": True, "categorical_regressors": ["u_1"]}),
     ],
     "holdout_configs": [
@@ -289,12 +293,13 @@ RDM_CONFIG = {
     "default_fixed_values": {"s_v": 0.0, "s_tau": 0.0},
     "benchmark_configs": RDM_BENCHMARK_CONFIGS,
     "val_scenarios": [
-        # Intercept-only baseline (category count does not apply).
-        ("intercept_only", RDM_BENCHMARK_CONFIGS["intercept_only"], {"max_num_categories": 2}),
-        # 2 main regressors, no interaction; K pinned at 2, random continuous/categorical mix.
-        ("fixed_regressed", RDM_BENCHMARK_CONFIGS["fixed_regressed"], {"max_num_categories": 2}),
-        # interaction at exactly training K: u_1 categorical, u_2 continuous (see DDM notes).
-        ("interaction", RDM_BENCHMARK_CONFIGS["interaction"],
+        # OG cases (continuous regressors, K=2) + mixed predictor (see DDM notes).
+        ("intercept_only",  RDM_BENCHMARK_CONFIGS["intercept_only"],  {"max_num_categories": 2}),
+        ("fixed",           RDM_BENCHMARK_CONFIGS["fixed"],           {"max_num_categories": 2}),
+        ("regressed",       RDM_BENCHMARK_CONFIGS["regressed"],       {"max_num_categories": 2, "categorical_regressors": []}),
+        ("fixed_regressed", RDM_BENCHMARK_CONFIGS["fixed_regressed"], {"max_num_categories": 2, "categorical_regressors": []}),
+        ("interaction",     RDM_BENCHMARK_CONFIGS["interaction"],     {"max_num_categories": 2, "categorical_regressors": []}),
+        ("mixed_predictor", RDM_BENCHMARK_CONFIGS["interaction"],
          {"exact_num_categories": True, "categorical_regressors": ["u_1"]}),
     ],
     "holdout_configs": [
@@ -382,12 +387,13 @@ LBA_CONFIG = {
     "default_fixed_values": {"s_v": 0.0, "s_tau": 0.0},
     "benchmark_configs": LBA_BENCHMARK_CONFIGS,
     "val_scenarios": [
-        # Intercept-only baseline (category count does not apply).
-        ("intercept_only", LBA_BENCHMARK_CONFIGS["intercept_only"], {"max_num_categories": 2}),
-        # 2 main regressors, no interaction; K pinned at 2, random continuous/categorical mix.
-        ("fixed_regressed", LBA_BENCHMARK_CONFIGS["fixed_regressed"], {"max_num_categories": 2}),
-        # interaction at exactly training K: u_1 categorical, u_2 continuous (see DDM notes).
-        ("interaction", LBA_BENCHMARK_CONFIGS["interaction"],
+        # OG cases (continuous regressors, K=2) + mixed predictor (see DDM notes).
+        ("intercept_only",  LBA_BENCHMARK_CONFIGS["intercept_only"],  {"max_num_categories": 2}),
+        ("fixed",           LBA_BENCHMARK_CONFIGS["fixed"],           {"max_num_categories": 2}),
+        ("regressed",       LBA_BENCHMARK_CONFIGS["regressed"],       {"max_num_categories": 2, "categorical_regressors": []}),
+        ("fixed_regressed", LBA_BENCHMARK_CONFIGS["fixed_regressed"], {"max_num_categories": 2, "categorical_regressors": []}),
+        ("interaction",     LBA_BENCHMARK_CONFIGS["interaction"],     {"max_num_categories": 2, "categorical_regressors": []}),
+        ("mixed_predictor", LBA_BENCHMARK_CONFIGS["interaction"],
          {"exact_num_categories": True, "categorical_regressors": ["u_1"]}),
     ],
     "holdout_configs": [

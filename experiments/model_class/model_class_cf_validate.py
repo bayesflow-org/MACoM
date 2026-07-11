@@ -29,7 +29,8 @@ from cogformer.diagnostics.metric.adaptive_metrics import (
 from cogformer.utils.plot_utils import cogformer_mc_colors
 
 from ..configs import MODELS as _BASE_MODELS
-from ..utils import add_global_params, infer_free_fixed_intrinsics, build_encoder_input_dim, chunked_sample
+from ..utils import (add_global_params, infer_free_fixed_intrinsics, build_encoder_input_dim,
+                     chunked_sample, resolve_val_scenario)
 
 GLOBAL_PARAMS = ["pi"]
 GLOBAL_VARIABLE_NAMES = [r"$\pi$"]
@@ -99,7 +100,7 @@ def get_benchmark_design_configs():
             "intrinsic_params": cfg["intrinsic_params"],
             "variable_names": cfg["variable_names"],
             "default_fixed_values": cfg["default_fixed_values"],
-            "benchmarks": cfg["benchmark_configs"],
+            "val_scenarios": cfg["val_scenarios"],
         }
         for m, cfg in _MODELS_WITH_PI.items()
     }
@@ -131,7 +132,8 @@ def parse_args():
     p.add_argument("--solver", type=str, default="midpoint", choices=["euler", "midpoint", "rk4"])
     p.add_argument("--samples_chunk_size", type=int, default=None,
                    help="Samples per ODE loop; peak GPU memory scales with batch_size * samples_chunk_size.")
-    p.add_argument("--include_full", action="store_true", default=False, help="Include the 'full' benchmark case (skipped by default)")
+    p.add_argument("--include_full", action="store_true", default=False,
+                   help="Deprecated / no effect: validation now runs the fixed val_scenarios set.")
     p.add_argument("--skip_posteriors", action="store_true", default=False, help="Skip posterior pairplots")
     p.add_argument("--skip_log_gamma", action="store_true", default=True, help="Skip log gamma metric (slow, skipped by default)")
     p.add_argument("--include_log_gamma", dest="skip_log_gamma", action="store_false", help="Include log gamma metric")
@@ -221,9 +223,7 @@ def main():
 
     colors = cogformer_mc_colors()
     all_model_configs = get_benchmark_design_configs()
-    if not args.include_full:
-        for mc in all_model_configs.values():
-            mc["benchmarks"] = {k: v for k, v in mc["benchmarks"].items() if k != "full"}
+    training_max_cats = args.max_num_categories
     n_global_params = model_class.n_global_params
 
     model_family_config = {
@@ -247,11 +247,16 @@ def main():
         default_fixed_values = model_cfg["default_fixed_values"]
         global_indices = model_class.local_to_global[model_name]
 
-        for cfg_name, design_config in model_cfg["benchmarks"].items():
+        for cfg_name, design_config, scenario_opts in model_cfg["val_scenarios"]:
+            max_cats, min_cats, mix_opts, skip = resolve_val_scenario(scenario_opts, training_max_cats)
             n_main_effects = sum(1 for k in design_config if k != "1" and ":" not in k)
             if n_main_effects > args.max_num_regressors:
                 print(f"Skipping {model_name} / {cfg_name}: needs {n_main_effects} regressors, "
                       f"model trained with max_num_regressors={args.max_num_regressors}")
+                continue
+            if skip:
+                print(f"Skipping {model_name} / {cfg_name}: needs max_num_categories={max_cats} "
+                      f"> training {training_max_cats}")
                 continue
             print(f"Preparing data: {model_name} / {cfg_name}")
             outdir = Path(args.outdir) / model_name.lower() / cfg_name
@@ -283,12 +288,15 @@ def main():
                     num_obs=args.num_obs,
                     mask_randomizer_kwargs=mask_kwargs,
                     max_num_regressors=args.max_num_regressors,
-                    max_num_categories=args.max_num_categories,
+                    max_num_categories=max_cats,
+                    min_num_categories=min_cats,
                     keep_intercept=args.keep_intercept,
                     add_interaction=args.add_interaction,
                     flatten_param_outputs=True,
                     fixed_config=True,
                     link_fun=link_fun,
+                    pad_to_max_num_categories=training_max_cats,
+                    **mix_opts,
                 )
                 test_samples["model_ids"] = np.full(args.batch_size, model_id, dtype=np.int64)
 

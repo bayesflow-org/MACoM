@@ -24,7 +24,8 @@ from cogformer.diagnostics.metric.adaptive_metrics import (
 from cogformer.utils.plot_utils import cogformer_fm_colors
 
 from ..configs import MODELS as _BASE_MODELS, GLOBAL_PARAMS, GLOBAL_VARIABLE_NAMES
-from ..utils import add_global_params, strip_global_params, infer_free_fixed_intrinsics, build_encoder_input_dim, chunked_sample
+from ..utils import (add_global_params, strip_global_params, infer_free_fixed_intrinsics,
+                     build_encoder_input_dim, chunked_sample, resolve_val_scenario)
 
 
 # CF validate uses global params (pi) and adds script-specific output keys
@@ -77,8 +78,8 @@ def parse_args():
                    help="Samples per ODE loop; peak GPU memory scales with batch_size * samples_chunk_size.")
     p.add_argument("--include_full", action="store_true", default=False)
     p.add_argument("--configs", nargs="+", default=None,
-                   help="Subset of benchmark configs to run (e.g. --configs intercept_only regressed)."
-                        " Runs all configs by default.")
+                   help="Subset of validation scenarios to run by tag (intercept_only, fixed, "
+                        "regressed, fixed_regressed, interaction, mixed_predictor). Runs all by default.")
     p.add_argument("--skip_posteriors", action="store_true", default=False)
     p.add_argument("--skip_log_gamma", action="store_true", default=True)
     p.add_argument("--include_log_gamma", dest="skip_log_gamma", action="store_false")
@@ -171,11 +172,14 @@ def main():
     cogformer = torch.compile(cogformer, dynamic=True)
 
     colors = cogformer_fm_colors()
-    benchmark = dict(model_cfg["benchmark_configs"])
-    if not args.include_full:
-        benchmark.pop("full", None)
+    training_max_cats = args.max_num_categories
+    # Validation scenarios (same source as the training val_step): the OG benchmark cases
+    # plus the mixed-predictor case. Each pins its own category count / continuous-vs-
+    # categorical mix via resolve_val_scenario, so every batch shares one parameter mask
+    # (homogeneous -> no padding-cell recovery artifact).
+    scenarios = list(model_cfg["val_scenarios"])
     if args.configs is not None:
-        benchmark = {k: v for k, v in benchmark.items() if k in args.configs}
+        scenarios = [s for s in scenarios if s[0] in args.configs]
 
     pred_filename_template = model_cfg["pred_filename_template"]
 
@@ -184,7 +188,12 @@ def main():
 
     # Phase 1: prepare all data
     cases = []
-    for cfg_name, design_config in benchmark.items():
+    for cfg_name, design_config, scenario_opts in scenarios:
+        max_cats, min_cats, mix_opts, skip = resolve_val_scenario(scenario_opts, training_max_cats)
+        if skip:
+            print(f"[val] skipping scenario '{cfg_name}': needs max_num_categories={max_cats} "
+                  f"> training {training_max_cats}")
+            continue
         print(f"Preparing data: {cfg_name}")
         outdir = outdir_root / cfg_name
         outdir.mkdir(parents=True, exist_ok=True)
@@ -201,6 +210,8 @@ def main():
             "min_num_regressors": 0,
             "fixed_config": True,
         }
+        # Per-scenario category ceiling; wider tokens are padded up to the training max.
+        scenario_family_config = {**model_family_config, "max_num_categories": max_cats}
 
         if args.data_dir is not None:
             data_path = Path(args.data_dir) / f"{model_name}_{cfg_name}_data.npz"
@@ -225,15 +236,18 @@ def main():
             assert file_batch == args.batch_size, (
                 f"Batch size mismatch: file={file_batch}, args={args.batch_size}"
             )
-            test_samples = test_samples | model_family_config
+            test_samples = test_samples | scenario_family_config
         else:
             test_samples = model_family.batch_sample(
-                **model_family_config,
+                **scenario_family_config,
                 **val_sample_config,
+                min_num_categories=min_cats,
                 batch_size=args.batch_size,
                 flatten_param_outputs=True,
                 design_config=design_config,
                 link_fun=link_fun,
+                pad_to_max_num_categories=training_max_cats,
+                **mix_opts,
             )
 
         adapted = adapter.adapt(test_samples, device=device)

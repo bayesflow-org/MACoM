@@ -30,7 +30,8 @@ from cogformer.utils.plot_utils import cogformer_fm_colors
 from ..configs import MODELS as _BASE_MODELS
 from ..utils import (add_global_params, build_encoder_input_dim, chunked_sample,
                      infer_free_fixed_intrinsics, ModelClassDataset, make_sim_loader, train_step,
-                     add_architecture_args, add_training_args, recommend_sim_workers)
+                     add_architecture_args, add_training_args, recommend_sim_workers,
+                     resolve_val_scenario)
 from ..timing import RunTimer
 
 
@@ -97,15 +98,13 @@ class CogFormerTrainer:
             global_indices = self.model_class.local_to_global[model_name]
 
             for tag, design_config, scenario_opts in model_cfg["val_scenarios"]:
-                max_cats = scenario_opts.get("max_num_categories", default_max_cats)
-                min_cats = scenario_opts.get("min_num_categories", default_min_cats)
-                if scenario_opts.get("exact_num_categories"):
-                    min_cats = max_cats
-                # Keep 2 <= floor <= ceiling so build_design_matrix's randint is valid.
-                min_cats = max(2, min(min_cats, max_cats))
+                max_cats, min_cats, mix_opts, skip = resolve_val_scenario(
+                    scenario_opts, training_max_cats,
+                    default_max_cats=default_max_cats, default_min_cats=default_min_cats,
+                )
                 # Encoder input dim is sized from the training max; a wider scenario
                 # would crash val_step, so skip it rather than break the whole run.
-                if max_cats > training_max_cats:
+                if skip:
                     logging.warning(
                         f"[val] skipping scenario '{model_name}/{tag}': needs "
                         f"max_num_categories={max_cats} > training {training_max_cats}."
@@ -116,9 +115,6 @@ class CogFormerTrainer:
                     design_config, intrinsic_params, model_cfg["default_fixed_values"]
                 )
                 mask_kwargs = {"free_intrinsics": free, "fixed_intrinsics": fixed, "fixed_values": fixed_vals}
-                # Per-scenario continuous/categorical mix control (else batch_sample default).
-                mix_opts = {k: scenario_opts[k] for k in ("discrete_prob", "categorical_regressors")
-                            if k in scenario_opts}
 
                 test_samples = mf.batch_sample(
                     design_config=design_config,

@@ -26,7 +26,8 @@ from cogformer.utils.plot_utils import cogformer_fm_colors
 from ..configs import MODELS as _BASE_MODELS, GLOBAL_PARAMS, GLOBAL_VARIABLE_NAMES
 from ..utils import (add_global_params, strip_global_params, build_encoder_input_dim,
                      chunked_sample, train_step, add_architecture_args, add_training_args,
-                     recommend_sim_workers, ModelFamilyDataset, make_sim_loader)
+                     recommend_sim_workers, ModelFamilyDataset, make_sim_loader,
+                     resolve_val_scenario)
 from ..timing import RunTimer
 
 
@@ -170,29 +171,20 @@ class CogFormerTrainer:
         default_min_cats = val_config.get("val_min_num_categories") or 2
         self._val_data = []
         for tag, design_config, scenario_opts in self.model_cfg["val_scenarios"]:
-            max_cats = scenario_opts.get("max_num_categories", default_max_cats)
-            min_cats = scenario_opts.get("min_num_categories", default_min_cats)
-            if scenario_opts.get("exact_num_categories"):
-                # Validate at exactly the (effective) category ceiling — e.g. a model
-                # trained at max K validates this case on exactly K categories.
-                min_cats = max_cats
-            # Keep 2 <= floor <= ceiling so build_design_matrix's randint is always valid.
-            min_cats = max(2, min(min_cats, max_cats))
+            max_cats, min_cats, mix_opts, skip = resolve_val_scenario(
+                scenario_opts, training_max_cats,
+                default_max_cats=default_max_cats, default_min_cats=default_min_cats,
+            )
             # The encoder input dim is built from the training max_num_categories, so a
             # scenario needing more category columns produces wider tokens than the model
             # accepts and would crash val_step. Skip it rather than break the whole run.
-            if max_cats > training_max_cats:
+            if skip:
                 logging.warning(
                     f"[val] skipping scenario '{tag}': needs max_num_categories={max_cats} "
                     f"> training max_num_categories={training_max_cats}; model input dim too small."
                 )
                 continue
             model_family_cfg = {**val_config["model_family_config"], "max_num_categories": max_cats}
-            # Per-scenario continuous/categorical mix control (else batch_sample default).
-            # 'categorical_regressors' fixes which main regressors are categorical (the
-            # rest continuous); 'discrete_prob' randomizes the mix instead.
-            mix_opts = {k: scenario_opts[k] for k in ("discrete_prob", "categorical_regressors")
-                        if k in scenario_opts}
             samples = self.model_family.batch_sample(
                 **model_family_cfg,
                 **val_config["val_sample_config"],

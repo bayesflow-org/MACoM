@@ -339,6 +339,40 @@ def add_global_params(
     return cfg
 
 
+def resolve_val_scenario(
+    scenario_opts: dict,
+    training_max_cats: int,
+    default_max_cats: int | None = None,
+    default_min_cats: int = 2,
+) -> tuple[int, int, dict, bool]:
+    """Resolve a ``val_scenarios`` opts dict into concrete category bounds + mix kwargs.
+
+    Single source of the per-scenario category/mix handling shared by every CogFormer
+    validation path (model_family / model_class train val_step and validate scripts), so
+    they can't drift. Returns ``(max_cats, min_cats, mix_opts, skip)``:
+
+    - ``max_cats`` — category ceiling; scenario ``max_num_categories`` else ``default_max_cats``
+      (which itself defaults to ``training_max_cats``).
+    - ``min_cats`` — floor; scenario ``min_num_categories`` else ``default_min_cats``. When the
+      scenario sets ``exact_num_categories`` the floor is pulled up to the ceiling (exact-K).
+      Clamped to ``2 <= min_cats <= max_cats`` so ``build_design_matrix``'s randint is valid.
+    - ``mix_opts`` — ``{discrete_prob, categorical_regressors}`` passed through to batch_sample
+      (fixes the continuous/categorical mix); absent keys keep batch_sample's random default.
+    - ``skip`` — True when the scenario needs more categories than the model was trained on
+      (the encoder input dim is sized from ``training_max_cats``, so a wider case would crash).
+    """
+    default_max_cats = default_max_cats or training_max_cats
+    max_cats = scenario_opts.get("max_num_categories", default_max_cats)
+    min_cats = scenario_opts.get("min_num_categories", default_min_cats)
+    if scenario_opts.get("exact_num_categories"):
+        min_cats = max_cats
+    min_cats = max(2, min(min_cats, max_cats))
+    skip = max_cats > training_max_cats
+    mix_opts = {k: scenario_opts[k] for k in ("discrete_prob", "categorical_regressors")
+                if k in scenario_opts}
+    return max_cats, min_cats, mix_opts, skip
+
+
 def strip_global_params(cfg: dict) -> dict:
     """Return a copy of cfg with global_params removed from intrinsic_params,
     variable_names, free_params, benchmark_configs, and val_scenarios.
