@@ -186,10 +186,12 @@ class ModelFamily:
         num_regressors: int = 2,
         max_num_regressors: int = 5,
         max_num_categories: int = 4,
+        min_num_categories: int = 2,
         link_fun: dict | Callable = softplus,
         context: dict[str, np.ndarray] | None = None,
         mask_randomizer_kwargs: dict | None = None,
         discrete_prob: float = 0.5,
+        categorical_regressors: list[str] | None = None,
         free_prob: float | None = None,
         keep_intercept: bool = True,
         flatten_param_outputs: bool = True,
@@ -220,7 +222,20 @@ class ModelFamily:
             kwargs=kwargs,
         )
 
-        _, discrete_mask = build_discrete_mask(design_config=design_config, discrete_prob=discrete_prob)
+        # Optional deterministic continuous(0)/categorical(1) assignment of the main
+        # regressors (e.g. a validation case that needs a fixed mix). When given, the
+        # same mask drives BOTH the reported discrete_mask and the design matrix so they
+        # stay consistent; otherwise the mix is drawn at random per regressor as before.
+        explicit_main_mask = None
+        if categorical_regressors is not None:
+            main_keys = [k for k in design_config if k != "1" and ":" not in k]
+            explicit_main_mask = np.array(
+                [1.0 if k in categorical_regressors else 0.0 for k in main_keys], dtype=np.float32
+            )
+        _, discrete_mask = build_discrete_mask(
+            design_config=design_config, discrete_prob=discrete_prob,
+            main_discrete_mask=explicit_main_mask,
+        )
 
         if context is None and hasattr(self.model, 'build_default_context'):
             context = self.model.build_default_context(num_obs=num_obs)
@@ -230,7 +245,9 @@ class ModelFamily:
             num_obs=num_obs,
             context=context,
             discrete_prob=discrete_prob,
+            min_num_categories=min_num_categories,
             max_num_categories=max_num_categories,
+            main_discrete_mask=explicit_main_mask,
             collinearity_df=collinearity_df,
             category_concentration=category_concentration,
             return_category_counts=True,
@@ -332,7 +349,9 @@ class ModelFamily:
         min_num_regressors: int = 0,
         max_num_regressors: int = 3,
         max_num_categories: int = 3,
+        min_num_categories: int = 2,
         discrete_prob: float = 0.5,
+        categorical_regressors: list[str] | None = None,
         free_prob: float | None = None,
         keep_intercept: bool = True,
         remove_intercept_on_collate: bool = False,
@@ -379,6 +398,8 @@ class ModelFamily:
                 free_prob=free_prob,
                 keep_intercept=keep_intercept,
                 max_num_categories=max_num_categories,
+                min_num_categories=min_num_categories,
+                categorical_regressors=categorical_regressors,
                 flatten_param_outputs=flatten_param_outputs,
                 fixed_config=fixed_config,
                 add_interaction=add_interaction,

@@ -512,18 +512,26 @@ def build_discrete_mask(
     discrete_prob: float = 0.5,
     keep_intercept: bool = False,
     add_interaction: bool = False,
+    main_discrete_mask: np.ndarray | None = None,
 ) -> tuple[np.ndarray, np.ndarray]:
     """
     Sample a discrete mask for main regressors only and expand it to a total-length
     mask aligned with design_config key order (excluding intercept).
+
+    ``main_discrete_mask`` may be supplied to fix the continuous (0) / categorical (1)
+    assignment deterministically (length = number of main-effect keys); otherwise it is
+    drawn at random with probability ``discrete_prob`` per regressor.
     """
     regressor_keys = [k for k in design_config.keys() if k != "1"]
     main_keys = [k for k in regressor_keys if ":" not in k]
 
-    main_discrete_mask = build_random_discrete_mask(
-        num_regressors=len(main_keys),
-        discrete_prob=discrete_prob,
-    ).astype(np.float32, copy=False)
+    if main_discrete_mask is None:
+        main_discrete_mask = build_random_discrete_mask(
+            num_regressors=len(main_keys),
+            discrete_prob=discrete_prob,
+        ).astype(np.float32, copy=False)
+    else:
+        main_discrete_mask = np.asarray(main_discrete_mask, dtype=np.float32)
 
     discrete_mask = np.full((len(regressor_keys),), -1.0, dtype=np.float32)
     ptr = 0

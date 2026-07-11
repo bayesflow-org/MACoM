@@ -163,9 +163,21 @@ class CogFormerTrainer:
         link_fun = self.model_cfg["link_fn"]()
         n_cols = len(self.model_cfg["intrinsic_params"])
         training_max_cats = val_config["model_family_config"]["max_num_categories"]
+        # Run-level validation category controls (CLI), applied to any scenario that
+        # doesn't pin its own count. The ceiling defaults to the training max; set the
+        # floor equal to the ceiling to validate at an exact number of categories.
+        default_max_cats = val_config.get("val_max_num_categories") or training_max_cats
+        default_min_cats = val_config.get("val_min_num_categories") or 2
         self._val_data = []
         for tag, design_config, scenario_opts in self.model_cfg["val_scenarios"]:
-            max_cats = scenario_opts.get("max_num_categories", training_max_cats)
+            max_cats = scenario_opts.get("max_num_categories", default_max_cats)
+            min_cats = scenario_opts.get("min_num_categories", default_min_cats)
+            if scenario_opts.get("exact_num_categories"):
+                # Validate at exactly the (effective) category ceiling — e.g. a model
+                # trained at max K validates this case on exactly K categories.
+                min_cats = max_cats
+            # Keep 2 <= floor <= ceiling so build_design_matrix's randint is always valid.
+            min_cats = max(2, min(min_cats, max_cats))
             # The encoder input dim is built from the training max_num_categories, so a
             # scenario needing more category columns produces wider tokens than the model
             # accepts and would crash val_step. Skip it rather than break the whole run.
@@ -176,14 +188,21 @@ class CogFormerTrainer:
                 )
                 continue
             model_family_cfg = {**val_config["model_family_config"], "max_num_categories": max_cats}
+            # Per-scenario continuous/categorical mix control (else batch_sample default).
+            # 'categorical_regressors' fixes which main regressors are categorical (the
+            # rest continuous); 'discrete_prob' randomizes the mix instead.
+            mix_opts = {k: scenario_opts[k] for k in ("discrete_prob", "categorical_regressors")
+                        if k in scenario_opts}
             samples = self.model_family.batch_sample(
                 **model_family_cfg,
                 **val_config["val_sample_config"],
+                min_num_categories=min_cats,
                 batch_size=val_config["batch_size"],
                 flatten_param_outputs=True,
                 design_config=design_config,
                 link_fun=link_fun,
                 pad_to_max_num_categories=training_max_cats,
+                **mix_opts,
             )
             adapted = self.adapter.adapt(samples, device=val_config["device"])
             true_flat = adapted["param_matrices"].detach().cpu().numpy()
@@ -380,6 +399,15 @@ def parse_args():
     parser.add_argument("--val_samples_chunk_size", type=int, default=4,
                         help="Samples per ODE loop during validation; peak GPU memory scales with "
                              "batch_size * val_samples_chunk_size.")
+    parser.add_argument("--val_max_num_categories", type=int, default=None,
+                        help="Category ceiling for validation scenarios that don't pin their own "
+                             "'max_num_categories'. Defaults to the training --max_num_categories. "
+                             "Must be <= training --max_num_categories (larger scenarios are skipped). "
+                             "Set below the training max to validate a model at fewer categories.")
+    parser.add_argument("--val_min_num_categories", type=int, default=None,
+                        help="Category floor for validation scenarios (default 2). Set equal to "
+                             "--val_max_num_categories to validate at an exact number of categories "
+                             "rather than a random count in [floor, ceiling].")
     parser.add_argument("--estimate_global_params", action=argparse.BooleanOptionalAction,
                         default=True,
                         help="Include global parameters (e.g. contamination probability pi) "
@@ -487,6 +515,8 @@ if __name__ == "__main__":
         "val_samples_chunk_size": args.val_samples_chunk_size,
         "model_family_config": model_family_config,
         "val_sample_config": val_sample_config,
+        "val_max_num_categories": args.val_max_num_categories,
+        "val_min_num_categories": args.val_min_num_categories,
         "device": device,
     }
 

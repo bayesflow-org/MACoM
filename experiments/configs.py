@@ -101,11 +101,17 @@ DDM_CONFIG = {
     "default_fixed_values": {"s_v": 0.0, "s_tau": 0.0},
     "benchmark_configs": DDM_BENCHMARK_CONFIGS,
     "val_scenarios": [
-        ("interaction", DDM_BENCHMARK_CONFIGS["interaction"], {"max_num_categories": 2}),
+        # Intercept-only baseline: no active regressors (category count does not apply).
         # No skip_global: training designs always include global params, so a mask
         # without pi is out-of-distribution and biases a/v recovery downward.
-        ("fixed", DDM_BENCHMARK_CONFIGS["fixed"], {"max_num_categories": 2}),
-        ("two_factor", DDM_BENCHMARK_CONFIGS["two_factor"], {"max_num_categories": 3}),
+        ("intercept_only", DDM_BENCHMARK_CONFIGS["intercept_only"], {"max_num_categories": 2}),
+        # 2 main regressors, no interaction; K pinned at 2, random continuous/categorical mix.
+        ("fixed_regressed", DDM_BENCHMARK_CONFIGS["fixed_regressed"], {"max_num_categories": 2}),
+        # 2 main regressors + their interaction, validated at exactly the training
+        # max_num_categories (K): u_1 categorical (K levels), u_2 continuous, so the
+        # interaction is a continuous x categorical effect.
+        ("interaction", DDM_BENCHMARK_CONFIGS["interaction"],
+         {"exact_num_categories": True, "categorical_regressors": ["u_1"]}),
     ],
     "holdout_configs": [
         {"design_config": DDM_BENCHMARK_CONFIGS["three_reg_interaction"], "max_num_categories": 3},
@@ -191,9 +197,13 @@ CDM_CONFIG = {
     "default_fixed_values": {"s_v": 0.0, "s_tau": 0.0},
     "benchmark_configs": CDM_BENCHMARK_CONFIGS,
     "val_scenarios": [
-        ("interaction", CDM_BENCHMARK_CONFIGS["interaction"], {"max_num_categories": 2}),
-        ("fixed", CDM_BENCHMARK_CONFIGS["fixed"], {"max_num_categories": 2}),
-        ("two_factor", CDM_BENCHMARK_CONFIGS["two_factor"], {"max_num_categories": 3}),
+        # Intercept-only baseline (category count does not apply).
+        ("intercept_only", CDM_BENCHMARK_CONFIGS["intercept_only"], {"max_num_categories": 2}),
+        # 2 main regressors, no interaction; K pinned at 2, random continuous/categorical mix.
+        ("fixed_regressed", CDM_BENCHMARK_CONFIGS["fixed_regressed"], {"max_num_categories": 2}),
+        # interaction at exactly training K: u_1 categorical, u_2 continuous (see DDM notes).
+        ("interaction", CDM_BENCHMARK_CONFIGS["interaction"],
+         {"exact_num_categories": True, "categorical_regressors": ["u_1"]}),
     ],
     "holdout_configs": [
         {"design_config": CDM_BENCHMARK_CONFIGS["three_reg_interaction"], "max_num_categories": 3},
@@ -279,9 +289,13 @@ RDM_CONFIG = {
     "default_fixed_values": {"s_v": 0.0, "s_tau": 0.0},
     "benchmark_configs": RDM_BENCHMARK_CONFIGS,
     "val_scenarios": [
-        ("interaction", RDM_BENCHMARK_CONFIGS["interaction"], {"max_num_categories": 2}),
-        ("fixed", RDM_BENCHMARK_CONFIGS["fixed"], {"max_num_categories": 2}),
-        ("two_factor", RDM_BENCHMARK_CONFIGS["two_factor"], {"max_num_categories": 3}),
+        # Intercept-only baseline (category count does not apply).
+        ("intercept_only", RDM_BENCHMARK_CONFIGS["intercept_only"], {"max_num_categories": 2}),
+        # 2 main regressors, no interaction; K pinned at 2, random continuous/categorical mix.
+        ("fixed_regressed", RDM_BENCHMARK_CONFIGS["fixed_regressed"], {"max_num_categories": 2}),
+        # interaction at exactly training K: u_1 categorical, u_2 continuous (see DDM notes).
+        ("interaction", RDM_BENCHMARK_CONFIGS["interaction"],
+         {"exact_num_categories": True, "categorical_regressors": ["u_1"]}),
     ],
     "holdout_configs": [
         {"design_config": RDM_BENCHMARK_CONFIGS["three_reg_interaction"], "max_num_categories": 3},
@@ -368,9 +382,13 @@ LBA_CONFIG = {
     "default_fixed_values": {"s_v": 0.0, "s_tau": 0.0},
     "benchmark_configs": LBA_BENCHMARK_CONFIGS,
     "val_scenarios": [
-        ("interaction", LBA_BENCHMARK_CONFIGS["interaction"], {"max_num_categories": 2}),
-        ("fixed", LBA_BENCHMARK_CONFIGS["fixed"], {"max_num_categories": 2}),
-        ("two_factor", LBA_BENCHMARK_CONFIGS["two_factor"], {"max_num_categories": 3}),
+        # Intercept-only baseline (category count does not apply).
+        ("intercept_only", LBA_BENCHMARK_CONFIGS["intercept_only"], {"max_num_categories": 2}),
+        # 2 main regressors, no interaction; K pinned at 2, random continuous/categorical mix.
+        ("fixed_regressed", LBA_BENCHMARK_CONFIGS["fixed_regressed"], {"max_num_categories": 2}),
+        # interaction at exactly training K: u_1 categorical, u_2 continuous (see DDM notes).
+        ("interaction", LBA_BENCHMARK_CONFIGS["interaction"],
+         {"exact_num_categories": True, "categorical_regressors": ["u_1"]}),
     ],
     "holdout_configs": [
         {"design_config": LBA_BENCHMARK_CONFIGS["three_reg_interaction"], "max_num_categories": 3},
