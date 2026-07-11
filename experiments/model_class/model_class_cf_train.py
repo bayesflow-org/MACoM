@@ -43,13 +43,15 @@ _MODELS_WITH_PI = {
     if m != "lba"
 }
 
-# val_step uses the "interaction" benchmark config as the fixed validation design
+# val_step validates the same per-model scenarios as model_family (intercept_only,
+# fixed_regressed, interaction), each with its own category controls (exact-K etc.),
+# so recovery plots are homogeneous per batch and match the model_family study.
 MODEL_CONFIGS = {
     m.upper(): {
         "intrinsic_params": cfg["intrinsic_params"],
         "variable_names": cfg["variable_names"],
         "default_fixed_values": cfg["default_fixed_values"],
-        "val_design_config": cfg["benchmark_configs"]["interaction"],
+        "val_scenarios": cfg["val_scenarios"],
     }
     for m, cfg in _MODELS_WITH_PI.items()
 }
@@ -71,60 +73,93 @@ class CogFormerTrainer:
         self.rank = rank
         self.is_distributed = world_size > 1
     def _prepare_val_data(self, val_config):
-        """Pre-generate fixed validation datasets for all model families once."""
+        """Pre-generate fixed validation datasets for all families and scenarios once.
+
+        Mirrors model_family: each scenario pins its own category count (exact-K,
+        pinned continuous/categorical mix, etc.) so every sample in a batch shares one
+        parameter mask — no padding cells leak into the recovery scatter.
+        """
         device = val_config["device"]
         model_family_config = val_config["model_family_config"]
         n_global_params = self.model_class.n_global_params
-        self._val_data = {}
+        batch_size = val_config["batch_size"]
+        training_max_cats = model_family_config["max_num_categories"]
+        # Run-level validation category controls (CLI); default ceiling = training max,
+        # default floor = 2. Scenarios may override or pin exactly (exact_num_categories).
+        default_max_cats = val_config.get("val_max_num_categories") or training_max_cats
+        default_min_cats = val_config.get("val_min_num_categories") or 2
+        self._val_data = []
         for model_name, model_cfg in MODEL_CONFIGS.items():
             mf = self.model_class.model_families[model_name]
             model_id = self.model_class.model_index[model_name]
             link_fun = self.model_class.link_funs[model_name]
-            design_config = model_cfg["val_design_config"]
             intrinsic_params = model_cfg["intrinsic_params"]
-
-            free, fixed, fixed_vals = infer_free_fixed_intrinsics(
-                design_config, intrinsic_params, model_cfg["default_fixed_values"]
-            )
-            mask_kwargs = {"free_intrinsics": free, "fixed_intrinsics": fixed, "fixed_values": fixed_vals}
-
-            test_samples = mf.batch_sample(
-                design_config=design_config,
-                batch_size=val_config["batch_size"],
-                num_obs=val_config["num_obs"],
-                max_num_regressors=model_family_config["max_num_regressors"],
-                max_num_categories=model_family_config["max_num_categories"],
-                keep_intercept=model_family_config["keep_intercept"],
-                mask_randomizer_kwargs=mask_kwargs,
-                flatten_param_outputs=True,
-                fixed_config=True,
-                link_fun=link_fun,
-            )
-            test_samples["model_ids"] = np.full(val_config["batch_size"], model_id, dtype=np.int64)
-            test_samples["param_matrices"], test_samples["param_masks"] = \
-                self.model_class.lift_to_global_space(
-                    model_name, test_samples["param_matrices"], test_samples["param_masks"])
-            test_samples["n_params"] = n_global_params
-            adapted = self.adapter.adapt(test_samples, device=device)
-
             global_indices = self.model_class.local_to_global[model_name]
-            batch_size = val_config["batch_size"]
-            true_flat = adapted["param_matrices"].detach().cpu().numpy()
-            n_rows = true_flat.shape[1] // n_global_params
-            true_set = true_flat.reshape(batch_size, n_rows, n_global_params)[:, :, global_indices]
-            params_mask = adapted["param_masks"].detach().cpu().numpy()
-            params_mask = params_mask.reshape(batch_size, n_rows, n_global_params)[0][:, global_indices]
 
-            self._val_data[model_name] = {
-                "adapted": adapted,
-                "true_set": true_set,
-                "params_mask": params_mask,
-                "n_rows": n_rows,
-                "global_indices": global_indices,
-                "design_config": design_config,
-                "intrinsic_params": intrinsic_params,
-                "variable_names": model_cfg["variable_names"],
-            }
+            for tag, design_config, scenario_opts in model_cfg["val_scenarios"]:
+                max_cats = scenario_opts.get("max_num_categories", default_max_cats)
+                min_cats = scenario_opts.get("min_num_categories", default_min_cats)
+                if scenario_opts.get("exact_num_categories"):
+                    min_cats = max_cats
+                # Keep 2 <= floor <= ceiling so build_design_matrix's randint is valid.
+                min_cats = max(2, min(min_cats, max_cats))
+                # Encoder input dim is sized from the training max; a wider scenario
+                # would crash val_step, so skip it rather than break the whole run.
+                if max_cats > training_max_cats:
+                    logging.warning(
+                        f"[val] skipping scenario '{model_name}/{tag}': needs "
+                        f"max_num_categories={max_cats} > training {training_max_cats}."
+                    )
+                    continue
+
+                free, fixed, fixed_vals = infer_free_fixed_intrinsics(
+                    design_config, intrinsic_params, model_cfg["default_fixed_values"]
+                )
+                mask_kwargs = {"free_intrinsics": free, "fixed_intrinsics": fixed, "fixed_values": fixed_vals}
+                # Per-scenario continuous/categorical mix control (else batch_sample default).
+                mix_opts = {k: scenario_opts[k] for k in ("discrete_prob", "categorical_regressors")
+                            if k in scenario_opts}
+
+                test_samples = mf.batch_sample(
+                    design_config=design_config,
+                    batch_size=batch_size,
+                    num_obs=val_config["num_obs"],
+                    max_num_regressors=model_family_config["max_num_regressors"],
+                    max_num_categories=max_cats,
+                    min_num_categories=min_cats,
+                    keep_intercept=model_family_config["keep_intercept"],
+                    mask_randomizer_kwargs=mask_kwargs,
+                    flatten_param_outputs=True,
+                    fixed_config=True,
+                    link_fun=link_fun,
+                    pad_to_max_num_categories=training_max_cats,
+                    **mix_opts,
+                )
+                test_samples["model_ids"] = np.full(batch_size, model_id, dtype=np.int64)
+                test_samples["param_matrices"], test_samples["param_masks"] = \
+                    self.model_class.lift_to_global_space(
+                        model_name, test_samples["param_matrices"], test_samples["param_masks"])
+                test_samples["n_params"] = n_global_params
+                adapted = self.adapter.adapt(test_samples, device=device)
+
+                true_flat = adapted["param_matrices"].detach().cpu().numpy()
+                n_rows = true_flat.shape[1] // n_global_params
+                true_set = true_flat.reshape(batch_size, n_rows, n_global_params)[:, :, global_indices]
+                params_mask = adapted["param_masks"].detach().cpu().numpy()
+                params_mask = params_mask.reshape(batch_size, n_rows, n_global_params)[0][:, global_indices]
+
+                self._val_data.append({
+                    "model_name": model_name,
+                    "tag": tag,
+                    "adapted": adapted,
+                    "true_set": true_set,
+                    "params_mask": params_mask,
+                    "n_rows": n_rows,
+                    "global_indices": global_indices,
+                    "design_config": design_config,
+                    "intrinsic_params": intrinsic_params,
+                    "variable_names": model_cfg["variable_names"],
+                })
 
     def train(self, train_config, val_config, checkpoint_path="cogformer_model_class_fm.pt",
               fig_path="fig", resume=False, resume_start_epoch=0):
@@ -234,7 +269,9 @@ class CogFormerTrainer:
         figures_dir = Path("./outputs/figures/model_class/cf/recovery")
         figures_dir.mkdir(parents=True, exist_ok=True)
 
-        for model_name, val in self._val_data.items():
+        for val in self._val_data:
+            model_name    = val["model_name"]
+            tag           = val["tag"]
             adapted       = val["adapted"]
             true_set      = val["true_set"]
             params_mask   = val["params_mask"]
@@ -271,12 +308,12 @@ class CogFormerTrainer:
                 global_params=GLOBAL_PARAMS,
             )
 
-            fig_name = f"{model_name.lower()}_{fig_path}_recovery.pdf"
+            fig_name = f"{model_name.lower()}_{tag}_{fig_path}_recovery.pdf"
             recovery_fig.savefig(figures_dir / fig_name, bbox_inches="tight")
             logging.info(f"[saved] {figures_dir / fig_name}")
 
             if self.use_wandb:
-                wandb.log({f"val/{model_name}/recovery": wandb.Image(recovery_fig)}, step=global_step)
+                wandb.log({f"val/{model_name}/{tag}/recovery": wandb.Image(recovery_fig)}, step=global_step)
 
             plt.close(recovery_fig)
 
@@ -293,11 +330,11 @@ class CogFormerTrainer:
                 global_color=colors["intercept"],
             )
             if global_fig is not None:
-                global_name = f"{model_name.lower()}_{fig_path}_recovery_global.pdf"
+                global_name = f"{model_name.lower()}_{tag}_{fig_path}_recovery_global.pdf"
                 global_fig.savefig(figures_dir / global_name, bbox_inches="tight")
                 logging.info(f"[saved] {figures_dir / global_name}")
                 if self.use_wandb:
-                    wandb.log({f"val/{model_name}/recovery_global": wandb.Image(global_fig)}, step=global_step)
+                    wandb.log({f"val/{model_name}/{tag}/recovery_global": wandb.Image(global_fig)}, step=global_step)
                 plt.close(global_fig)
 
         self.net.train()
@@ -331,6 +368,12 @@ def parse_args():
     parser.add_argument("--val_batch_size", type=int, default=500)
     parser.add_argument("--val_epoch_interval", type=int, default=2500,
                         help="Epochs between validation + checkpoint saves.")
+    parser.add_argument("--val_max_num_categories", type=int, default=None,
+                        help="Category ceiling for validation scenarios that don't pin their own "
+                             "'max_num_categories'. Defaults to the training --max_num_categories.")
+    parser.add_argument("--val_min_num_categories", type=int, default=None,
+                        help="Category floor for validation scenarios (default 2). Set equal to "
+                             "--val_max_num_categories to validate at an exact number of categories.")
     parser.add_argument("--fm_sample_steps", type=int, default=100)
     parser.add_argument("--fm_num_samples", type=int, default=100)
     parser.add_argument("--fm_solver", type=str, default="euler",
@@ -411,6 +454,8 @@ if __name__ == "__main__":
         "val_samples_chunk_size": args.val_samples_chunk_size,
         "batch_size": args.val_batch_size,
         "num_obs": args.val_num_obs,
+        "val_max_num_categories": args.val_max_num_categories,
+        "val_min_num_categories": args.val_min_num_categories,
         "model_family_config": model_family_config,
         "device": device,
     }
