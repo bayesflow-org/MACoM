@@ -21,6 +21,11 @@ class ModelClass:
         Per-model link functions, keyed by model name.
     weights : list[float] | None
         Sampling weights over model families. Uniform if None.
+    train_contexts : dict[str, Callable] | None
+        Optional per-model context builders, keyed by model name. Each is called
+        as fn(num_obs) per batch element in batch_sample, overriding the model's
+        build_default_context (e.g. RDM.build_random_context to train over 2-4
+        alternatives, matching the model_family training distribution).
     """
 
     def __init__(
@@ -29,6 +34,7 @@ class ModelClass:
         link_funs: dict[str, dict | Callable],
         weights: list[float] | None = None,
         num_workers: int | None = None,
+        train_contexts: dict[str, Callable] | None = None,
     ):
         if set(model_families.keys()) != set(link_funs.keys()):
             raise ValueError("model_families and link_funs must have the same keys.")
@@ -62,6 +68,7 @@ class ModelClass:
             weights = np.array(weights, dtype=np.float64)
             weights /= weights.sum()
         self.weights = weights
+        self.train_contexts = train_contexts or {}
         default_workers = max(1, (os.cpu_count() or 1) // 6)
         self._num_workers: int = num_workers if num_workers is not None else default_workers
         self._executor: ThreadPoolExecutor | None = None
@@ -122,9 +129,13 @@ class ModelClass:
             model_name = sampled_names[i]
             mf = self.model_families[model_name]
 
-            ctx_i = None
-            if hasattr(mf.model, "build_default_context"):
+            ctx_fn = self.train_contexts.get(model_name)
+            if ctx_fn is not None:
+                ctx_i = ctx_fn(num_obs)
+            elif hasattr(mf.model, "build_default_context"):
                 ctx_i = mf.model.build_default_context(num_obs=num_obs)
+            else:
+                ctx_i = None
 
             sim_instance = mf.sample(
                 design_config=design_config,

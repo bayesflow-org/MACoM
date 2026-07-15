@@ -44,9 +44,10 @@ _MODELS_WITH_PI = {
     if m != "lba"
 }
 
-# val_step validates the same per-model scenarios as model_family (intercept_only,
-# fixed_regressed, interaction), each with its own category controls (exact-K etc.),
-# so recovery plots are homogeneous per batch and match the model_family study.
+# val_step validates all six per-model scenarios shared with model_family
+# (intercept_only, fixed, regressed, fixed_regressed, interaction, mixed_predictor),
+# each with its own category controls (exact-K etc.), so recovery plots are
+# homogeneous per batch and match the model_family study.
 MODEL_CONFIGS = {
     m.upper(): {
         "intrinsic_params": cfg["intrinsic_params"],
@@ -62,13 +63,16 @@ CHECKPOINT_DIR = "./outputs/checkpoints/model_class/cf/"
 
 class CogFormerTrainer:
     def __init__(self, net, model_class, model_class_config, adapter, use_wandb=False, val_epoch_interval=2000,
-                 num_sim_workers=3, world_size=1, rank=0):
+                 early_val_epoch=None, num_sim_workers=3, world_size=1, rank=0):
         self.net = net
         self.model_class = model_class      # main instance used in val_step
         self.model_class_config = model_class_config  # config dict for per-thread reconstruction
         self.adapter = adapter
         self.use_wandb = use_wandb
         self.val_epoch_interval = val_epoch_interval
+        # One-off early validation + checkpoint (safety check on long runs), in
+        # addition to the regular val_epoch_interval schedule.
+        self.early_val_epoch = early_val_epoch
         self.num_sim_workers = num_sim_workers
         self.world_size = world_size
         self.rank = rank
@@ -223,7 +227,8 @@ class CogFormerTrainer:
                 pbar.set_postfix(loss=f"{loss:.4f}", lr=f"{current_lr:.2e}")
                 pbar.update(1)
 
-            if (epoch + 1) % self.val_epoch_interval == 0:
+            is_early_val = self.early_val_epoch is not None and (epoch + 1) == self.early_val_epoch
+            if (epoch + 1) % self.val_epoch_interval == 0 or is_early_val:
                 if self.is_distributed:
                     dist.barrier()
                 if self.rank == 0:
@@ -364,6 +369,9 @@ def parse_args():
     parser.add_argument("--val_batch_size", type=int, default=500)
     parser.add_argument("--val_epoch_interval", type=int, default=2500,
                         help="Epochs between validation + checkpoint saves.")
+    parser.add_argument("--early_val_epoch", type=int, default=None,
+                        help="Run one extra validation + checkpoint at the end of this epoch "
+                             "(safety check on long runs), in addition to --val_epoch_interval.")
     parser.add_argument("--val_max_num_categories", type=int, default=None,
                         help="Category ceiling for validation scenarios that don't pin their own "
                              "'max_num_categories'. Defaults to the training --max_num_categories.")
@@ -484,10 +492,16 @@ if __name__ == "__main__":
         f"local_batch={local_batch} (total={args.train_batch_size}, world={world_size}), device={device}"
     )
 
+    # fixed_values must carry the default_fixed_values (s_v/s_tau -> 0.0): when a random
+    # design excludes an intrinsic, ModelFamily.sample() injects this value instead of
+    # link_fun(0) = softplus(0) ~= 0.693. Validation scenarios inject 0 via
+    # infer_free_fixed_intrinsics, so an empty dict here trains the net on s_v/s_tau ~= 0.693
+    # whenever they are masked out — biasing all params below the diagonal in the
+    # fixed/fixed_regressed recovery plots.
     mask_randomizer_kwargs = {
-        "DDM": {"free_intrinsics": ["v", "a", "z", "tau"], "fixed_intrinsics": ["s_v", "s_tau"], "fixed_values": {}, "global_params": GLOBAL_PARAMS},
-        "RDM": {"free_intrinsics": ["v", "v_diff", "a", "tau"], "fixed_intrinsics": ["s_v", "s_tau"], "fixed_values": {}, "global_params": GLOBAL_PARAMS},
-        "CDM": {"free_intrinsics": ["v", "v_theta", "a", "tau"], "fixed_intrinsics": ["s_v", "s_tau"], "fixed_values": {}, "global_params": GLOBAL_PARAMS},
+        "DDM": {"free_intrinsics": ["v", "a", "z", "tau"], "fixed_intrinsics": ["s_v", "s_tau"], "fixed_values": _MODELS_WITH_PI["ddm"]["default_fixed_values"], "global_params": GLOBAL_PARAMS},
+        "RDM": {"free_intrinsics": ["v", "v_diff", "a", "tau"], "fixed_intrinsics": ["s_v", "s_tau"], "fixed_values": _MODELS_WITH_PI["rdm"]["default_fixed_values"], "global_params": GLOBAL_PARAMS},
+        "CDM": {"free_intrinsics": ["v", "v_theta", "a", "tau"], "fixed_intrinsics": ["s_v", "s_tau"], "fixed_values": _MODELS_WITH_PI["cdm"]["default_fixed_values"], "global_params": GLOBAL_PARAMS},
     }
 
     # Config dict used by trainer to reconstruct per-thread ModelClass instances
@@ -498,6 +512,10 @@ if __name__ == "__main__":
             "CDM": {"model_cls": CDM, "prior_fn": cdm_priors, "intrinsic_params": _MODELS_WITH_PI["cdm"]["intrinsic_params"], "mask_randomizer_kwargs": mask_randomizer_kwargs["CDM"]},
         },
         "link_funs": {"DDM": ddm_link_fun, "RDM": rdm_link_fun, "CDM": cdm_link_fun},
+        # RDM trains over 2-4 alternatives (random per batch element), matching the
+        # model_family training distribution. Validation scenarios keep the default
+        # context (2 alternatives), which is in-distribution.
+        "train_contexts": {"RDM": RDM.build_random_context},
     }
 
     # Main ModelClass instance used for validation
@@ -511,7 +529,8 @@ if __name__ == "__main__":
         for name, cfg in model_class_config["families"].items()
     }
     link_funs = {k: fn() for k, fn in model_class_config["link_funs"].items()}
-    model_class = ModelClass(model_families=model_families, link_funs=link_funs)
+    model_class = ModelClass(model_families=model_families, link_funs=link_funs,
+                             train_contexts=model_class_config.get("train_contexts"))
 
     adapter = Adapter()
 
@@ -558,6 +577,7 @@ if __name__ == "__main__":
         adapter=adapter,
         use_wandb=use_wandb,
         val_epoch_interval=args.val_epoch_interval,
+        early_val_epoch=args.early_val_epoch,
         num_sim_workers=num_sim_workers,
         world_size=world_size,
         rank=rank,

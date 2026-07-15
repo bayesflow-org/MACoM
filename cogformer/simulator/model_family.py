@@ -266,6 +266,15 @@ class ModelFamily:
             category_counts=actual_col_counts,
         )
 
+        # Refine by realized support: a category level (or interaction cell) that
+        # received zero observations leaves its design column all-zero, so the data
+        # carries no information about that coefficient — it must not be an
+        # estimation target. The category-count rebuild above only excludes the
+        # structurally unused columns; this also drops columns that are empty by
+        # chance (sparse Dirichlet category draws, unpopulated interaction cells).
+        realized_cols = (np.abs(design_matrix) > 0).any(axis=0)
+        parameter_mask[~realized_cols] = 0.0
+
         parameter_matrix = sample_parameter_matrix(
             parameter_mask=parameter_mask,
             prior=intrinsic_prior,

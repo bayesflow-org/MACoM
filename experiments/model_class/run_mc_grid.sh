@@ -29,6 +29,7 @@ BATCH="${BATCH:-64}"
 # memory (see run_resume2.sh notes on the ~41 GB val footprint). 100 + chunk 1 is safe.
 VAL_BATCH="${VAL_BATCH:-100}"
 VAL_INTERVAL="${VAL_INTERVAL:-2500}"
+EARLY_VAL="${EARLY_VAL:-500}"
 SIM_WORKERS="${SIM_WORKERS:-20}"
 
 for job in $1; do
@@ -59,6 +60,7 @@ for job in $1; do
         --lr 1e-4 --dropout 0.05 --layer_dropout 0.05 \
         --fm_sample_steps 25 --fm_num_samples 100 --fm_solver midpoint \
         --val_epoch_interval "$VAL_INTERVAL" \
+        --early_val_epoch "$EARLY_VAL" \
         --num_sim_workers "$SIM_WORKERS" \
         --checkpoint_dir "./outputs/checkpoints/model_class/cf/${tag}/" \
         --use_wandb

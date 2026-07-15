@@ -133,6 +133,7 @@ class ModelClassDataset(torch.utils.data.IterableDataset):
     def __init__(self, model_class_config, train_config, num_workers, world_size=1):
         self._families_cfg = model_class_config["families"]
         self._link_fns = model_class_config["link_funs"]
+        self._train_contexts = model_class_config.get("train_contexts")
         self._batch_size = train_config["batch_size"]
         self._mf_config = train_config["model_family_config"]
         self._sample_config = train_config["train_sample_config"]
@@ -159,6 +160,7 @@ class ModelClassDataset(torch.utils.data.IterableDataset):
         mc = ModelClass(
             model_families=families,
             link_funs={k: fn() for k, fn in self._link_fns.items()},
+            train_contexts=self._train_contexts,
         )
         adapter = Adapter()
         while True:

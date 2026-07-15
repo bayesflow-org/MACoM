@@ -84,8 +84,17 @@ def softplus(x: np.ndarray):
 
 def shifted_softplus(x: np.ndarray):
     """
-    Vectorized shifted softplus: f(x) = log(1 + exp(x)) - log(2)
-    This ensures f(0) = 0 and is stable for large |x|.
+    Numerically stable softplus: f(x) = log(1 + exp(x)), computed as
+    max(x, 0) + log1p(exp(-|x|)).
+
+    NOTE: despite the name, no shift is applied — f(0) = log(2) ~= 0.693, NOT 0.
+    Subtracting log(2) would make f negative for x < 0, which is invalid for
+    scale parameters (s_v/s_tau are used as distribution scales in the
+    simulators). Exact zeros for intrinsics excluded from the design are
+    instead produced by fixed-value injection in ModelFamily.sample(), which
+    bypasses the link function when a param is masked out and present in
+    mask_randomizer_kwargs["fixed_values"]. Training and validation must both
+    pass those fixed_values, or their simulated data distributions diverge.
 
     Parameters
     ----------
@@ -97,7 +106,6 @@ def shifted_softplus(x: np.ndarray):
     np.ndarray
         Same shape as x.
     """
-    # Stable softplus: max(x,0) + log1p(exp(-|x|))
     sp = np.maximum(x, 0) + np.log1p(np.exp(-np.abs(x)))
     return sp
 
