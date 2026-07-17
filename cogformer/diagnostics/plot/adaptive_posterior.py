@@ -4,7 +4,10 @@ import seaborn as sns
 import matplotlib.pyplot as plt
 
 from cogformer.utils.plot_utils import cogformer_cm_colors
-from cogformer.simulator.design_utils import build_parameter_mask, build_design_matrix, build_random_design_config, build_row_labels
+from cogformer.simulator.design_utils import (
+    build_parameter_mask, build_design_matrix, build_random_design_config,
+    build_row_labels, expand_design_config_to_mask,
+)
 
 
 from matplotlib.patches import Patch
@@ -14,10 +17,10 @@ def effect_type_from_unfolded_name(name: str) -> str:
     """
     Determine effect type from unfolded column name.
 
-    Expected naming scheme from unfolded_names():
-      - "<param>"                          -> intercept
-      - "<param> -- $<u_k>$ | $c_<id>$"   -> main
-      - "<param> -- $<u_k:u_j>$ | $c_<id>$" -> interaction
+    Expected naming scheme from unfolded_names() (labels from build_row_labels):
+      - "<param>"                              -> intercept
+      - "<param> -- $u_k$" / "-- $u_k:c_i$"    -> main (":c_i" marks a categorical contrast)
+      - "<param> -- $u_k \\times u_j$" (any contrast suffixes) -> interaction
 
     Returns
     -------
@@ -27,10 +30,7 @@ def effect_type_from_unfolded_name(name: str) -> str:
         return "intercept"
 
     regressor_part = name.split(" -- ", 1)[1]
-    if " | " in regressor_part:
-        regressor_part = regressor_part.split(" | ")[0]
-    regressor_clean = regressor_part.replace("$", "")
-    return "interaction" if ":" in regressor_clean else "main"
+    return "interaction" if (r"\times" in regressor_part or "×" in regressor_part) else "main"
 
 
 def pick_pair_color(x_name: str, y_name: str, colors: dict[str, str]) -> str:
@@ -52,6 +52,8 @@ def unfolded_names(
     intrinsic_params: list[str],
     max_num_categories: int,
     col_labels: list[str] | None = None,
+    categorical_regressors: list[str] | None = None,
+    parameter_mask: np.ndarray | None = None,
 ):
     """
     Names aligned with the unfolded parameter matrix.
@@ -61,6 +63,8 @@ def unfolded_names(
     col_labels : list[str] | None
         Optional display labels for columns (e.g. LaTeX r"$v$").
         If None, uses intrinsic_params.
+    categorical_regressors, parameter_mask :
+        Forwarded to :func:`build_row_labels` for categorical contrast labeling.
     """
     if col_labels is None:
         col_labels = intrinsic_params
@@ -68,7 +72,9 @@ def unfolded_names(
 
     # Row-major over the parameter-mask layout (intercept, main-effect blocks, then
     # interaction (i, j) blocks) so names align with parameter_mask.reshape(-1).
-    row_labels, row_kinds = build_row_labels(design_config, max_num_categories, return_kinds=True)
+    row_labels, row_kinds = build_row_labels(design_config, max_num_categories, return_kinds=True,
+                                             categorical_regressors=categorical_regressors,
+                                             parameter_mask=parameter_mask)
 
     names = []
     for coef, kind in zip(row_labels, row_kinds):
@@ -90,6 +96,7 @@ def samples_to_unfolded_df(
     parameter_mask: np.ndarray,
     unfold: bool,
     col_labels: list[str] | None = None,
+    categorical_regressors: list[str] | None = None,
 ):
     """
     Convert samples into a DataFrame aligned with the unfolded parameter matrix.
@@ -100,6 +107,8 @@ def samples_to_unfolded_df(
         intrinsic_params=intrinsic_params,
         max_num_categories=max_num_categories,
         col_labels=col_labels,
+        categorical_regressors=categorical_regressors,
+        parameter_mask=parameter_mask,
     )
 
     if isinstance(samples, pd.DataFrame):
@@ -189,6 +198,8 @@ def adaptive_posterior(
     target_color: str = "black",
     global_params: list[str] = None,
     global_only: bool = False,
+    max_num_regressors: int = None,
+    categorical_regressors: list[str] = None,
 ):
     """
     Pairplot of posterior samples with adaptive "patching" consistent with adaptive_recovery.
@@ -218,9 +229,11 @@ def adaptive_posterior(
     if parameter_mask.ndim == 3:
         parameter_mask = parameter_mask[0]
 
-    # collate() pads the grid to max dims; cap to rows the design_config covers.
-    _regressor_keys = list(design_config.keys())
-    _n_design_rows = 1 + (len(_regressor_keys) - 1) * (max_num_categories - 1)
+    # collate() pads the grid to max dims; cap to rows the design_config covers
+    # (intercept + main blocks + declared interaction blocks — a contiguous prefix).
+    design_config = expand_design_config_to_mask(design_config, parameter_mask, max_num_categories,
+                                                 max_num_regressors=max_num_regressors)
+    _n_design_rows = len(build_row_labels(design_config, max_num_categories))
     parameter_mask = parameter_mask[:_n_design_rows]
     if not isinstance(samples, pd.DataFrame):
         _s = np.asarray(samples)
@@ -235,6 +248,7 @@ def adaptive_posterior(
         parameter_mask=parameter_mask,
         unfold=unfold,
         col_labels=col_labels,
+        categorical_regressors=categorical_regressors,
     )
 
     # Global parameters (e.g. pi) are estimated jointly but presented separately.
@@ -248,6 +262,8 @@ def adaptive_posterior(
             intrinsic_params=intrinsic_params,
             max_num_categories=max_num_categories,
             col_labels=_cl,
+            categorical_regressors=categorical_regressors,
+            parameter_mask=parameter_mask,
         )
         _ncl = len(_cl)
         global_names = {
@@ -279,6 +295,8 @@ def adaptive_posterior(
             intrinsic_params=intrinsic_params,
             max_num_categories=max_num_categories,
             col_labels=col_labels,
+            categorical_regressors=categorical_regressors,
+            parameter_mask=parameter_mask,
         )
         mask_flat = parameter_mask.reshape(-1)
         if unfold:
@@ -300,6 +318,7 @@ def adaptive_posterior(
             parameter_mask=parameter_mask,
             unfold=unfold,
             col_labels=col_labels,
+            categorical_regressors=categorical_regressors,
         )
         # Keep prior columns aligned with the (global-filtered) posterior columns.
         df_prior = df_prior.loc[:, [c for c in df_prior.columns if c in df_post.columns]]

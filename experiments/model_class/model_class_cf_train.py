@@ -159,6 +159,8 @@ class CogFormerTrainer:
                     "design_config": design_config,
                     "intrinsic_params": intrinsic_params,
                     "variable_names": model_cfg["variable_names"],
+                    # Contrast-coded regressors for row labeling (e.g. mixed_predictor's u_1)
+                    "categorical_regressors": mix_opts.get("categorical_regressors"),
                 })
 
     def train(self, train_config, val_config, checkpoint_path="cogformer_model_class_fm.pt",
@@ -307,6 +309,8 @@ class CogFormerTrainer:
                 main_effect_color=colors["main_effect"],
                 interaction_color=colors["interaction"],
                 global_params=GLOBAL_PARAMS,
+                max_num_regressors=config["model_family_config"]["max_num_regressors"],
+                categorical_regressors=val.get("categorical_regressors"),
             )
 
             fig_name = f"{model_name.lower()}_{tag}_{fig_path}_recovery.pdf"
@@ -329,6 +333,8 @@ class CogFormerTrainer:
                 parameter_mask=params_mask,
                 variable_names=variable_names,
                 global_color=colors["intercept"],
+                max_num_regressors=config["model_family_config"]["max_num_regressors"],
+                categorical_regressors=val.get("categorical_regressors"),
             )
             if global_fig is not None:
                 global_name = f"{model_name.lower()}_{tag}_{fig_path}_recovery_global.pdf"

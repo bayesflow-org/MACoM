@@ -320,6 +320,8 @@ def main():
                 "variable_names": variable_names, "global_indices": global_indices,
                 "adapted": adapted, "true_set": true_set,
                 "params_mask": params_mask, "n_rows": n_rows, "outdir": outdir,
+                # Contrast-coded regressors for row labeling (e.g. mixed_predictor's u_1)
+                "categorical_regressors": mix_opts.get("categorical_regressors"),
             })
 
     # Phase 2: run all ODE integrations
@@ -347,7 +349,14 @@ def main():
         pred_set      = case["pred_set"]
         params_mask   = case["params_mask"]
         outdir        = case["outdir"]
+        categorical_regressors = case["categorical_regressors"]
         tag = f"{model_name.lower()}_{cfg_name}"
+        # Shared row-labeling kwargs: the mask layout is padded to the training
+        # regressor budget, and mixed cases carry contrast-coded regressors.
+        label_kwargs = {
+            "max_num_regressors": args.max_num_regressors,
+            "categorical_regressors": categorical_regressors,
+        }
 
         np.savez(
             pred_dir / f"{tag}_cf_pred.npz",
@@ -366,6 +375,7 @@ def main():
             main_effect_color=colors["main_effect"],
             interaction_color=colors["interaction"],
             global_params=GLOBAL_PARAMS,
+            **label_kwargs,
         )
         fig_path = outdir / f"{tag}_fm_recovery.pdf"
         fig.savefig(fig_path, bbox_inches="tight")
@@ -382,6 +392,7 @@ def main():
             parameter_mask=params_mask,
             variable_names=variable_names,
             global_color=colors["intercept"],
+            **label_kwargs,
         )
         if glob_fig is not None:
             glob_path = outdir / f"{tag}_fm_recovery_global.pdf"
@@ -400,6 +411,7 @@ def main():
             main_effect_color=colors["main_effect"],
             interaction_color=colors["interaction"],
             global_params=GLOBAL_PARAMS,
+            **label_kwargs,
         )
         coverage_path = outdir / f"{tag}_fm_coverage.pdf"
         coverage_fig.savefig(coverage_path, bbox_inches="tight")
@@ -412,6 +424,7 @@ def main():
             variable_names=variable_names, global_params=GLOBAL_PARAMS,
             intrinsic_params=intrinsic_params, parameter_mask=params_mask,
             max_num_categories=args.max_num_categories,
+            **label_kwargs,
         )
         if cov_glob is not None:
             cov_glob.savefig(outdir / f"{tag}_fm_coverage_global.pdf", bbox_inches="tight")
@@ -429,6 +442,7 @@ def main():
             interaction_color=colors["interaction"],
             difference=True,
             global_params=GLOBAL_PARAMS,
+            **label_kwargs,
         )
         ecdf_path = outdir / f"{tag}_fm_ecdf.pdf"
         ecdf_fig.savefig(ecdf_path, bbox_inches="tight")
@@ -441,6 +455,7 @@ def main():
             variable_names=variable_names, global_params=GLOBAL_PARAMS,
             intrinsic_params=intrinsic_params, parameter_mask=params_mask,
             max_num_categories=args.max_num_categories, difference=True,
+            **label_kwargs,
         )
         if ecdf_glob is not None:
             ecdf_glob.savefig(outdir / f"{tag}_fm_ecdf_global.pdf", bbox_inches="tight")
@@ -458,6 +473,7 @@ def main():
             interaction_color=colors["interaction"],
             skip_log_gamma=args.skip_log_gamma,
             global_params=GLOBAL_PARAMS,
+            **label_kwargs,
         )
         metrics_fig_path = outdir / f"{tag}_fm_metrics.pdf"
         metrics_fig.savefig(metrics_fig_path, bbox_inches="tight")
@@ -470,6 +486,7 @@ def main():
             intrinsic_params=intrinsic_params, max_num_categories=args.max_num_categories,
             global_params=GLOBAL_PARAMS, parameter_mask=params_mask,
             variable_names=variable_names, skip_log_gamma=args.skip_log_gamma,
+            **label_kwargs,
         )
         if metrics_glob is not None:
             metrics_glob.savefig(outdir / f"{tag}_fm_metrics_global.pdf", bbox_inches="tight")
@@ -484,6 +501,7 @@ def main():
             variable_names=variable_names,
             skip_log_gamma=args.skip_log_gamma,
             global_params=GLOBAL_PARAMS,
+            **label_kwargs,
         )
         metrics_csv_path = outdir / f"{tag}_fm_metrics.csv"
         metrics_df.to_csv(metrics_csv_path)
@@ -495,6 +513,7 @@ def main():
             intrinsic_params=intrinsic_params, max_num_categories=args.max_num_categories,
             global_params=GLOBAL_PARAMS, parameter_mask=params_mask,
             variable_names=variable_names, skip_log_gamma=args.skip_log_gamma,
+            **label_kwargs,
         )
         if not metrics_glob_df.empty:
             metrics_glob_df.to_csv(outdir / f"{tag}_fm_metrics_global.csv")
@@ -512,6 +531,7 @@ def main():
                     main_effect_color=colors["main_effect"],
                     interaction_color=colors["interaction"],
                     global_params=GLOBAL_PARAMS,
+                    **label_kwargs,
                 )
                 posterior_path = outdir / f"{tag}_fm_posterior_{i}.pdf"
                 posterior_fig.savefig(posterior_path, bbox_inches="tight")
@@ -522,6 +542,7 @@ def main():
                     samples=pred_set[i], design_config=design_config,
                     intrinsic_params=intrinsic_params, max_num_categories=args.max_num_categories,
                     global_params=GLOBAL_PARAMS, parameter_mask=params_mask, unfold=False,
+                    **label_kwargs,
                 )
                 if post_glob is not None:
                     post_glob.savefig(outdir / f"{tag}_fm_posterior_global_{i}.pdf", bbox_inches="tight")

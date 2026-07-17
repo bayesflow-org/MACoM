@@ -4,7 +4,10 @@ import matplotlib.colors as mcolors
 from matplotlib.patches import Rectangle
 import seaborn as sns
 
-from cogformer.simulator.design_utils import build_parameter_mask, build_design_matrix, build_random_design_config, build_row_labels
+from cogformer.simulator.design_utils import (
+    build_parameter_mask, build_design_matrix, build_random_design_config,
+    build_ensemble_row_labels,
+)
 from cogformer.diagnostics.metric.adaptive_metrics import (
     _rmse,
     _contraction,
@@ -40,6 +43,8 @@ def ensemble_metrics(
     fmt: str = ".3f",
     global_params: list[str] = None,
     global_only: bool = False,
+    max_num_regressors: int = None,
+    categorical_regressors_list: list = None,
 ) -> plt.Figure:
     """
     Heatmap of diagnostic metrics averaged over multiple design configs.
@@ -117,8 +122,15 @@ def ensemble_metrics(
             for m in parameter_masks
         ]
 
+    # Grid dimensions: max num_rows across all masks, fixed num_cols. Pad every
+    # mask to the shared row count so cell activity checks are uniform.
     num_rows = max(m.shape[0] for m in parameter_masks)
     num_cols = parameter_masks[0].shape[1]
+    parameter_masks = [
+        np.vstack([m, np.zeros((num_rows - m.shape[0], m.shape[1]), dtype=m.dtype)])
+        if m.shape[0] < num_rows else m
+        for m in parameter_masks
+    ]
 
     # Global parameters (e.g. pi) are estimated jointly but presented separately.
     # Slice columns to exclude them from the grid, or keep only them when global_only.
@@ -197,16 +209,30 @@ def ensemble_metrics(
                 mean_grids[m][r, c] = float(np.mean(v))
                 std_grids[m][r, c]  = float(np.std(v, ddof=1) if n > 1 else 0.0)
 
-    # Row labels + colors from the widest design config (most rows), aligned with the
-    # mask layout (intercept, main-effect blocks, then interaction (i, j) blocks).
-    _label_dc = design_configs[int(np.argmax([m.shape[0] for m in parameter_masks]))]
-    _labels_all, _kinds_all = build_row_labels(_label_dc, max_num_categories, return_kinds=True)
+    # Union row labels + kinds across configs, aligned with the padded row layout.
+    _labels_all, _kinds_all = build_ensemble_row_labels(
+        design_configs, parameter_masks, max_num_categories,
+        max_num_regressors=max_num_regressors,
+        categorical_regressors_list=categorical_regressors_list,
+        return_kinds=True,
+    )
     _kind_color = {"intercept": intercept_color, "main": main_effect_color, "interaction": interaction_color}
-    row_labels = [_labels_all[r] if r < len(_labels_all) else f"Row {r}" for r in range(num_rows)]
-    row_colors = [_kind_color[_kinds_all[r]] if r < len(_kinds_all) else main_effect_color
-                  for r in range(num_rows)]
+    row_labels = list(_labels_all)
+    row_colors = [_kind_color[k] for k in _kinds_all]
 
     col_labels = variable_names if variable_names is not None else intrinsic_params
+
+    # Compact rows: keep only rows active in at least one config.
+    row_idx = np.where(np.any([np.any(m == 1.0, axis=1) for m in parameter_masks], axis=0))[0]
+    if row_idx.size == 0:
+        return None
+    for m in metric_names:
+        mean_grids[m] = mean_grids[m][row_idx]
+        std_grids[m] = std_grids[m][row_idx]
+    count_grid = count_grid[row_idx]
+    row_labels = ["" if global_only else row_labels[r] for r in row_idx]
+    row_colors = [row_colors[r] for r in row_idx]
+    num_rows = row_idx.size
 
     metric_specs = [
         (rmse_col,                "mako",   0.0, 1.0),

@@ -2,7 +2,10 @@ import numpy as np
 import pandas as pd
 from scipy.stats import binom
 
-from cogformer.simulator.design_utils import build_parameter_mask, build_design_matrix, build_random_design_config
+from cogformer.simulator.design_utils import (
+    build_parameter_mask, build_design_matrix, build_random_design_config,
+    expand_design_config_to_mask, build_row_labels,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -162,6 +165,8 @@ def adaptive_metrics(
     skip_log_gamma: bool = True,
     global_params: list[str] = None,
     global_only: bool = False,
+    max_num_regressors: int = None,
+    categorical_regressors: list[str] = None,
 ) -> pd.DataFrame:
     """
     Compute adaptive diagnostic metrics for all active parameters in the
@@ -228,12 +233,15 @@ def adaptive_metrics(
         parameter_mask = parameter_mask[0]
 
     col_labels = variable_names if variable_names is not None else intrinsic_params
-    regressor_keys = list(design_config.keys())
+    design_config = expand_design_config_to_mask(design_config, parameter_mask, max_num_categories,
+                                                 max_num_regressors=max_num_regressors)
+    row_labels = build_row_labels(design_config, max_num_categories,
+                                  categorical_regressors=categorical_regressors,
+                                  parameter_mask=parameter_mask)
 
     batch_size, num_draws, num_rows, num_cols = pred.shape
     # collate() pads the grid to max dims; cap to rows the design_config covers.
-    n_design_rows = 1 + (len(regressor_keys) - 1) * (max_num_categories - 1)
-    num_rows = min(num_rows, n_design_rows)
+    num_rows = min(num_rows, len(row_labels))
     parameter_mask = parameter_mask[:num_rows]
     true = true[:, :num_rows, :]
     pred = pred[:, :, :num_rows, :]
@@ -255,14 +263,9 @@ def adaptive_metrics(
     records = {}
 
     for r in range(num_rows):
-        # Build label (same convention as adaptive_posterior.py)
-        if r == 0:
-            row_suffix = None
-        else:
-            category_id = (r - 1) % (max_num_categories - 1) + 1
-            regressor_id = (r - 1) // (max_num_categories - 1) + 1
-            regressor_key = regressor_keys[regressor_id]
-            row_suffix = f"${regressor_key}$ | $c_{{{category_id}}}$"
+        # Row label (same convention as adaptive_posterior.py: bare param name for
+        # the intercept row, "<param> -- <coefficient>" otherwise)
+        row_suffix = None if r == 0 else row_labels[r]
 
         for c in range(num_cols):
             if parameter_mask[r, c] != 1.0:

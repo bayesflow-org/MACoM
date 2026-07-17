@@ -85,12 +85,14 @@ def _add_mask_legend(
     gap: float = 0.018,
     pixel_alphas: list[float] | None = None,
     thumb_scale: float = 1.0,
+    max_per_column: int = 6,
 ):
     """
-    Add a row of parameter mask thumbnails as a visual legend at the bottom
-    of a figure. Active cells are drawn in the config's color; inactive cells
-    in light gray. Pixels are forced square. Config labels appear below each
-    thumbnail.
+    Add parameter mask thumbnails as a visual legend in a strip on the LEFT
+    side of the figure, stacked top-down in one or more columns and separated
+    from the main axes by a vertical divider line. Active cells are drawn in
+    the config's color; inactive cells in light gray. Pixels are forced square.
+    Config labels appear below each thumbnail.
 
     Parameters
     ----------
@@ -107,38 +109,56 @@ def _add_mask_legend(
         Number of columns (intrinsic parameters).
     label_fontsize : int
     pad : float
-        Vertical padding above and below thumbnails, in figure coords.
+        Padding around thumbnails, in figure coords.
     gap : float
-        Horizontal gap between thumbnails, in figure coords.
+        Horizontal gap between legend columns, in figure coords.
+    max_per_column : int
+        Thumbnails per legend column; more configs wrap into further columns.
+
+    Returns
+    -------
+    strip_w_fig : float
+        Width of the legend strip in figure coordinates.
     """
     figW, figH = fig.get_size_inches()
     n = len(parameter_masks)
+    n_cols_leg = int(np.ceil(n / max_per_column))
+    n_per_col = int(np.ceil(n / n_cols_leg))
 
-    # Fixed thumbnail width: n=12 fills ~full width (0.95); thumb_scale adjusts size
-    thumb_w_fig  = thumb_scale * (0.95 - 11 * gap) / 12
-    avail_w_fig  = n * thumb_w_fig + (n - 1) * gap
-    total_gaps   = gap * (n - 1)
-    # Centre the thumbnail strip horizontally
-    left_margin  = (1.0 - avail_w_fig) / 2
-    thumb_w_in   = thumb_w_fig * figW
-    thumb_h_in   = thumb_w_in * num_rows / num_cols   # square pixels
-    thumb_h_fig  = thumb_h_in / figH
-
-    # Rough label height in figure coords (1 line of text)
+    # Rough label height in figure coords (1 line of text below each thumbnail)
     label_h_fig = (label_fontsize * 2.2 / 72) / figH
 
-    strip_h_fig = pad + label_h_fig + thumb_h_fig + pad
+    # Size thumbnails so a full legend column fits in ~90% of the figure height
+    # (square pixels); cap the width so the strip stays a narrow sidebar. The
+    # lower clamp keeps small figures (e.g. single-cell global panels) valid.
+    cell_gap_fig = 2 * pad
+    thumb_h_fig = max(thumb_scale * (0.9 / n_per_col - label_h_fig - cell_gap_fig), 0.02)
+    thumb_h_in  = thumb_h_fig * figH
+    thumb_w_in  = thumb_h_in * num_cols / num_rows   # square pixels
+    thumb_w_fig = thumb_w_in / figW
+    max_w_fig = 0.11 * thumb_scale
+    if thumb_w_fig > max_w_fig:
+        thumb_w_fig = max_w_fig
+        thumb_w_in  = thumb_w_fig * figW
+        thumb_h_in  = thumb_w_in * num_rows / num_cols
+        thumb_h_fig = thumb_h_in / figH
 
-    # Re-layout main subplots leaving the bottom strip free
-    fig.tight_layout(rect=[0, strip_h_fig, 1, 1])
+    strip_w_fig = pad + n_cols_leg * thumb_w_fig + (n_cols_leg - 1) * gap + pad
 
-    # Thin dividing line between main plot and thumbnail strip
+    # Re-layout main subplots leaving the left strip free
+    fig.tight_layout(rect=[strip_w_fig, 0, 1, 1])
+
+    # Vertical divider between the thumbnail strip and the main plot
     line = Line2D(
-        [0.02, 0.98], [strip_h_fig, strip_h_fig],
+        [strip_w_fig, strip_w_fig], [0.02, 0.98],
         transform=fig.transFigure,
         color="lightgray", linewidth=0.7, zorder=10,
     )
     fig.add_artist(line)
+
+    # Centre each legend column vertically
+    cell_h_fig = thumb_h_fig + label_h_fig + cell_gap_fig
+    y_top = 0.5 + (n_per_col * cell_h_fig) / 2
 
     for k in range(n):
         mask_k = np.array(parameter_masks[k])
@@ -174,8 +194,10 @@ def _add_mask_legend(
             img[mask_k == 1.0, :3] = config_rgb
             img[mask_k == 1.0,  3] = 1.0
 
-        x0 = left_margin + k * (thumb_w_fig + gap)
-        y0 = pad + label_h_fig
+        leg_col = k // n_per_col
+        leg_row = k % n_per_col
+        x0 = pad + leg_col * (thumb_w_fig + gap)
+        y0 = y_top - leg_row * cell_h_fig - thumb_h_fig
 
         ax_t = fig.add_axes([x0, y0, thumb_w_fig, thumb_h_fig])
         ax_t.imshow(img, aspect="equal", interpolation="nearest")
@@ -192,7 +214,20 @@ def _add_mask_legend(
             sp.set_visible(False)
         ax_t.set_xlabel(labels[k], fontsize=label_fontsize, labelpad=3)
 
-    return strip_h_fig
+    return strip_w_fig
+
+
+def _add_config_legend(fig, colors, labels, fontsize: int = 11):
+    """Plain per-config color legend to the right of the axes — used instead of
+    mask thumbnails when the grid has no coefficient-matrix structure to show
+    (e.g. global-parameter-only ensemble panels)."""
+    handles = [
+        Line2D([], [], marker="o", linestyle="none", color=c, label=l)
+        for c, l in zip(colors, labels)
+    ]
+    fig.tight_layout()
+    fig.legend(handles=handles, loc="center left", bbox_to_anchor=(1.0, 0.5),
+               fontsize=fontsize, frameon=False)
 
 
 def hex_code():

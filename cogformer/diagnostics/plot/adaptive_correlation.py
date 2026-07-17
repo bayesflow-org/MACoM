@@ -14,6 +14,7 @@ def compute_r_matrix(
     intrinsic_params: list[str],
     max_num_categories: int,
     parameter_mask: np.ndarray = None,
+    max_num_regressors: int = None,
 ) -> tuple[np.ndarray, np.ndarray]:
     """Compute per-cell Pearson r over the parameter grid.
 
@@ -33,7 +34,8 @@ def compute_r_matrix(
     elif parameter_mask.ndim == 3:
         parameter_mask = parameter_mask[0]
 
-    design_config = expand_design_config_to_mask(design_config, parameter_mask, max_num_categories)
+    design_config = expand_design_config_to_mask(design_config, parameter_mask, max_num_categories,
+                                                 max_num_regressors=max_num_regressors)
     regressor_keys = list(design_config.keys())
     block_width = max_num_categories - 1
     main_keys = [k for k in regressor_keys if k != "1" and ":" not in k]
@@ -74,11 +76,13 @@ def _compact(r_matrix, parameter_mask, row_labels, row_colors, variable_names,
     excluded, or kept exclusively when ``global_only`` — so global params can be
     rendered separately from the coefficient matrix.
     """
-    row_idx = np.where(np.any(parameter_mask, axis=1))[0]
     col_idx = np.where(np.any(parameter_mask, axis=0))[0]
     if global_cols is not None:
         keep = (lambda c: c in global_cols) if global_only else (lambda c: c not in global_cols)
         col_idx = np.array([c for c in col_idx if keep(c)], dtype=int)
+    # Rows with no active cell in the KEPT columns are dropped — a global-only
+    # panel keeps just the row(s) where the global param lives.
+    row_idx = np.where(np.any(parameter_mask[:, col_idx], axis=1))[0] if col_idx.size else np.array([], dtype=int)
     return (
         r_matrix[np.ix_(row_idx, col_idx)],
         parameter_mask[np.ix_(row_idx, col_idx)],
@@ -89,10 +93,13 @@ def _compact(r_matrix, parameter_mask, row_labels, row_colors, variable_names,
 
 
 def _build_row_labels(design_config, num_rows, max_num_categories,
-                      intercept_color, main_effect_color, interaction_color):
+                      intercept_color, main_effect_color, interaction_color,
+                      categorical_regressors=None, parameter_mask=None):
     """Row labels + colors aligned with the parameter-mask row layout
     (intercept, main-effect blocks, then interaction (i, j) blocks)."""
-    labels, kinds = build_row_labels(design_config, max_num_categories, return_kinds=True)
+    labels, kinds = build_row_labels(design_config, max_num_categories, return_kinds=True,
+                                     categorical_regressors=categorical_regressors,
+                                     parameter_mask=parameter_mask)
     kind_color = {"intercept": intercept_color, "main": main_effect_color, "interaction": interaction_color}
     colors = [kind_color[k] for k in kinds]
     return labels[:num_rows], colors[:num_rows]
@@ -155,6 +162,8 @@ def adaptive_correlation_delta(
     tick_fontsize: int = 13,
     annot_fontsize: int = 11,
     fmt: str = "+.2f",
+    max_num_regressors: int = None,
+    categorical_regressors: list[str] = None,
 ) -> plt.Figure:
     """Heatmap of Δr = r_b − r_a, using the same cell layout as adaptive_correlation.
 
@@ -167,12 +176,14 @@ def adaptive_correlation_delta(
     if variable_names is None:
         variable_names = intrinsic_params
 
-    design_config = expand_design_config_to_mask(design_config, parameter_mask, max_num_categories)
+    design_config = expand_design_config_to_mask(design_config, parameter_mask, max_num_categories,
+                                                 max_num_regressors=max_num_regressors)
     num_rows, num_cols = parameter_mask.shape
 
     row_labels, row_colors = _build_row_labels(
         design_config, num_rows, max_num_categories,
-        intercept_color, main_effect_color, interaction_color
+        intercept_color, main_effect_color, interaction_color,
+        categorical_regressors=categorical_regressors, parameter_mask=parameter_mask,
     )
 
     delta = r_matrix_b - r_matrix_a
@@ -225,6 +236,8 @@ def adaptive_correlation(
     fmt: str = ".2f",
     global_params: list[str] = None,
     global_only: bool = False,
+    max_num_regressors: int = None,
+    categorical_regressors: list[str] = None,
 ) -> plt.Figure:
     """Heatmap of Pearson r, identical to the r values in adaptive_recovery scatter panels.
 
@@ -241,14 +254,17 @@ def adaptive_correlation(
         variable_names = intrinsic_params
 
     r_matrix, parameter_mask = compute_r_matrix(
-        true, pred, design_config, intrinsic_params, max_num_categories, parameter_mask
+        true, pred, design_config, intrinsic_params, max_num_categories, parameter_mask,
+        max_num_regressors=max_num_regressors,
     )
-    design_config = expand_design_config_to_mask(design_config, parameter_mask, max_num_categories)
+    design_config = expand_design_config_to_mask(design_config, parameter_mask, max_num_categories,
+                                                 max_num_regressors=max_num_regressors)
     num_rows = parameter_mask.shape[0]
 
     row_labels, row_colors = _build_row_labels(
         design_config, num_rows, max_num_categories,
-        intercept_color, main_effect_color, interaction_color
+        intercept_color, main_effect_color, interaction_color,
+        categorical_regressors=categorical_regressors, parameter_mask=parameter_mask,
     )
 
     global_cols = (

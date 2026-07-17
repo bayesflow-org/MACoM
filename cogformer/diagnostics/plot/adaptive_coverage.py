@@ -122,6 +122,8 @@ def adaptive_coverage(
     difference: bool = False,
     global_params: list = None,
     global_only: bool = False,
+    max_num_regressors: int = None,
+    categorical_regressors: list = None,
 ) -> plt.Figure:
     """
     Adaptive (masked) empirical coverage plot over a regressor-by-parameter grid.
@@ -143,28 +145,34 @@ def adaptive_coverage(
     elif parameter_mask.ndim == 3:
         parameter_mask = parameter_mask[0]
 
-    design_config = expand_design_config_to_mask(design_config, parameter_mask, max_num_categories)
+    design_config = expand_design_config_to_mask(design_config, parameter_mask, max_num_categories,
+                                                 max_num_regressors=max_num_regressors)
     batch_size, num_draws, num_rows, num_cols = pred.shape
     # Row labels + tints, aligned with the parameter-mask row layout
     # (intercept, main-effect blocks, then interaction (i, j) blocks).
-    row_ylabels, row_kinds = build_row_labels(design_config, max_num_categories, return_kinds=True)
+    row_ylabels, row_kinds = build_row_labels(design_config, max_num_categories, return_kinds=True,
+                                              categorical_regressors=categorical_regressors,
+                                              parameter_mask=parameter_mask)
     _kind_color = {"intercept": intercept_color, "main": main_effect_color, "interaction": interaction_color}
     row_tints = [_kind_color[k] for k in row_kinds]
     num_rows = min(num_rows, len(row_ylabels))
     row_ylabels = row_ylabels[:num_rows]
     row_tints = row_tints[:num_rows]
 
-    # Compact: drop rows and columns that are entirely N/A
-    row_idx = np.where(np.any(parameter_mask[:num_rows], axis=1))[0]
+    # Compact: drop columns that are entirely N/A. Global parameters (e.g. pi) are
+    # estimated jointly but presented separately: exclude their columns from the
+    # matrix, or keep only them when global_only.
     col_idx = np.where(np.any(parameter_mask[:num_rows], axis=0))[0]
-
-    # Global parameters (e.g. pi) are estimated jointly but presented separately.
-    # Exclude their columns from the matrix, or keep only them when global_only.
     if global_params and intrinsic_params is not None:
         global_cols = {i for i, p in enumerate(intrinsic_params) if p in global_params}
         keep = (lambda c: c in global_cols) if global_only else (lambda c: c not in global_cols)
         col_idx = np.array([c for c in col_idx if keep(c)], dtype=int)
     if col_idx.size == 0:
+        return None
+    # Drop rows with no active cell in the KEPT columns — a global-only panel keeps
+    # just the row(s) where the global param lives, with no N/A rows below it.
+    row_idx = np.where(np.any(parameter_mask[:num_rows][:, col_idx], axis=1))[0]
+    if row_idx.size == 0:
         return None
 
     parameter_mask = parameter_mask[np.ix_(row_idx, col_idx)]
@@ -173,6 +181,9 @@ def adaptive_coverage(
     row_ylabels = [row_ylabels[i] for i in row_idx]
     row_tints   = [row_tints[i]   for i in row_idx]
     col_labels  = [variable_names[i] for i in col_idx]
+    if global_only:
+        # Global params aren't coefficient-matrix rows; the column title names them.
+        row_ylabels = [""] * len(row_ylabels)
     num_rows    = len(row_idx)
     num_cols    = len(col_idx)
 

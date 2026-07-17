@@ -16,14 +16,26 @@ from cogformer.simulator.benchmarks.ssms.link_funs import ddm_link_fun, rdm_link
 from cogformer.simulator.design_utils import build_parameter_mask, build_design_matrix, build_random_design_config
 from cogformer.adapter import Adapter
 from cogformer.networks.transformers.cogformer import CogFormer
-from cogformer.diagnostics.plot.ensemble_recovery import ensemble_recovery
-from cogformer.diagnostics.plot.ensemble_coverage import ensemble_coverage
-from cogformer.diagnostics.plot.ensemble_ecdf import ensemble_ecdf
-from cogformer.diagnostics.plot.ensemble_metrics import ensemble_metrics
+from cogformer.diagnostics.plot.ensemble_recovery import ensemble_recovery, global_ensemble_recovery
+from cogformer.diagnostics.plot.ensemble_coverage import ensemble_coverage, global_ensemble_coverage
+from cogformer.diagnostics.plot.ensemble_ecdf import ensemble_ecdf, global_ensemble_ecdf
+from cogformer.diagnostics.plot.ensemble_metrics import ensemble_metrics, global_ensemble_metrics
 
-from ..configs import MODELS as _BASE_MODELS, ALL_VARIABLE_NAMES as ALL_PARAMS_VARIABLE_NAMES
-from ..utils import infer_free_fixed_intrinsics, build_encoder_input_dim, chunked_sample
+from ..configs import (MODELS as _BASE_MODELS, ALL_PARAMS,
+                       ALL_VARIABLE_NAMES as ALL_PARAMS_VARIABLE_NAMES)
+from ..utils import (add_global_params, infer_free_fixed_intrinsics,
+                     build_encoder_input_dim, chunked_sample)
 
+GLOBAL_PARAMS = ["pi"]
+GLOBAL_VARIABLE_NAMES = [r"$\pi$"]
+
+# Training designs always include the global params (a pi-less mask is OOD and
+# biases recovery downward), so the random configs must carry pi too.
+_MODELS_WITH_PI = {
+    m: add_global_params(cfg, GLOBAL_PARAMS, GLOBAL_VARIABLE_NAMES)
+    for m, cfg in _BASE_MODELS.items()
+    if m != "lba"
+}
 
 DEFAULT_FIXED_VALUES = {
     m.upper(): cfg["default_fixed_values"] for m, cfg in _BASE_MODELS.items()
@@ -75,26 +87,23 @@ def main():
     rng = np.random.default_rng(args.seed)
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-    def _no_pi(d: dict) -> dict:
-        return {k: v for k, v in d.items() if k != "pi"}
-
     model_families = {
-        "DDM": ModelFamily(model=DDM(), name="DDM", prior=_no_pi(ddm_priors()),
-                           intrinsic_params=_BASE_MODELS["ddm"]["intrinsic_params"]),
-        "RDM": ModelFamily(model=RDM(), name="RDM", prior=_no_pi(rdm_priors()),
-                           intrinsic_params=_BASE_MODELS["rdm"]["intrinsic_params"]),
-        "CDM": ModelFamily(model=CDM(), name="CDM", prior=_no_pi(cdm_priors()),
-                           intrinsic_params=_BASE_MODELS["cdm"]["intrinsic_params"]),
+        "DDM": ModelFamily(model=DDM(), name="DDM", prior=ddm_priors(),
+                           intrinsic_params=_MODELS_WITH_PI["ddm"]["intrinsic_params"]),
+        "RDM": ModelFamily(model=RDM(), name="RDM", prior=rdm_priors(),
+                           intrinsic_params=_MODELS_WITH_PI["rdm"]["intrinsic_params"]),
+        "CDM": ModelFamily(model=CDM(), name="CDM", prior=cdm_priors(),
+                           intrinsic_params=_MODELS_WITH_PI["cdm"]["intrinsic_params"]),
     }
     link_funs = {
-        "DDM": _no_pi(ddm_link_fun()),
-        "RDM": _no_pi(rdm_link_fun()),
-        "CDM": _no_pi(cdm_link_fun()),
+        "DDM": ddm_link_fun(),
+        "RDM": rdm_link_fun(),
+        "CDM": cdm_link_fun(),
     }
     model_class = ModelClass(model_families=model_families, link_funs=link_funs)
     adapter = Adapter()
 
-    n_global_params = model_class.n_global_params  # 8
+    n_global_params = model_class.n_global_params  # 9 (8 intrinsics + pi)
 
     encoder_input_dim = build_encoder_input_dim(
         args.max_num_regressors, args.max_num_categories, args.keep_intercept
@@ -138,7 +147,7 @@ def main():
     rng.shuffle(sampled_model_names)
 
     true_list, pred_list, masks = [], [], []
-    design_configs_out, labels = [], []
+    design_configs_out, labels, categorical_regressors_list = [], [], []
     colors = sns.husl_palette(args.n_configs, h=0.05, l=0.82)
 
     # Per-model counter for label numbering: "DDM | 1", "RDM | 1", "DDM | 2", ...
@@ -163,6 +172,7 @@ def main():
             keep_intercept=args.keep_intercept,
             add_interaction=args.add_interaction,
             free_prob=args.free_prob,
+            global_params=GLOBAL_PARAMS,
         )
 
         free_intr, fixed_intr, fixed_vals = infer_free_fixed_intrinsics(
@@ -218,15 +228,26 @@ def main():
         masks.append(mask_global)
         design_configs_out.append(dc)
         labels.append(label)
+        # Element 0's realized continuous/categorical assignment (plots use mask[0]).
+        # Dummy coding drops the base category c_0, so even a K=2 categorical carries
+        # a c_1 contrast — labels must come from the discrete mask, not slot counts.
+        disc = np.asarray(samples["discrete_masks"][0][:args.max_num_regressors])
+        categorical_regressors_list.append(
+            [f"u_{i + 1}" for i, v in enumerate(disc) if v == 1.0]
+        )
 
     outdir = Path(args.outdir)
     outdir.mkdir(parents=True, exist_ok=True)
 
+    # The global param space is the ordered union across families, which places pi
+    # BEFORE the family-specific params (v_diff, v_theta) — build labels by name
+    # rather than assuming the pi-less ALL_PARAMS ordering.
     global_param_names = model_class.global_param_names
-    variable_names = ALL_PARAMS_VARIABLE_NAMES
+    _label_map = dict(zip(ALL_PARAMS, ALL_PARAMS_VARIABLE_NAMES))
+    _label_map.update(dict(zip(GLOBAL_PARAMS, GLOBAL_VARIABLE_NAMES)))
+    variable_names = [_label_map[p] for p in global_param_names]
 
-    logging.info("Generating ensemble recovery plot...")
-    fig = ensemble_recovery(
+    shared_kwargs = dict(
         true_list=true_list,
         pred_list=pred_list,
         design_configs=design_configs_out,
@@ -234,63 +255,36 @@ def main():
         max_num_categories=args.max_num_categories,
         parameter_masks=masks,
         variable_names=variable_names,
-        colors=colors,
-        labels=labels,
+        max_num_regressors=args.max_num_regressors,
+        categorical_regressors_list=categorical_regressors_list,
+        global_params=GLOBAL_PARAMS,
     )
-    p = outdir / "model_class_ensemble_recovery.pdf"
-    fig.savefig(p, bbox_inches="tight")
-    plt.close(fig)
-    logging.info(f"[saved] {p}")
+    color_kwargs = {"colors": colors, "labels": labels}
 
-    logging.info("Generating ensemble coverage plot...")
-    fig = ensemble_coverage(
-        true_list=true_list,
-        pred_list=pred_list,
-        design_configs=design_configs_out,
-        intrinsic_params=global_param_names,
-        max_num_categories=args.max_num_categories,
-        parameter_masks=masks,
-        variable_names=variable_names,
-        colors=colors,
-        labels=labels,
-    )
-    p = outdir / "model_class_ensemble_coverage.pdf"
-    fig.savefig(p, bbox_inches="tight")
-    plt.close(fig)
-    logging.info(f"[saved] {p}")
-
-    logging.info("Generating ensemble ECDF plot...")
-    fig = ensemble_ecdf(
-        true_list=true_list,
-        pred_list=pred_list,
-        design_configs=design_configs_out,
-        intrinsic_params=global_param_names,
-        max_num_categories=args.max_num_categories,
-        parameter_masks=masks,
-        variable_names=variable_names,
-        colors=colors,
-        labels=labels,
-    )
-    p = outdir / "model_class_ensemble_ecdf.pdf"
-    fig.savefig(p, bbox_inches="tight")
-    plt.close(fig)
-    logging.info(f"[saved] {p}")
-
+    plotters = [
+        ("recovery", ensemble_recovery, global_ensemble_recovery, color_kwargs),
+        ("coverage", ensemble_coverage, global_ensemble_coverage, color_kwargs),
+        ("ecdf", ensemble_ecdf, global_ensemble_ecdf, color_kwargs),
+    ]
     if args.metrics:
-        logging.info("Generating ensemble metrics heatmap...")
-        fig = ensemble_metrics(
-            true_list=true_list,
-            pred_list=pred_list,
-            design_configs=design_configs_out,
-            intrinsic_params=global_param_names,
-            max_num_categories=args.max_num_categories,
-            parameter_masks=masks,
-            variable_names=variable_names,
-        )
-        p = outdir / "model_class_ensemble_metrics.pdf"
-        fig.savefig(p, bbox_inches="tight")
-        plt.close(fig)
-        logging.info(f"[saved] {p}")
+        plotters.append(("metrics", ensemble_metrics, global_ensemble_metrics, {}))
+
+    for plot_name, plot_fn, global_fn, extra in plotters:
+        logging.info(f"Generating ensemble {plot_name} plot...")
+        fig = plot_fn(**shared_kwargs, **extra)
+        if fig is not None:
+            p = outdir / f"model_class_ensemble_{plot_name}.pdf"
+            fig.savefig(p, bbox_inches="tight")
+            plt.close(fig)
+            logging.info(f"[saved] {p}")
+
+        # Global params (pi): one panel per config, wrapped at 6 per row.
+        glob_fig = global_fn(**shared_kwargs, **extra)
+        if glob_fig is not None:
+            p = outdir / f"model_class_ensemble_{plot_name}_global.pdf"
+            glob_fig.savefig(p, bbox_inches="tight")
+            plt.close(glob_fig)
+            logging.info(f"[saved] {p}")
 
     logging.info("Done.")
 

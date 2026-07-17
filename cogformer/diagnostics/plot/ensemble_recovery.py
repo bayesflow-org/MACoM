@@ -4,8 +4,11 @@ import matplotlib.pyplot as plt
 
 from collections.abc import Callable
 
-from cogformer.simulator.design_utils import build_parameter_mask, build_design_matrix, build_random_design_config, build_row_labels
-from cogformer.utils.plot_utils import credible_interval, _add_mask_legend
+from cogformer.simulator.design_utils import (
+    build_parameter_mask, build_design_matrix, build_random_design_config,
+    build_ensemble_row_labels,
+)
+from cogformer.utils.plot_utils import credible_interval, _add_mask_legend, _add_config_legend
 
 
 def ensemble_recovery(
@@ -30,9 +33,16 @@ def ensemble_recovery(
     figsize: tuple = None,
     global_params: list[str] = None,
     global_only: bool = False,
+    max_num_regressors: int = None,
+    categorical_regressors_list: list = None,
 ):
     """
     Overlay recovery plot for multiple design configs on a shared parameter matrix grid.
+
+    Rows with no active cell in any config are dropped, so padded layouts stay
+    compact. ``max_num_regressors`` is the main-block count the mask layout was
+    padded to; ``categorical_regressors_list`` optionally gives, per config, the
+    contrast-coded regressor keys for row labeling (mask-inferred when omitted).
 
     Parameters
     ----------
@@ -91,9 +101,15 @@ def ensemble_recovery(
             for m in parameter_masks
         ]
 
-    # Grid dimensions: max num_rows across all masks, fixed num_cols
+    # Grid dimensions: max num_rows across all masks, fixed num_cols. Pad every
+    # mask to the shared row count so cell activity checks are uniform.
     num_rows = max(m.shape[0] for m in parameter_masks)
     num_cols = parameter_masks[0].shape[1]
+    parameter_masks = [
+        np.vstack([m, np.zeros((num_rows - m.shape[0], m.shape[1]), dtype=m.dtype)])
+        if m.shape[0] < num_rows else m
+        for m in parameter_masks
+    ]
 
     # Global parameters (e.g. pi) are estimated jointly but presented separately.
     # Slice columns to exclude them from the grid, or keep only them when global_only.
@@ -110,6 +126,19 @@ def ensemble_recovery(
         intrinsic_params = [intrinsic_params[c] for c in keep]
         num_cols = len(keep)
 
+    # Union row labels across configs, aligned with the padded row layout.
+    row_labels_all = build_ensemble_row_labels(
+        design_configs, parameter_masks, max_num_categories,
+        max_num_regressors=max_num_regressors,
+        categorical_regressors_list=categorical_regressors_list,
+    )
+
+    # Compact rows: keep only rows active in at least one config.
+    row_idx = np.where(np.any([np.any(m == 1.0, axis=1) for m in parameter_masks], axis=0))[0]
+    if row_idx.size == 0:
+        return None
+    n_kept = row_idx.size
+
     # Default colors from husl palette
     if colors is None:
         colors = sns.husl_palette(n_configs if n_colors is None else n_colors, h=palette_start_hue, l=palette_lightness)
@@ -118,38 +147,23 @@ def ensemble_recovery(
         labels = [f"Config {i + 1}" for i in range(n_configs)]
 
     if figsize is None:
-        figsize = (3 * num_cols, 3 * num_rows)
+        figsize = (3 * num_cols, 3 * n_kept)
 
-    fig, axarr = plt.subplots(num_rows, num_cols, figsize=figsize)
+    fig, axarr = plt.subplots(n_kept, num_cols, figsize=figsize, squeeze=False)
 
-    # Ensure axarr is always 2D
-    if num_rows == 1 and num_cols == 1:
-        axarr = np.array([[axarr]])
-    elif num_rows == 1:
-        axarr = axarr[np.newaxis, :]
-    elif num_cols == 1:
-        axarr = axarr[:, np.newaxis]
+    # Per-config r-value maps (compact-row space) for mask legend pixel alphas
+    r_maps = [np.zeros((n_kept, num_cols)) for _ in range(n_configs)]
 
-    # Row labels from the widest design config (most rows), aligned with the mask layout
-    # (intercept, main-effect blocks, then interaction (i, j) blocks).
-    _label_dc = design_configs[int(np.argmax([m.shape[0] for m in parameter_masks]))]
-    row_labels_all = build_row_labels(_label_dc, max_num_categories)
-
-    # Per-config r-value maps for mask legend pixel alphas
-    r_maps = [np.zeros((num_rows, num_cols)) for _ in range(n_configs)]
-
-    for r in range(num_rows):
-        ylabel = row_labels_all[r] if r < len(row_labels_all) else f"Row {r}"
+    for r_i, r in enumerate(row_idx):
+        ylabel = "" if global_only else row_labels_all[r]
 
         for c in range(num_cols):
-            ax = axarr[r, c]
+            ax = axarr[r_i, c]
 
             # Collect data from all configs that are active at (r, c)
             active_entries = []
             for k in range(n_configs):
                 mask_k = parameter_masks[k]
-                if r >= mask_k.shape[0]:
-                    continue
                 if mask_k[r, c] != 1.0:
                     continue
 
@@ -171,7 +185,7 @@ def ensemble_recovery(
                 # N/A cell — no config covers this cell
                 ax.set_facecolor("gray")
                 ax.patch.set_alpha(0.05)
-                if r == num_rows - 1:
+                if r_i == n_kept - 1:
                     ax.set_xticks([0.0, 0.5, 1.0])
                     ax.set_xticklabels(["0.0", "0.5", "1.0"])
                     ax.tick_params(axis="x", length=0, labelcolor="none")
@@ -187,7 +201,7 @@ def ensemble_recovery(
                     fontsize=18, weight="bold",
                     alpha=0.7, color="gray"
                 )
-                ax.set_xlabel("Ground Truth" if r == num_rows - 1 else "", fontsize=label_fontsize)
+                ax.set_xlabel("Ground Truth" if r_i == n_kept - 1 else "", fontsize=label_fontsize)
                 continue
 
             # Compute global limits across all active configs for this cell
@@ -210,7 +224,7 @@ def ensemble_recovery(
             cell_alpha = 1.0 if n_configs <= 2 else 2.0 / n_configs
 
             for idx, (cfg_k, x_k, y_mean_k, y_err_k, color_k, label_k) in enumerate(active_entries):
-                r_maps[cfg_k][r, c] = corrs[idx]
+                r_maps[cfg_k][r_i, c] = corrs[idx]
                 if y_err_k is not None:
                     ax.errorbar(
                         x_k, y_mean_k, yerr=y_err_k,
@@ -231,23 +245,135 @@ def ensemble_recovery(
             ax.grid(True, color="lightgray", linestyle="--", linewidth=0.5, alpha=0.2)
             sns.despine(ax=ax)
             ax.set_ylabel(ylabel if c == 0 else "", fontsize=label_fontsize)
-            ax.set_title(variable_names[c] if r == 0 else "", fontsize=title_fontsize)
-            ax.set_xlabel("Ground Truth" if r == num_rows - 1 else "", fontsize=label_fontsize)
+            ax.set_title(variable_names[c] if r_i == 0 else "", fontsize=title_fontsize)
+            ax.set_xlabel("Ground Truth" if r_i == n_kept - 1 else "", fontsize=label_fontsize)
 
-    pixel_alpha_maps = [np.clip(np.abs(r_maps[k]), 0.2, 1.0) for k in range(n_configs)]
-    _add_mask_legend(fig, parameter_masks, colors, labels, num_rows, num_cols,
-                     label_fontsize=legend_fontsize, pixel_alphas=pixel_alpha_maps,
-                     thumb_scale=thumb_scale)
+    if global_only:
+        # No coefficient-matrix structure to show — plain color legend instead.
+        _add_config_legend(fig, colors, labels, fontsize=legend_fontsize)
+    else:
+        pixel_alpha_maps = [np.clip(np.abs(r_maps[k]), 0.2, 1.0) for k in range(n_configs)]
+        compact_masks = [m[row_idx] for m in parameter_masks]
+        _add_mask_legend(fig, compact_masks, colors, labels, n_kept, num_cols,
+                         label_fontsize=legend_fontsize, pixel_alphas=pixel_alpha_maps,
+                         thumb_scale=thumb_scale)
     return fig
 
 
-def global_ensemble_recovery(*args, global_params, **kwargs):
-    """Ensemble recovery for global parameters (e.g. ``pi``) only, plotted
-    separately from the coefficient matrix. Thin wrapper over
-    :func:`ensemble_recovery` with ``global_only=True``. Returns ``None`` when no
-    global parameter is active.
+def global_ensemble_recovery(
+    true_list: list[np.ndarray],
+    pred_list: list[np.ndarray],
+    design_configs: list[dict],
+    intrinsic_params: list[str],
+    max_num_categories: int,
+    global_params: list[str],
+    parameter_masks: list[np.ndarray] = None,
+    variable_names: list[str] = None,
+    colors: list[str] = None,
+    n_colors: int = None,
+    palette_lightness: float = 0.77,
+    palette_start_hue: float = 0.05,
+    labels: list[str] = None,
+    uncertainty_agg: Callable = credible_interval,
+    title_fontsize: int = 18,
+    label_fontsize: int = 14,
+    figsize: tuple = None,
+    alpha: float = 0.7,
+    max_per_row: int = 6,
+    **kwargs,
+):
+    """Ensemble recovery for global parameters (e.g. ``pi``), plotted separately
+    from the coefficient matrix: ONE PANEL PER CONFIG, arranged in rows of at
+    most ``max_per_row`` panels (e.g. 5 configs -> one row of 5; 12 configs ->
+    two rows of 6), each panel in its config's color with the config label as
+    title. Returns ``None`` when no global parameter is active.
     """
-    return ensemble_recovery(*args, global_params=global_params, global_only=True, **kwargs)
+    n_configs = len(design_configs)
+    if variable_names is None:
+        variable_names = intrinsic_params
+    if parameter_masks is None:
+        parameter_masks = [
+            build_parameter_mask(design_config=dc, max_num_categories=max_num_categories,
+                                 intrinsic_params=intrinsic_params, keep_intercept=True)
+            for dc in design_configs
+        ]
+    else:
+        parameter_masks = [m[0] if m.ndim == 3 else m for m in parameter_masks]
+    if colors is None:
+        colors = sns.husl_palette(n_configs if n_colors is None else n_colors,
+                                  h=palette_start_hue, l=palette_lightness)
+    if labels is None:
+        labels = [f"Config {i + 1}" for i in range(n_configs)]
+
+    global_cols = [i for i, p in enumerate(intrinsic_params) if p in global_params]
+    active_cols = [c for c in global_cols
+                   if any(np.any(m[:, c] == 1.0) for m in parameter_masks)]
+    if not active_cols:
+        return None
+
+    # Wrap config panels at max_per_row per row (e.g. 12 configs -> 2 rows of 6).
+    n_cols_grid = min(n_configs, max_per_row)
+    rows_per_param = int(np.ceil(n_configs / n_cols_grid))
+    n_rows = len(active_cols) * rows_per_param
+    if figsize is None:
+        figsize = (3 * n_cols_grid, 3.2 * n_rows)
+    fig, axarr = plt.subplots(n_rows, n_cols_grid, figsize=figsize, squeeze=False)
+
+    for gi, c in enumerate(active_cols):
+        for k in range(n_configs):
+            ax = axarr[gi * rows_per_param + k // n_cols_grid, k % n_cols_grid]
+            is_left = k % n_cols_grid == 0
+            is_bottom = (gi == len(active_cols) - 1) and (k + n_cols_grid >= n_configs)
+            rows_k = np.where(parameter_masks[k][:, c] == 1.0)[0]
+            if rows_k.size == 0:
+                ax.set_xticks([]); ax.set_yticks([])
+                for sp in ax.spines.values():
+                    sp.set_visible(False)
+                ax.text(0.5, 0.5, "N/A", transform=ax.transAxes, ha="center", va="center",
+                        fontsize=18, weight="bold", alpha=0.7, color="gray")
+                ax.set_title(labels[k], fontsize=title_fontsize)
+                continue
+            r = int(rows_k[0])  # global params live on the intercept row
+
+            x = true_list[k][:, r, c]
+            pred_k = pred_list[k]
+            if pred_k.ndim == 4:
+                y = pred_k[:, :, r, c]
+                y_mean = y.mean(axis=1)
+                ci = uncertainty_agg(y, prob=0.9, axis=1)
+                y_err = np.vstack([y_mean - ci[0], ci[1] - y_mean])
+                ax.errorbar(x, y_mean, yerr=y_err, fmt="none", alpha=0.3,
+                            linewidth=1.2, color=colors[k])
+            else:
+                y_mean = pred_k[:, r, c]
+
+            lower = min(x.min(), y_mean.min())
+            upper = max(x.max(), y_mean.max())
+            span = upper - lower if upper != lower else 1.0
+            eps = span * 0.1
+            lims = (lower - eps, upper + eps)
+            ax.set_xlim(lims); ax.set_ylim(lims)
+            ax.plot(lims, lims, color="black", alpha=0.4, linestyle="dashed", linewidth=1.0)
+
+            sns.scatterplot(x=x, y=y_mean, ax=ax, color=colors[k], alpha=alpha)
+            corr = np.corrcoef(x, y_mean)[0, 1]
+            ax.text(0.1, 0.95, f"r = {corr:.3f}", ha="left", va="center",
+                    transform=ax.transAxes, size=12)
+
+            ax.set_box_aspect(1)
+            ax.grid(True, color="lightgray", linestyle="--", linewidth=0.5, alpha=0.2)
+            sns.despine(ax=ax)
+            ax.set_title(labels[k], fontsize=title_fontsize)
+            ax.set_ylabel(variable_names[c] if is_left else "", fontsize=title_fontsize)
+            ax.set_xlabel("Ground Truth" if is_bottom else "", fontsize=label_fontsize)
+
+    # Hide unused trailing cells in each param block
+    for gi in range(len(active_cols)):
+        for k in range(n_configs, rows_per_param * n_cols_grid):
+            axarr[gi * rows_per_param + k // n_cols_grid, k % n_cols_grid].axis("off")
+
+    fig.tight_layout()
+    return fig
 
 
 if __name__ == "__main__":

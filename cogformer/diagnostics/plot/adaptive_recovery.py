@@ -25,8 +25,15 @@ def adaptive_recovery(
     figsize: tuple = None,
     global_params: list[str] = None,
     global_only: bool = False,
+    max_num_regressors: int = None,
+    categorical_regressors: list[str] = None,
 ):
     """Coefficient-matrix recovery grid.
+
+    ``max_num_regressors`` is the main-block count the mask layout was padded to
+    (pass it for collated masks so phantom regressor labels aren't invented);
+    ``categorical_regressors`` marks contrast-coded regressors for row labeling
+    (inferred from the mask when omitted).
 
     ``global_params`` (e.g. the contamination probability ``pi``) are estimated
     jointly but presented separately. When given:
@@ -51,29 +58,35 @@ def adaptive_recovery(
     elif parameter_mask.ndim == 3:
         parameter_mask = parameter_mask[0]
 
-    design_config = expand_design_config_to_mask(design_config, parameter_mask, max_num_categories)
+    design_config = expand_design_config_to_mask(design_config, parameter_mask, max_num_categories,
+                                                 max_num_regressors=max_num_regressors)
     num_rows, num_cols = parameter_mask.shape
 
     # Row labels + colors, aligned with the parameter-mask row layout
     # (intercept, main-effect blocks, then interaction (i, j) blocks).
-    row_ylabels, row_kinds = build_row_labels(design_config, max_num_categories, return_kinds=True)
+    row_ylabels, row_kinds = build_row_labels(design_config, max_num_categories, return_kinds=True,
+                                              categorical_regressors=categorical_regressors,
+                                              parameter_mask=parameter_mask)
     _kind_color = {"intercept": intercept_color, "main": main_effect_color, "interaction": interaction_color}
     row_colors = [_kind_color[k] for k in row_kinds]
     num_rows = min(num_rows, len(row_ylabels))
     row_ylabels = row_ylabels[:num_rows]
     row_colors = row_colors[:num_rows]
 
-    # Compact: drop rows and columns that are entirely N/A
-    row_idx = np.where(np.any(parameter_mask[:num_rows], axis=1))[0]
+    # Compact: drop columns that are entirely N/A. Global parameters (e.g. pi) are
+    # estimated jointly but presented separately: exclude their columns from the
+    # matrix, or keep only them when global_only.
     col_idx = np.where(np.any(parameter_mask[:num_rows], axis=0))[0]
-
-    # Global parameters (e.g. pi) are estimated jointly but presented separately.
-    # Exclude their columns from the matrix, or keep only them when global_only.
     if global_params and intrinsic_params is not None:
         global_cols = {i for i, p in enumerate(intrinsic_params) if p in global_params}
         keep = (lambda c: c in global_cols) if global_only else (lambda c: c not in global_cols)
         col_idx = np.array([c for c in col_idx if keep(c)], dtype=int)
     if col_idx.size == 0:
+        return None
+    # Drop rows with no active cell in the KEPT columns — a global-only panel keeps
+    # just the row(s) where the global param lives, with no N/A rows below it.
+    row_idx = np.where(np.any(parameter_mask[:num_rows][:, col_idx], axis=1))[0]
+    if row_idx.size == 0:
         return None
     parameter_mask = parameter_mask[np.ix_(row_idx, col_idx)]
     true_f  = true[..., row_idx, :][..., col_idx]  # keep original for ref below
@@ -81,6 +94,9 @@ def adaptive_recovery(
     row_ylabels = [row_ylabels[i] for i in row_idx]
     row_colors  = [row_colors[i]  for i in row_idx]
     col_labels  = [variable_names[i] for i in col_idx]
+    if global_only:
+        # Global params aren't coefficient-matrix rows; the column title names them.
+        row_ylabels = [""] * len(row_ylabels)
     num_rows    = len(row_idx)
     num_cols    = len(col_idx)
 
@@ -166,14 +182,17 @@ def global_recovery(
     title_fontsize: int = 20,
     label_fontsize: int = 14,
     figsize: tuple = None,
+    max_num_regressors: int = None,
+    categorical_regressors: list[str] = None,
 ):
     """Recovery panel(s) for global parameters (e.g. the contamination probability
     ``pi``), plotted separately from the coefficient matrix.
 
     Thin wrapper over :func:`adaptive_recovery` with ``global_only=True`` — it
-    reuses the same scatter rendering but keeps only the global-parameter columns.
-    Returns ``None`` when no global parameter is active, so callers can skip
-    saving/logging.
+    reuses the same scatter rendering but keeps only the global-parameter columns
+    and the rows where they are active (so a never-regressed global param like
+    ``pi`` renders as a single panel with no N/A cells). Returns ``None`` when no
+    global parameter is active, so callers can skip saving/logging.
     """
     return adaptive_recovery(
         true=true,
@@ -192,6 +211,8 @@ def global_recovery(
         figsize=figsize,
         global_params=global_params,
         global_only=True,
+        max_num_regressors=max_num_regressors,
+        categorical_regressors=categorical_regressors,
     )
 
 

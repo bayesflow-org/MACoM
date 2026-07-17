@@ -41,6 +41,8 @@ def adaptive_metrics(
     fmt: str = ".3f",
     global_params: list[str] = None,
     global_only: bool = False,
+    max_num_regressors: int = None,
+    categorical_regressors: list[str] = None,
 ) -> plt.Figure:
     """
     Heatmap visualization of four adaptive diagnostic metrics arranged in a 2×2 grid.
@@ -99,7 +101,8 @@ def adaptive_metrics(
     if parameter_mask.ndim == 3:
         parameter_mask = parameter_mask[0]
 
-    design_config = expand_design_config_to_mask(design_config, parameter_mask, max_num_categories)
+    design_config = expand_design_config_to_mask(design_config, parameter_mask, max_num_categories,
+                                                 max_num_regressors=max_num_regressors)
     col_labels = variable_names if variable_names is not None else intrinsic_params
     regressor_keys = list(design_config.keys())
     block_width = max_num_categories - 1
@@ -159,23 +162,28 @@ def adaptive_metrics(
     # ------------------------------------------------------------------
     # Row / column axis labels (built before compact filtering)
     # ------------------------------------------------------------------
-    row_labels, row_kinds = build_row_labels(design_config, max_num_categories, return_kinds=True)
+    row_labels, row_kinds = build_row_labels(design_config, max_num_categories, return_kinds=True,
+                                             categorical_regressors=categorical_regressors,
+                                             parameter_mask=parameter_mask)
     _kind_color = {"intercept": intercept_color, "main": main_effect_color, "interaction": interaction_color}
     row_colors = [_kind_color[k] for k in row_kinds]
     row_labels = row_labels[:num_rows]
     row_colors = row_colors[:num_rows]
 
-    # Compact: drop rows and columns that are entirely N/A
-    row_idx = np.where(np.any(parameter_mask, axis=1))[0]
+    # Compact: drop columns that are entirely N/A. Global parameters (e.g. pi) are
+    # estimated jointly but presented separately: exclude their columns from the
+    # heatmaps, or keep only them when global_only.
     col_idx = np.where(np.any(parameter_mask, axis=0))[0]
-
-    # Global parameters (e.g. pi) are estimated jointly but presented separately.
-    # Exclude their columns from the heatmaps, or keep only them when global_only.
     if global_params and intrinsic_params is not None:
         global_cols = {i for i, p in enumerate(intrinsic_params) if p in global_params}
         keep = (lambda c: c in global_cols) if global_only else (lambda c: c not in global_cols)
         col_idx = np.array([c for c in col_idx if keep(c)], dtype=int)
     if col_idx.size == 0:
+        return None
+    # Drop rows with no active cell in the KEPT columns — a global-only panel keeps
+    # just the row(s) where the global param lives, with no N/A rows below it.
+    row_idx = np.where(np.any(parameter_mask[:, col_idx], axis=1))[0]
+    if row_idx.size == 0:
         return None
 
     parameter_mask = parameter_mask[np.ix_(row_idx, col_idx)]
@@ -184,6 +192,9 @@ def adaptive_metrics(
     row_labels = [row_labels[i] for i in row_idx]
     row_colors = [row_colors[i] for i in row_idx]
     col_labels = [col_labels[i] for i in col_idx]
+    if global_only:
+        # Global params aren't coefficient-matrix rows; the column title names them.
+        row_labels = [""] * len(row_labels)
     num_rows   = len(row_idx)
     num_cols   = len(col_idx)
 

@@ -323,6 +323,8 @@ def build_row_labels(
     max_num_categories: int = 3,
     math: bool = True,
     return_kinds: bool = False,
+    categorical_regressors: list[str] | set[str] | None = None,
+    parameter_mask: np.ndarray | None = None,
 ) -> list[str] | tuple[list[str], list[str]]:
     """Human-readable labels for each design-matrix ROW (coefficient), aligned with
     the row order of :func:`build_parameter_mask` / :func:`build_position_codes`:
@@ -330,40 +332,58 @@ def build_row_labels(
     then interaction blocks (``block_width ** 2`` rows, row-major ``(i, j)``) in
     config order.
 
-    Category slots use 1-based contrast indices (matching :func:`build_column_labels`),
-    and are only shown when there is more than one contrast (``block_width > 1``):
+    Label format (contrast indices are 1-based, matching :func:`build_column_labels`):
 
-      - intercept                          -> ``1``
-      - main effect ``u_r``, contrast ``c``      -> ``u_r``        (+ ``| c_c``)
-      - interaction ``u_a:u_b``, contrast ``(i, j)`` -> ``u_a:u_b``    (+ ``| c_{i,j}``)
+      - intercept                                   -> ``1``
+      - continuous main effect ``u_r``              -> ``u_r``
+      - categorical main effect ``u_r``, contrast c -> ``u_r:c_c``
+      - interaction ``u_a:u_b``, slot ``(i, j)``    -> ``u_a × u_b`` where each part
+        carries its own contrast index when that regressor is categorical, e.g.
+        ``u_a × u_b:c_j`` (cont × cat) or ``u_a:c_i × u_b:c_j`` (cat × cat).
 
-    The interaction suffix carries the full ``(i, j)`` category pair — one index per
-    interacting regressor — rather than a flat running count, so each row names the
-    exact cross-product cell it represents.
+    A continuous regressor only ever occupies the first slot of its block; the
+    remaining (padding) slots repeat the same label so indices stay row-aligned.
 
     Args:
         math         : wrap labels in ``$…$`` for LaTeX rendering (matplotlib mathtext).
         return_kinds : also return a parallel list of row kinds, each one of
                        ``"intercept"``, ``"main"``, ``"interaction"`` — convenient for
                        mapping rows to per-kind colors.
+        categorical_regressors : main-effect keys (e.g. ``["u_1"]``) that are
+                       contrast-coded. Takes precedence over mask inference. Dummy
+                       coding drops the base category ``c_0``, so a categorical
+                       regressor ALWAYS carries a contrast suffix — a K=2 categorical
+                       is labeled ``u_r:c_1``, never bare ``u_r``.
+        parameter_mask : row-aligned mask used to infer categorical regressors when
+                       ``categorical_regressors`` is None — a block with an active row
+                       beyond its first slot must be categorical. A K=2 categorical
+                       occupies only slot 1 and is indistinguishable from a continuous
+                       regressor this way, so pass ``categorical_regressors`` (e.g.
+                       from scenario opts or the sampler's ``discrete_masks``) whenever
+                       the assignment is known.
     """
     block_width = max_num_categories - 1
     keys = [k for k in design_config if k != "1"]
     main_keys = [k for k in keys if ":" not in k]
     inter_keys = [k for k in keys if ":" in k]
 
+    if categorical_regressors is not None:
+        cat_set = set(categorical_regressors)
+    elif parameter_mask is not None and block_width > 1:
+        cat_set = set()
+        row0 = 1 if "1" in design_config else 0
+        for m_i, key in enumerate(main_keys):
+            block = parameter_mask[row0 + m_i * block_width: row0 + (m_i + 1) * block_width]
+            if block.shape[0] > 1 and np.any(block[1:] == 1.0):
+                cat_set.add(key)
+    else:
+        cat_set = set()
+
     def wrap(body: str) -> str:
         return f"${body}$" if math else body
 
-    def main_suffix(c: int) -> str:
-        if block_width <= 1:
-            return ""
-        return fr"$ | c_{{{c}}}$" if math else f" | c_{c}"
-
-    def inter_suffix(i: int, j: int) -> str:
-        if block_width <= 1:
-            return ""
-        return fr"$ | c_{{{i},{j}}}$" if math else f" | c_{i},{j}"
+    def part(key: str, contrast: int) -> str:
+        return f"{key}:c_{contrast}" if key in cat_set else key
 
     labels: list[str] = []
     kinds: list[str] = []
@@ -372,12 +392,14 @@ def build_row_labels(
         kinds.append("intercept")
     for key in main_keys:
         for c in range(1, block_width + 1):
-            labels.append(wrap(key) + main_suffix(c))
+            labels.append(wrap(part(key, c)))
             kinds.append("main")
     for key in inter_keys:
+        a, b = key.split(":")
+        times = r" \times " if math else " × "
         for i in range(1, block_width + 1):
             for j in range(1, block_width + 1):
-                labels.append(wrap(key) + inter_suffix(i, j))
+                labels.append(wrap(part(a, i) + times + part(b, j)))
                 kinds.append("interaction")
 
     return (labels, kinds) if return_kinds else labels
@@ -411,6 +433,7 @@ def expand_design_config_to_mask(
     design_config: dict,
     parameter_mask: np.ndarray,
     max_num_categories: int,
+    max_num_regressors: int | None = None,
 ) -> dict:
     """
     Infer the number of main-effect regressor blocks from parameter_mask.shape[0] and
@@ -418,6 +441,12 @@ def expand_design_config_to_mask(
 
     Used in diagnostic functions that receive the original (possibly sparse) config but
     need label generation to match the mask that was built from the normalized config.
+
+    max_num_regressors : the number of main-effect blocks the mask layout was padded
+        to (collate pads to ``max_num_regressors`` main blocks plus
+        ``C(max_num_regressors, 2)`` interaction slots). Without it, padded interaction
+        slots are indistinguishable from main-effect rows and the row-count inference
+        invents phantom regressors (u_5, u_6, …) — always pass it for collated masks.
     """
     block_width = max_num_categories - 1
     inter_block_width = block_width ** 2
@@ -425,6 +454,8 @@ def expand_design_config_to_mask(
     inter_keys = [k for k in design_config if ":" in k]
     main_rows = parameter_mask.shape[0] - (1 if has_intercept else 0) - len(inter_keys) * inter_block_width
     num_main_blocks = max(main_rows // block_width, 0)
+    if max_num_regressors is not None:
+        num_main_blocks = min(num_main_blocks, max_num_regressors)
     out = {}
     if has_intercept:
         out["1"] = design_config.get("1", [])
@@ -433,6 +464,53 @@ def expand_design_config_to_mask(
     for key in inter_keys:
         out[key] = design_config[key]
     return out
+
+
+def build_ensemble_row_labels(
+    design_configs: list[dict],
+    parameter_masks: list[np.ndarray],
+    max_num_categories: int,
+    max_num_regressors: int | None = None,
+    categorical_regressors_list: list[list[str] | None] | None = None,
+    math: bool = True,
+    return_kinds: bool = False,
+) -> list[str] | tuple[list[str], list[str]]:
+    """Row labels for an ensemble grid that overlays several design configs on the
+    same (padded) row layout.
+
+    For each row, collects the :func:`build_row_labels` label of every config with an
+    active cell in that row and joins the unique ones with `` / `` — e.g. a row shared
+    by a continuous slope and a first categorical contrast reads ``u_1 / u_1:c_1``.
+    Rows no config touches fall back to ``Row r``. Row kinds (for tinting) come from
+    the first active config; length equals ``max(mask rows)``.
+    """
+    num_rows = max(m.shape[0] for m in parameter_masks)
+    per_config: list[tuple[list[str], list[str]]] = []
+    for k, (dc, mask) in enumerate(zip(design_configs, parameter_masks)):
+        dc_exp = expand_design_config_to_mask(dc, mask, max_num_categories, max_num_regressors)
+        cat_regs = categorical_regressors_list[k] if categorical_regressors_list else None
+        per_config.append(build_row_labels(
+            dc_exp, max_num_categories, math=math, return_kinds=True,
+            categorical_regressors=cat_regs, parameter_mask=mask,
+        ))
+
+    labels: list[str] = []
+    kinds: list[str] = []
+    for r in range(num_rows):
+        seen: list[str] = []
+        kind = "main"
+        for k, mask in enumerate(parameter_masks):
+            labels_k, kinds_k = per_config[k]
+            if r >= mask.shape[0] or r >= len(labels_k) or not np.any(mask[r] == 1.0):
+                continue
+            if not seen:
+                kind = kinds_k[r]
+            if labels_k[r] not in seen:
+                seen.append(labels_k[r])
+        labels.append(" / ".join(seen) if seen else f"Row {r}")
+        kinds.append(kind)
+
+    return (labels, kinds) if return_kinds else labels
 
 
 def build_random_parameter_mask(
