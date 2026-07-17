@@ -222,6 +222,7 @@ outputs/timing/
 outputs/logs/
 outputs/figures/*
 !outputs/figures/real_data
+!outputs/figures/model_class/cf
 
 .claude/
 .claude/settings.local.json
