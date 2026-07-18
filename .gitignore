@@ -220,8 +220,13 @@ outputs/checkpoints/
 outputs/data/
 outputs/timing/
 outputs/logs/
+# Ignore figures except real_data and model_class/cf. A negation cannot
+# re-include a path whose parent directory is excluded, so the model_class
+# parent must be unignored first and its other children re-ignored.
 outputs/figures/*
 !outputs/figures/real_data
+!outputs/figures/model_class/
+outputs/figures/model_class/*
 !outputs/figures/model_class/cf
 
 .claude/
