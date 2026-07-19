@@ -50,6 +50,13 @@ def parse_args():
     p.add_argument("--n_configs", type=int, default=12, help="Total random configs (4 per family by default; use 8 for 2-3 per family)")
     p.add_argument("--batch_size", type=int, default=200)
     p.add_argument("--num_obs", type=int, default=500)
+    # Design-level size of the SAMPLED random configs — independent of the
+    # --max_num_* architecture params, which must match the checkpoint and only
+    # set the padded mask layout.
+    p.add_argument("--num_regressors", type=int, default=2,
+                   help="Regressors per random design config (padded up to max_num_regressors)")
+    p.add_argument("--num_categories", type=int, default=2,
+                   help="Exact category count K for categorical regressors (padded up to max_num_categories)")
     p.add_argument("--max_num_regressors", type=int, default=5)
     p.add_argument("--max_num_categories", type=int, default=5)
     p.add_argument("--keep_intercept", action="store_true", default=True)
@@ -166,7 +173,7 @@ def main():
 
         dc = build_random_design_config(
             intrinsic_params=intrinsic_params_local,
-            num_regressors=args.max_num_regressors,
+            num_regressors=args.num_regressors,
             free_intrinsics=[p for p in intrinsic_params_local if p not in default_fixed],
             fixed_intrinsics=list(default_fixed.keys()),
             keep_intercept=args.keep_intercept,
@@ -189,12 +196,14 @@ def main():
                 "fixed_values": fixed_vals,
             },
             max_num_regressors=args.max_num_regressors,
-            max_num_categories=args.max_num_categories,
+            max_num_categories=args.num_categories,
+            min_num_categories=args.num_categories,
             keep_intercept=args.keep_intercept,
             add_interaction=args.add_interaction,
             flatten_param_outputs=True,
             fixed_config=True,
             link_fun=link_fun,
+            pad_to_max_num_categories=args.max_num_categories,
         )
         samples["model_ids"] = np.full(args.batch_size, model_id, dtype=np.int64)
 
