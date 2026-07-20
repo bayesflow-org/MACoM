@@ -4,8 +4,14 @@ from scipy.stats import norm
 
 
 def _pi_sampler() -> float:
-    """Sample pi directly from Beta(1, 10) — no link function applied."""
-    return float(np.random.beta(0.5, 50))
+    """Sample pi directly from Beta(1, 50) — no link function applied.
+
+    alpha = 1 keeps the density finite at 0 (=50, not infinite): an
+    alpha < 1 spike is unlearnable for the flow head and broke pi
+    calibration in the r4c4 run. 99% of datasets fall below ~8.8%
+    contamination.
+    """
+    return float(np.random.beta(1, 50))
 
 
 def cdm_priors():
