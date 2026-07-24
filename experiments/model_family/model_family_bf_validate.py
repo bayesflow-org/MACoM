@@ -240,10 +240,10 @@ def main(model_key: str, case: str, batch_size: int = 200, num_samples: int = 20
         for i in range(10):
             posterior_fig = adaptive_posterior(
                 samples=pred_grid[i],
+                targets=true_grid[i],
                 design_config=design_config,
                 intrinsic_params=intrinsic_params,
                 max_num_categories=2,
-                unfold=False,
                 intercept_color=adaptive_colors["intercept"],
                 main_effect_color=adaptive_colors["main_effect"],
                 interaction_color=adaptive_colors["interaction"],

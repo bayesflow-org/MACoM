@@ -9,7 +9,7 @@ import matplotlib.pyplot as plt
 from cogformer.simulator import ModelFamily
 from cogformer.adapter import Adapter
 from cogformer.networks.transformers.cogformer import CogFormer
-from cogformer.diagnostics.plot.adaptive_posterior import adaptive_posterior, global_posterior
+from cogformer.diagnostics.plot.adaptive_posterior import adaptive_posterior
 from cogformer.diagnostics.plot.adaptive_recovery import adaptive_recovery, global_recovery
 from cogformer.diagnostics.plot.adaptive_coverage import adaptive_coverage, global_coverage
 from cogformer.diagnostics.plot.adaptive_ecdf import adaptive_ecdf, global_ecdf
@@ -439,29 +439,18 @@ def main():
             for i in range(min(10, args.batch_size)):
                 posterior = adaptive_posterior(
                     samples=pred_set[i],
+                    targets=true_set[i],
                     design_config=design_config,
                     intrinsic_params=intrinsic_params,
                     max_num_categories=args.max_num_categories,
                     parameter_mask=params_mask,
-                    unfold=False,
                     intercept_color=colors["intercept"],
                     main_effect_color=colors["main_effect"],
                     interaction_color=colors["interaction"],
-                    global_params=global_params,
                 )
                 posterior_path = outdir / f"{model_name}_family_{cfg_name}_fm_mixed_posterior_{i}.pdf"
                 posterior.savefig(posterior_path, bbox_inches="tight")
                 plt.close(posterior.fig)
-
-                # Global parameters (e.g. pi): separate posterior panel.
-                post_glob = global_posterior(
-                    samples=pred_set[i], design_config=design_config,
-                    intrinsic_params=intrinsic_params, max_num_categories=args.max_num_categories,
-                    global_params=global_params, parameter_mask=params_mask, unfold=False,
-                )
-                if post_glob is not None:
-                    post_glob.savefig(outdir / f"{model_name}_family_{cfg_name}_fm_mixed_posterior_global_{i}.pdf", bbox_inches="tight")
-                    plt.close(post_glob.fig)
 
     logging.info("Done.")
 

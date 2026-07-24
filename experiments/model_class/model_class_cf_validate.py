@@ -14,7 +14,7 @@ from cogformer.simulator.benchmarks.ssms.priors import ddm_priors, rdm_priors, c
 from cogformer.simulator.benchmarks.ssms.link_funs import ddm_link_fun, rdm_link_fun, cdm_link_fun
 from cogformer.adapter import Adapter
 from cogformer.networks.transformers.cogformer import CogFormer
-from cogformer.diagnostics.plot.adaptive_posterior import adaptive_posterior, global_posterior
+from cogformer.diagnostics.plot.adaptive_posterior import adaptive_posterior
 from cogformer.diagnostics.plot.adaptive_recovery import adaptive_recovery, global_recovery
 from cogformer.diagnostics.plot.adaptive_coverage import adaptive_coverage, global_coverage
 from cogformer.diagnostics.plot.adaptive_ecdf import adaptive_ecdf, global_ecdf
@@ -522,31 +522,19 @@ def main():
             for i in range(10):
                 posterior_fig = adaptive_posterior(
                     samples=pred_set[i],
+                    targets=true_set[i],
                     design_config=design_config,
                     intrinsic_params=intrinsic_params,
                     max_num_categories=args.max_num_categories,
                     parameter_mask=params_mask,
-                    unfold=False,
                     intercept_color=colors["intercept"],
                     main_effect_color=colors["main_effect"],
                     interaction_color=colors["interaction"],
-                    global_params=GLOBAL_PARAMS,
                     **label_kwargs,
                 )
                 posterior_path = outdir / f"{tag}_fm_posterior_{i}.pdf"
                 posterior_fig.savefig(posterior_path, bbox_inches="tight")
                 plt.close(posterior_fig.fig)
-
-                # Global parameters (e.g. pi): separate posterior panel.
-                post_glob = global_posterior(
-                    samples=pred_set[i], design_config=design_config,
-                    intrinsic_params=intrinsic_params, max_num_categories=args.max_num_categories,
-                    global_params=GLOBAL_PARAMS, parameter_mask=params_mask, unfold=False,
-                    **label_kwargs,
-                )
-                if post_glob is not None:
-                    post_glob.savefig(outdir / f"{tag}_fm_posterior_global_{i}.pdf", bbox_inches="tight")
-                    plt.close(post_glob.fig)
 
     logging.info("Done.")
 
