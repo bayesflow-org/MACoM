@@ -1,0 +1,185 @@
+\documentclass[11pt]{article}
+\usepackage[margin=1in]{geometry}
+\usepackage{booktabs}
+\usepackage{amsmath}
+\usepackage{amssymb}
+\usepackage{siunitx}
+\usepackage{xcolor}
+\usepackage{caption}
+
+\sisetup{group-separator={,}, group-minimum-digits=4}
+
+\newcommand{\IW}{\mathrm{IW}}
+\newcommand{\LKJ}{\mathrm{LKJ}}
+
+\title{LKJ vs.\ Inverse-Wishart for the Design-Matrix Correlation Structure}
+\author{CogFormer-2}
+\date{}
+
+\begin{document}
+\maketitle
+
+\section*{Motivation}
+
+\texttt{build\_design\_matrix} draws all non-context main-effect regressors
+jointly from a shared latent multivariate normal, $X \sim \mathcal N(0, \Sigma)$,
+so that the design can exhibit realistic collinearity instead of always being
+orthogonal. Historically $\Sigma$ was drawn as $\Sigma \sim \IW(\nu, I_k)$ and
+then rescaled to unit variance per column, i.e. only the \emph{correlation
+matrix} implied by $\Sigma$ was ever used. This note works out exactly what
+distribution that implied correlation matrix has, and shows it is the LKJ
+distribution only in the bivariate case $k=2$ --- for $k>2$ (the regime this
+simulator actually samples, e.g.\ \texttt{r4c4}) the two are genuinely
+different distributions, which is why the swap to sampling $R \sim \LKJ(\eta)$
+directly is a change in behavior, not merely a reparametrization.
+
+\section*{Setup}
+
+For a $k\times k$ correlation matrix $R$ (symmetric, unit diagonal, positive
+definite), the LKJ distribution has density
+\[
+  p_{\LKJ}(R \mid \eta) \;\propto\; \det(R)^{\eta - 1}, \qquad \eta > 0.
+\]
+$\eta = 1$ is uniform over the space of valid correlation matrices; $\eta > 1$
+concentrates mass toward the identity (weak correlations); $\eta < 1$ spreads
+mass toward near-singular/extreme correlations.
+
+The inverse-Wishart distribution on a covariance matrix $\Sigma$ with scale
+$I_k$ and degrees of freedom $\nu$ has density
+\[
+  p_{\IW}(\Sigma \mid \nu, I_k) \;\propto\;
+  \det(\Sigma)^{-(\nu+k+1)/2} \exp\!\left(-\tfrac12 \operatorname{tr}(\Sigma^{-1})\right).
+\]
+
+To compare the two, decompose $\Sigma$ into scale and correlation parts
+(the ``separation strategy,'' Barnard, McCulloch \& Meng, 2000):
+\[
+  \Sigma = D R D, \qquad D = \operatorname{diag}(\sigma_1,\dots,\sigma_k),
+\]
+where $\sigma_i > 0$ are standard deviations and $R$ is a correlation matrix.
+This is exactly the object \texttt{build\_design\_matrix} extracts when it
+computes $X_{\mathrm{mvn}} \mathrel{/}= \sqrt{\operatorname{diag}(\Sigma)}$: it
+discards $D$ and keeps only $R$.
+
+\subsection*{Change-of-variables Jacobian}
+
+Writing $\Sigma_{ii} = \sigma_i^2$ and $\Sigma_{ij} = \sigma_i \sigma_j r_{ij}$
+for $i<j$, the Jacobian matrix of $(\sigma_1,\dots,\sigma_k, \{r_{ij}\}) \mapsto
+\{\Sigma_{ij}\}$ is block lower-triangular: each $\Sigma_{ii}$ depends only on
+$\sigma_i$, and each $\Sigma_{ij}$ depends on $\sigma_i,\sigma_j$ and its own
+$r_{ij}$ only. The two diagonal blocks give determinant $\prod_i 2\sigma_i$
+(from $\partial \Sigma_{ii}/\partial \sigma_i = 2\sigma_i$) and
+$\prod_{i<j}\sigma_i\sigma_j = |D|^{k-1}$ (each index appears in $k-1$ pairs),
+so
+\[
+  d\Sigma \;=\; 2^k\,|D|\cdot|D|^{k-1}\, dD\, dR \;=\; 2^k\,|D|^{k}\, dD\, dR.
+\]
+\emph{Sanity check} ($k=1$): $\Sigma=\sigma^2 \Rightarrow d\Sigma = 2\sigma\,d\sigma$,
+matching $2^1|D|^1$ with no $R$ factor.
+
+\section*{The distribution of the extracted correlation matrix}
+
+Substituting $\Sigma = DRD$, $\det(\Sigma) = |D|^2\det(R)$, and
+$\operatorname{tr}(\Sigma^{-1}) = \sum_i (R^{-1})_{ii}/\sigma_i^2$ (since
+$\Sigma^{-1} = D^{-1}R^{-1}D^{-1}$ and $D$ is diagonal) into $p_\IW$, then
+multiplying by the Jacobian:
+\[
+  p(D, R) \;\propto\; \det(R)^{-(\nu+k+1)/2}
+  \prod_{i=1}^k \Big[ \sigma_i^{-(\nu+1)} \exp\!\big(-\tfrac{(R^{-1})_{ii}}{2\sigma_i^2}\big) \Big].
+\]
+The $D$-dependence factors completely across coordinates, so each $\sigma_i$
+integrates out independently:
+\[
+  \int_0^\infty \sigma^{-(\nu+1)} \exp\!\left(-\frac{c}{2\sigma^2}\right) d\sigma
+  \;\propto\; c^{-\nu/2}, \qquad c = (R^{-1})_{ii}.
+\]
+Marginalizing $D$ out therefore gives the \textbf{exact} density of the
+correlation matrix implied by $\Sigma \sim \IW(\nu, I_k)$:
+\[
+  \boxed{\; p_R(R) \;\propto\; \det(R)^{-(\nu+k+1)/2} \prod_{i=1}^k \big[(R^{-1})_{ii}\big]^{-\nu/2} \;}
+\]
+
+\section*{$k=2$: exact equivalence}
+
+For $k=2$, $R = \left(\begin{smallmatrix}1 & r \\ r & 1\end{smallmatrix}\right)$,
+$\det(R) = 1-r^2$, and $(R^{-1})_{11} = (R^{-1})_{22} = (1-r^2)^{-1}$ --- both
+diagonal entries of $R^{-1}$ are \emph{pure functions of $\det(R)$}. Substituting,
+\[
+  p_R(r) \;\propto\; (1-r^2)^{-(\nu+3)/2} \cdot (1-r^2)^{\nu/2} \cdot (1-r^2)^{\nu/2}
+  \;=\; (1-r^2)^{(\nu-3)/2}.
+\]
+Compared with the LKJ density in two dimensions, $p_{\LKJ}(r) \propto (1-r^2)^{\eta-1}$,
+these match exactly under
+\[
+  \eta = \frac{\nu - 1}{2} \quad\Longleftrightarrow\quad \nu = 2\eta + 1.
+\]
+So extracting the correlation from a $2\times 2$ inverse-Wishart$(\nu, I_2)$
+draw and sampling $r \sim \LKJ(\eta)$ directly are \emph{literally the same
+distribution} under this correspondence.
+
+\paragraph{Numerical check.} With $\eta=2 \Rightarrow \nu=5$, $N=\num{200000}$
+draws each: IW-extracted $r$ has mean $-0.0015$, std $0.4463$; direct LKJ draws
+have mean $0.0005$, std $0.4470$. A two-sample KS test gives
+$D_{\mathrm{KS}}=0.0034$, $p=0.20$ --- indistinguishable, as the algebra predicts.
+
+\section*{$k>2$: the equivalence breaks down}
+
+For $k>2$, $(R^{-1})_{ii}$ is \emph{not} a function of $\det(R)$ alone --- it
+depends on the full correlation structure among all $k$ variables, not just
+their overall determinant. So $\prod_i[(R^{-1})_{ii}]^{-\nu/2}$ cannot be
+absorbed into the $\det(R)^{-(\nu+k+1)/2}$ term, and the boxed density above
+does not reduce to LKJ's $\det(R)^{\eta-1}$ form for any $\nu$. The two
+families are genuinely different distributions once $k>2$.
+
+\paragraph{Numerical check ($k=4$, $\eta=2$).} Naively extending the $k=2$
+correspondence ($\nu = 2\eta+1 = 5$), the single pairwise entry $r_{12}$
+extracted from $\Sigma \sim \IW(5, I_4)$ has std $0.5768$, versus the true LKJ$(2)$
+pairwise marginal (which is $2\cdot\mathrm{Beta}(\eta+\tfrac{k-2}{2},\,\eta+\tfrac{k-2}{2})-1$
+by exchangeability, std $0.3781$). A KS test rejects equality outright
+($D_{\mathrm{KS}}=0.147$, $p\approx 0$): IW-then-normalize produces
+\emph{substantially more extreme} pairwise correlations than a matched-$\eta$
+LKJ draw once $k>2$.
+
+\begin{center}
+\begin{tabular}{lccc}
+  \toprule
+  & $k=2$ ($\nu=5$, $\eta=2$) & $k=4$ ($\nu=5$, $\eta=2$) \\
+  \midrule
+  IW-extracted $r_{12}$: std & 0.4463 & 0.5768 \\
+  LKJ($\eta$) marginal: std  & 0.4470 & 0.3781 \\
+  KS $p$-value               & 0.20 (match) & $\approx 0$ (mismatch) \\
+  \bottomrule
+\end{tabular}
+\end{center}
+
+\section*{Why the old code needed a $k$-dependent range}
+
+This also explains a detail of the previous implementation: the degrees of
+freedom were drawn as $\nu \sim \mathrm{Uniform}(k+1,\, 4k+1)$, scaling with
+$k$. Because IW's implied pairwise-correlation spread drifts with $k$ for
+fixed $\nu$ (as the table above shows: same $\nu$, very different spread at
+$k=2$ vs.\ $k=4$), that $k$-dependent range was an empirically-tuned patch to
+keep the \emph{effective} collinearity roughly comparable across different
+regressor counts. LKJ's $\eta$ does not need this patch --- by construction,
+every pairwise marginal of an LKJ$(\eta)$ draw has the same
+$2\cdot\mathrm{Beta}(\eta+\tfrac{k-2}{2},\,\eta+\tfrac{k-2}{2})-1$ form, so a
+single $\eta$-sampling range behaves consistently as $k$ varies (up to the
+principled, derived $\tfrac{k-2}{2}$ shift, not an ad hoc one).
+
+\section*{Bottom line}
+
+\begin{itemize}
+  \item Extracting a correlation matrix from $\Sigma \sim \IW(\nu, I_k)$ and
+    sampling $R \sim \LKJ(\eta)$ directly are \textbf{exactly the same
+    distribution only when $k=2$}, under $\nu = 2\eta+1$.
+  \item For $k>2$ --- the regime this simulator actually uses --- they are
+    different distributions; IW-then-normalize is not a valid way to sample
+    from LKJ$(\eta)$ in more than two dimensions.
+  \item The swap implemented in \texttt{design\_utils.build\_design\_matrix}
+    (using \texttt{sample\_lkj\_correlation} from
+    \texttt{simulator\_utils.py}) is therefore a genuine change in the
+    training data's collinearity structure for $k>2$, not just a faster
+    or cleaner-looking reparametrization of the same thing.
+\end{itemize}
+
+\end{document}

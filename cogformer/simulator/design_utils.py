@@ -1,9 +1,8 @@
 import numpy as np
 from itertools import combinations
 from typing import Callable
-from scipy.stats import invwishart
 
-from cogformer.utils.simulator_utils import shifted_softplus
+from cogformer.utils.simulator_utils import shifted_softplus, sample_lkj_correlation
 
 
 def design_config_signature(design_config: dict) -> frozenset:
@@ -654,19 +653,22 @@ def build_design_matrix(
     min_num_categories: int = 2,
     max_num_categories: int = 4,
     main_discrete_mask: np.ndarray = None,
-    collinearity_df: float | None = None,
+    eta: float | None = None,
     category_concentration: float | None = None,
     return_category_counts: bool = False,
 ) -> np.ndarray | tuple[np.ndarray, dict[str, int]]:
     """
     Build design matrix based on the respective configuration of free intrinsic parameters.
 
-    All regressors (not context vars) are drawn jointly from X ~ MVN(0, Sigma),
-    Sigma ~ Inv-Wishart(collinearity_df, I_k), giving a shared latent covariance structure
-    across both continuous and discrete regressors.
+    All regressors (not context vars) are drawn jointly from X ~ MVN(0, R),
+    R ~ LKJ(eta), giving a shared latent correlation structure across both
+    continuous and discrete regressors. eta = 1 is uniform over correlation
+    matrices; eta > 1 concentrates toward the identity (weaker collinearity);
+    eta < 1 spreads mass toward near-singular/extreme collinearity.
 
-    Continuous columns are used directly (standardized to unit variance).
-    Discrete columns are discretized via Dirichlet-sampled quantile cuts:
+    Continuous columns are used directly (already unit variance since R has
+    unit diagonal). Discrete columns are discretized via Dirichlet-sampled
+    quantile cuts:
       p ~ Dirichlet(category_concentration * 1_k), then z is cut at quantiles implied by cumsum(p).
     """
     context = context or {}
@@ -695,11 +697,9 @@ def build_design_matrix(
     ]
     k = len(non_context_indices)
     if k > 0:
-        collinearity_df_val = float(collinearity_df) if collinearity_df is not None else np.random.uniform(k + 1, 4 * k + 1)
-        Sigma = invwishart.rvs(df=collinearity_df_val, scale=np.eye(k))
-        Sigma = np.atleast_2d(Sigma).reshape(k, k)
-        X_mvn = np.random.multivariate_normal(np.zeros(k), Sigma, size=num_obs)
-        X_mvn /= np.sqrt(np.diag(Sigma))[np.newaxis, :]
+        eta_val = float(eta) if eta is not None else np.random.uniform(0.5, 5.0)
+        R = sample_lkj_correlation(k, eta_val)
+        X_mvn = np.random.multivariate_normal(np.zeros(k), R, size=num_obs)
         mvn_col_map = {j: X_mvn[:, i].astype(np.float32) for i, j in enumerate(non_context_indices)}
     else:
         mvn_col_map = {}

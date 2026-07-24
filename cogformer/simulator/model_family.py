@@ -198,7 +198,7 @@ class ModelFamily:
         debug: bool = False,
         fixed_config: bool = False,
         add_interaction: bool = False,
-        collinearity_df: float | None = None,
+        eta: float | None = None,
         category_concentration: float | None = None,
         allowed_slope_patterns: list[frozenset[str]] | None = None,
     ):
@@ -248,7 +248,7 @@ class ModelFamily:
             min_num_categories=min_num_categories,
             max_num_categories=max_num_categories,
             main_discrete_mask=explicit_main_mask,
-            collinearity_df=collinearity_df,
+            eta=eta,
             category_concentration=category_concentration,
             return_category_counts=True,
         )
@@ -369,7 +369,7 @@ class ModelFamily:
         flatten_param_outputs: bool = True,
         fixed_config: bool = False,
         add_interaction: bool = False,
-        collinearity_df: float | None = None,
+        eta: float | None = None,
         category_concentration: float | None = None,
         allowed_slope_patterns: list[frozenset[str]] | None = None,
     ) -> list[dict] | dict:
@@ -413,7 +413,7 @@ class ModelFamily:
                 fixed_config=fixed_config,
                 add_interaction=add_interaction,
                 link_fun=link_fun,
-                collinearity_df=collinearity_df,
+                eta=eta,
                 category_concentration=category_concentration,
                 allowed_slope_patterns=allowed_slope_patterns,
             )

@@ -1,4 +1,47 @@
 import numpy as np
+from numba import njit
+
+
+@njit(cache=True)
+def sample_lkj_correlation(k: int, eta: float) -> np.ndarray:
+    """
+    Sample a k x k correlation matrix from LKJ(eta) via the onion method
+    (Lewandowski, Kurowicka & Joe, 2009), building the Cholesky factor L
+    row by row so that L @ L.T has unit diagonal by construction.
+
+    eta = 1 is uniform over correlation matrices; eta > 1 concentrates mass
+    toward the identity (weaker correlations); eta < 1 spreads mass toward
+    near-singular/extreme correlations.
+
+    Numba-jitted: called once per simulated dataset (per design-matrix build),
+    so per-call Python/numpy dispatch overhead otherwise dominates for the
+    small k typical here.
+    """
+    L = np.zeros((k, k))
+    if k == 1:
+        L[0, 0] = 1.0
+        return L
+
+    beta0 = eta + (k - 2) / 2.0
+    u = np.random.beta(beta0, beta0)
+    r12 = 2 * u - 1
+    L[0, 0] = 1.0
+    L[1, 0] = r12
+    L[1, 1] = np.sqrt(1 - r12 ** 2)
+
+    for m in range(2, k):
+        beta0 -= 0.5
+        y = np.random.beta(m / 2.0, beta0)
+        z = np.random.randn(m)
+        z = z / np.linalg.norm(z)
+        # New row is a direct unit-radius vector, NOT z transformed through
+        # L[:m, :m] -- that transform breaks the unit-diagonal identity since
+        # L[:m,:m].T @ L[:m,:m] != I in general. Row/scalar norms already sum
+        # to 1 (y + (1 - y)), which is all unit-diagonal requires.
+        L[m, :m] = np.sqrt(y) * z
+        L[m, m] = np.sqrt(1 - y)
+
+    return L @ L.T
 
 
 def contaminate(
