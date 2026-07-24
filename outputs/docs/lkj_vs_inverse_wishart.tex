@@ -182,4 +182,74 @@ principled, derived $\tfrac{k-2}{2}$ shift, not an ad hoc one).
     or cleaner-looking reparametrization of the same thing.
 \end{itemize}
 
+\appendix
+\section{Categorical Regressors: Why Discretization Must Route Through the Shared Latent}
+
+The same collinearity concern applies to \texttt{\_discretize\_column}: a
+categorical regressor's dummy columns must remain correlated with the rest of
+the design, exactly like the continuous columns. The current implementation
+cuts the regressor's own column of the shared $R$-correlated latent at
+Dirichlet-sampled quantiles (a Gaussian-copula / NORTA construction). A
+tempting alternative is to generate each category from its own Gaussian
+component --- $c_i \sim \mathrm{Categorical}(p)$, value $\sim \mathcal
+N(\mu_{c_i}, \sigma_{c_i}^2)$ --- independently of the shared latent. This
+appendix proves that alternative discards the correlation structure exactly,
+while the current method provably retains it.
+
+\subsection*{Setup}
+
+Let $(Z_1, Z_2)$ be a standardized bivariate normal pair from the shared
+latent draw, $\operatorname{Corr}(Z_1, Z_2) = \rho$, with $Z_2$ a continuous
+regressor column and $Z_1$ the column to be discretized. Consider the binary
+case: a threshold $t$ splits $Z_1$ into $D = \mathbf 1\{Z_1 > t\}$ with
+$P(D=1) = p$, so $t = \Phi^{-1}(1-p)$ --- the population limit the empirical
+quantile cut converges to as $n\to\infty$ (Glivenko--Cantelli).
+
+\subsection*{Quantile cut on the shared latent: correlation survives}
+
+By the tower property and $\mathbb E[Z_2 \mid Z_1] = \rho Z_1$ (bivariate
+normal),
+\[
+  \operatorname{Cov}(D, Z_2) = \mathbb E[D Z_2]
+  = \mathbb E\big[\mathbf 1\{Z_1 > t\}\,\mathbb E[Z_2 \mid Z_1]\big]
+  = \rho\,\mathbb E[Z_1 \mathbf 1\{Z_1 > t\}] = \rho\,\varphi(t),
+\]
+using the truncated-normal moment identity $\mathbb E[Z\mathbf 1\{Z>t\}] =
+\varphi(t)$ for $Z\sim\mathcal N(0,1)$. Normalizing by
+$\sqrt{\operatorname{Var}(D)} = \sqrt{p(1-p)}$,
+\[
+  \boxed{\; \operatorname{Corr}(D, Z_2) = \frac{\rho\,\varphi(t)}{\sqrt{p(1-p)}} \;}
+\]
+the classical \emph{biserial correlation} formula (Pearson): nonzero for any
+$\rho \neq 0$. At $\rho = 0.6$, $p = 0.7$ this evaluates to $0.4552$, matching
+a direct simulation ($N=\num{200000}$) of $0.4556$.
+
+\subsection*{Independent one-Gaussian-per-category: correlation is exactly zero}
+
+If $c_i \sim \mathrm{Categorical}(p)$ is drawn from its own independent
+randomness, then $c_i \perp (Z_1, Z_2)$ by construction, and for \emph{any}
+measurable function $f$ (in particular the dummy indicator $D = f(c)$),
+\[
+  \mathbb E[D Z_2] = \mathbb E[D]\,\mathbb E[Z_2]
+  \quad\Longrightarrow\quad
+  \operatorname{Cov}(D, Z_2) = 0.
+\]
+This needs no Gaussianity assumption on $Z_2$, no asymptotics, and no
+approximation --- it is the definition of independence. It holds for every
+dummy column of the categorical regressor simultaneously (the whole
+$(K{-}1)$-column indicator vector is a function of $c$ alone) and at every
+finite sample size, not merely in a large-$n$ limit.
+
+\subsection*{Conclusion}
+
+The comparison is an asymmetry, not a symmetric trade-off: the quantile-cut
+method has a \emph{derivable, nonzero} correlation with the rest of the design
+(matching Pearson's century-old biserial-correlation formula and confirmed by
+simulation), while the independent-Gaussian-mixture method has \emph{provably
+zero} correlation by a one-line independence argument. Any variant of ``one
+Gaussian per category'' that is not explicitly re-coupled to the shared
+$R$-correlated latent will silently decorrelate that regressor from the rest
+of the design --- exactly the collinearity structure the LKJ swap in the main
+text was built to make interpretable in the first place.
+
 \end{document}
