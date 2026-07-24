@@ -25,6 +25,7 @@ from cogformer.simulator.benchmarks.ssms.link_funs import ddm_link_fun, rdm_link
 from cogformer.adapter import Adapter
 from cogformer.networks.transformers.cogformer import CogFormer
 from cogformer.diagnostics.plot.adaptive_recovery import adaptive_recovery, global_recovery
+from cogformer.diagnostics.plot.adaptive_ecdf import adaptive_ecdf, global_ecdf
 from cogformer.utils.plot_utils import cogformer_fm_colors
 
 from ..configs import MODELS as _BASE_MODELS
@@ -63,13 +64,16 @@ CHECKPOINT_DIR = "./outputs/checkpoints/model_class/cf/"
 
 class CogFormerTrainer:
     def __init__(self, net, model_class, model_class_config, adapter, use_wandb=False, val_epoch_interval=2000,
-                 early_val_epoch=None, num_sim_workers=3, world_size=1, rank=0):
+                 early_val_epoch=None, num_sim_workers=3, world_size=1, rank=0, fig_dir=None,
+                 val_scenario_tags=None):
         self.net = net
         self.model_class = model_class      # main instance used in val_step
         self.model_class_config = model_class_config  # config dict for per-thread reconstruction
         self.adapter = adapter
         self.use_wandb = use_wandb
         self.val_epoch_interval = val_epoch_interval
+        self.fig_dir = fig_dir
+        self.val_scenario_tags = val_scenario_tags
         # One-off early validation + checkpoint (safety check on long runs), in
         # addition to the regular val_epoch_interval schedule.
         self.early_val_epoch = early_val_epoch
@@ -102,6 +106,8 @@ class CogFormerTrainer:
             global_indices = self.model_class.local_to_global[model_name]
 
             for tag, design_config, scenario_opts in model_cfg["val_scenarios"]:
+                if self.val_scenario_tags is not None and tag not in self.val_scenario_tags:
+                    continue
                 max_cats, min_cats, mix_opts, skip = resolve_val_scenario(
                     scenario_opts, training_max_cats,
                     default_max_cats=default_max_cats, default_min_cats=default_min_cats,
@@ -269,7 +275,10 @@ class CogFormerTrainer:
 
         n_global_params = self.model_class.n_global_params
         colors = cogformer_fm_colors()
-        figures_dir = Path("./outputs/figures/model_class/cf/recovery")
+        if self.fig_dir is not None:
+            figures_dir = Path(self.fig_dir) / "recovery"
+        else:
+            figures_dir = Path("./outputs/figures/model_class/cf/recovery")
         figures_dir.mkdir(parents=True, exist_ok=True)
 
         for val in self._val_data:
@@ -344,6 +353,51 @@ class CogFormerTrainer:
                     wandb.log({f"val/{model_name}/{tag}/recovery_global": wandb.Image(global_fig)}, step=global_step)
                 plt.close(global_fig)
 
+            ecdf_fig = adaptive_ecdf(
+                true=true_set,
+                pred=pred_set,
+                design_config=design_config,
+                intrinsic_params=intrinsic_params,
+                max_num_categories=config["model_family_config"]["max_num_categories"],
+                parameter_mask=params_mask,
+                variable_names=variable_names,
+                intercept_color=colors["intercept"],
+                main_effect_color=colors["main_effect"],
+                interaction_color=colors["interaction"],
+                global_params=GLOBAL_PARAMS,
+                max_num_regressors=config["model_family_config"]["max_num_regressors"],
+                categorical_regressors=val.get("categorical_regressors"),
+            )
+            ecdf_name = f"{model_name.lower()}_{tag}_{fig_path}_ecdf.pdf"
+            ecdf_fig.savefig(figures_dir / ecdf_name, bbox_inches="tight")
+            logging.info(f"[saved] {figures_dir / ecdf_name}")
+
+            if self.use_wandb:
+                wandb.log({f"val/{model_name}/{tag}/ecdf": wandb.Image(ecdf_fig)}, step=global_step)
+
+            plt.close(ecdf_fig)
+
+            global_ecdf_fig = global_ecdf(
+                true=true_set,
+                pred=pred_set,
+                design_config=design_config,
+                intrinsic_params=intrinsic_params,
+                max_num_categories=config["model_family_config"]["max_num_categories"],
+                global_params=GLOBAL_PARAMS,
+                parameter_mask=params_mask,
+                variable_names=variable_names,
+                global_color=colors["intercept"],
+                max_num_regressors=config["model_family_config"]["max_num_regressors"],
+                categorical_regressors=val.get("categorical_regressors"),
+            )
+            if global_ecdf_fig is not None:
+                global_ecdf_name = f"{model_name.lower()}_{tag}_{fig_path}_ecdf_global.pdf"
+                global_ecdf_fig.savefig(figures_dir / global_ecdf_name, bbox_inches="tight")
+                logging.info(f"[saved] {figures_dir / global_ecdf_name}")
+                if self.use_wandb:
+                    wandb.log({f"val/{model_name}/{tag}/ecdf_global": wandb.Image(global_ecdf_fig)}, step=global_step)
+                plt.close(global_ecdf_fig)
+
         self.net.train()
 
 
@@ -395,6 +449,16 @@ def parse_args():
                         help="Override the default checkpoint output directory (CHECKPOINT_DIR). The "
                              "checkpoint filename does NOT encode max_num_categories/max_num_regressors, "
                              "so use this to keep a non-default design space from clobbering existing checkpoints.")
+    parser.add_argument("--fig_dir", type=str, default=None,
+                        help="Override the default figure output directory (hardcoded "
+                             "./outputs/figures/model_class/cf otherwise). Recovery/ecdf PDFs land in "
+                             "<fig_dir>/recovery/. Filenames encode scenario tag and architecture but not "
+                             "batch_size/epochs, so use this to keep a non-default run from clobbering "
+                             "another run's plots.")
+    parser.add_argument("--val_scenario_tags", type=str, default=None,
+                        help="Comma-separated subset of val_scenario tags to validate on, applied to every "
+                             "model family (e.g. 'intercept_only,fixed_regressed,interaction'). Defaults to "
+                             "all scenarios in each family's val_scenarios list.")
 
     return parser.parse_args()
 
@@ -576,6 +640,11 @@ if __name__ == "__main__":
         f"_p{cogformer_config['proj_dim']}"
     )
 
+    val_scenario_tags = (
+        {t.strip() for t in args.val_scenario_tags.split(",")}
+        if args.val_scenario_tags is not None else None
+    )
+
     trainer = CogFormerTrainer(
         net=cogformer,
         model_class=model_class,
@@ -587,6 +656,8 @@ if __name__ == "__main__":
         num_sim_workers=num_sim_workers,
         world_size=world_size,
         rank=rank,
+        fig_dir=args.fig_dir,
+        val_scenario_tags=val_scenario_tags,
     )
 
     is_dry_run = args.dry_run_epochs is not None

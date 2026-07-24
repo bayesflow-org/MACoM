@@ -21,6 +21,7 @@ from cogformer.simulator import ModelFamily
 from cogformer.adapter import Adapter
 from cogformer.networks.transformers.cogformer import CogFormer
 from cogformer.diagnostics.plot.adaptive_recovery import adaptive_recovery, global_recovery
+from cogformer.diagnostics.plot.adaptive_ecdf import adaptive_ecdf, global_ecdf
 from cogformer.utils.plot_utils import cogformer_fm_colors
 
 from ..configs import MODELS as _BASE_MODELS, GLOBAL_PARAMS, GLOBAL_VARIABLE_NAMES
@@ -285,11 +286,14 @@ class CogFormerTrainer:
         params = self.model_cfg["intrinsic_params"]
         param_names = self.model_cfg["variable_names"]
         global_params = self.model_cfg.get("global_params") or None
-        fig_subdir = self.model_cfg["fig_subdir"]
+        fig_dir_override = self.model_cfg.get("fig_dir")
+        if fig_dir_override is not None:
+            rec_dir = Path(fig_dir_override) / "recovery"
+        else:
+            rec_dir = Path(f"./outputs/figures/{self.model_cfg['fig_subdir']}") / "recovery"
 
         colors = cogformer_fm_colors()
         default_max_cats = config["model_family_config"]["max_num_categories"]
-        rec_dir = Path(f"./outputs/figures/{fig_subdir}") / "recovery"
         rec_dir.mkdir(parents=True, exist_ok=True)
 
         self.net.eval()
@@ -359,6 +363,50 @@ class CogFormerTrainer:
                     )
                 plt.close(glob_fig)
 
+            ecdf_fig = adaptive_ecdf(
+                true=true_set,
+                pred=pred_set,
+                design_config=design_config,
+                intrinsic_params=params,
+                max_num_categories=default_max_cats,
+                parameter_mask=params_mask,
+                variable_names=param_names,
+                intercept_color=colors["intercept"],
+                main_effect_color=colors["main_effect"],
+                interaction_color=colors["interaction"],
+                global_params=global_params,
+            )
+            out_ecdf = rec_dir / f"{model_name}_val_ecdf_{tag}.pdf"
+            ecdf_fig.savefig(out_ecdf, bbox_inches="tight")
+
+            if self.use_wandb:
+                wandb.log(
+                    {f"val/ecdf_{tag}": wandb.Image(ecdf_fig)},
+                    step=global_step,
+                )
+            plt.close(ecdf_fig)
+
+            glob_ecdf_fig = global_ecdf(
+                true=true_set,
+                pred=pred_set,
+                design_config=design_config,
+                intrinsic_params=params,
+                max_num_categories=default_max_cats,
+                global_params=global_params,
+                parameter_mask=params_mask,
+                variable_names=param_names,
+                global_color=colors["intercept"],
+            )
+            if glob_ecdf_fig is not None:
+                out_glob_ecdf = rec_dir / f"{model_name}_val_ecdf_global_{tag}.pdf"
+                glob_ecdf_fig.savefig(out_glob_ecdf, bbox_inches="tight")
+                if self.use_wandb:
+                    wandb.log(
+                        {f"val/ecdf_global_{tag}": wandb.Image(glob_ecdf_fig)},
+                        step=global_step,
+                    )
+                plt.close(glob_ecdf_fig)
+
         self.net.train()
 
 
@@ -413,6 +461,16 @@ def parse_args():
                         help="Override the model-default checkpoint output directory. The checkpoint "
                              "filename does NOT encode max_num_categories/max_num_regressors, so use this "
                              "to keep runs with a non-default design space from clobbering existing checkpoints.")
+    parser.add_argument("--fig_dir", type=str, default=None,
+                        help="Override the model-default figure output directory (bypasses the hardcoded "
+                             "./outputs/figures/<fig_subdir> path entirely). Recovery/ecdf PDFs land in "
+                             "<fig_dir>/recovery/. The filenames encode scenario tag but not "
+                             "batch_size/epochs, so use this to keep a non-default run from clobbering "
+                             "another run's plots for the same model.")
+    parser.add_argument("--val_scenario_tags", type=str, default=None,
+                        help="Comma-separated subset of val_scenario tags to validate on (e.g. "
+                             "'intercept_only,fixed_regressed,interaction'). Defaults to all scenarios "
+                             "in the model's val_scenarios list.")
     return parser.parse_args()
 
 
@@ -442,6 +500,15 @@ if __name__ == "__main__":
     if args.checkpoint_dir is not None:
         model_cfg = dict(model_cfg)
         model_cfg["checkpoint_dir"] = args.checkpoint_dir
+    if args.fig_dir is not None:
+        model_cfg = dict(model_cfg)
+        model_cfg["fig_dir"] = args.fig_dir
+    if args.val_scenario_tags is not None:
+        model_cfg = dict(model_cfg)
+        keep_tags = {t.strip() for t in args.val_scenario_tags.split(",")}
+        model_cfg["val_scenarios"] = [
+            s for s in model_cfg["val_scenarios"] if s[0] in keep_tags
+        ]
     use_wandb = args.use_wandb and (rank == 0)
 
     max_num_regressors = args.max_num_regressors
