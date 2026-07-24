@@ -477,37 +477,114 @@ def build_ensemble_row_labels(
     """Row labels for an ensemble grid that overlays several design configs on the
     same (padded) row layout.
 
-    For each row, collects the :func:`build_row_labels` label of every config with an
-    active cell in that row and joins the unique ones with `` / `` — e.g. a row shared
-    by a continuous slope and a first categorical contrast reads ``u_1 / u_1:c_1``.
-    Rows no config touches fall back to ``Row r``. Row kinds (for tinting) come from
-    the first active config; length equals ``max(mask rows)``.
+    Builds ONE unified label per row instead of joining each config's whole label
+    with `` / `` (which compounds badly for interactions, e.g. the old
+    ``u_1 × u_2 / u_1:c_1 × u_2 / u_1 × u_2:c_1``). A regressor's category suffix is
+    parenthesized (``u_1(:c_1)``) only when the configs active at that row disagree
+    about whether it's continuous or categorical *at the first contrast slot* — the
+    only slot where that ambiguity can exist, since any slot beyond the first is
+    unambiguously categorical whenever active (a continuous regressor never populates
+    it). Interaction labels combine each side's (possibly parenthesized) part with
+    `` × ``, e.g. ``u_1(:c_1) × u_2:c_2``. Rows no config touches fall back to
+    ``Row r``. Row kinds (for tinting) come directly from row structure
+    (intercept/main/interaction); length equals ``max(mask rows)``.
+
+    Interaction keys are unioned across all configs (first-seen order) since
+    :func:`expand_design_config_to_mask` does not pad declared interactions the way it
+    pads main-effect blocks; main-effect keys are taken from the first config, which is
+    safe whenever every config shares the same ``max_num_regressors`` (true at every
+    current call site).
     """
+    block_width = max_num_categories - 1
     num_rows = max(m.shape[0] for m in parameter_masks)
-    per_config: list[tuple[list[str], list[str]]] = []
+
+    exp_configs: list[dict] = []
+    cat_sets: list[set[str]] = []
     for k, (dc, mask) in enumerate(zip(design_configs, parameter_masks)):
         dc_exp = expand_design_config_to_mask(dc, mask, max_num_categories, max_num_regressors)
+        exp_configs.append(dc_exp)
+
         cat_regs = categorical_regressors_list[k] if categorical_regressors_list else None
-        per_config.append(build_row_labels(
-            dc_exp, max_num_categories, math=math, return_kinds=True,
-            categorical_regressors=cat_regs, parameter_mask=mask,
-        ))
+        if cat_regs is not None:
+            cat_sets.append(set(cat_regs))
+        elif block_width > 1:
+            cs: set[str] = set()
+            main_keys_k = [key for key in dc_exp if key != "1" and ":" not in key]
+            row0 = 1 if "1" in dc_exp else 0
+            for m_i, key in enumerate(main_keys_k):
+                block = mask[row0 + m_i * block_width: row0 + (m_i + 1) * block_width]
+                if block.shape[0] > 1 and np.any(block[1:] == 1.0):
+                    cs.add(key)
+            cat_sets.append(cs)
+        else:
+            cat_sets.append(set())
+
+    main_keys = [k for k in exp_configs[0] if k != "1" and ":" not in k]
+    inter_keys: list[str] = []
+    seen_inter: set[str] = set()
+    for dc_exp in exp_configs:
+        for k in dc_exp:
+            if ":" in k and k not in seen_inter:
+                seen_inter.add(k)
+                inter_keys.append(k)
+
+    def wrap(body: str) -> str:
+        return f"${body}$" if math else body
+
+    def active_at(r: int) -> list[int]:
+        return [
+            k for k, mask in enumerate(parameter_masks)
+            if r < mask.shape[0] and np.any(mask[r] == 1.0)
+        ]
+
+    def part(key: str, slot: int, active_configs: list[int]) -> str:
+        if slot > 1:
+            return f"{key}:c_{slot}"
+        is_cat = {key in cat_sets[k] for k in active_configs}
+        if is_cat == {True}:
+            return f"{key}:c_1"
+        if is_cat == {False}:
+            return key
+        return f"{key}(:c_1)"
 
     labels: list[str] = []
     kinds: list[str] = []
-    for r in range(num_rows):
-        seen: list[str] = []
-        kind = "main"
-        for k, mask in enumerate(parameter_masks):
-            labels_k, kinds_k = per_config[k]
-            if r >= mask.shape[0] or r >= len(labels_k) or not np.any(mask[r] == 1.0):
-                continue
-            if not seen:
-                kind = kinds_k[r]
-            if labels_k[r] not in seen:
-                seen.append(labels_k[r])
-        labels.append(" / ".join(seen) if seen else f"Row {r}")
-        kinds.append(kind)
+    row = 0
+
+    if "1" in exp_configs[0]:
+        labels.append(wrap("1"))
+        kinds.append("intercept")
+        row += 1
+
+    for key in main_keys:
+        for slot in range(1, block_width + 1):
+            active = active_at(row)
+            labels.append(wrap(part(key, slot, active)) if active else f"Row {row}")
+            kinds.append("main")
+            row += 1
+
+    times = r" \times " if math else " × "
+    for key in inter_keys:
+        a, b = key.split(":")
+        for i in range(1, block_width + 1):
+            for j in range(1, block_width + 1):
+                active = active_at(row)
+                if active:
+                    labels.append(wrap(part(a, i, active) + times + part(b, j, active)))
+                else:
+                    labels.append(f"Row {row}")
+                kinds.append("interaction")
+                row += 1
+
+    # Defensive: keep the contract that length always equals max(mask rows), even if
+    # heterogeneous configs (different max_num_regressors/interaction sets) make the
+    # structural layout above land short or long.
+    if len(labels) < num_rows:
+        labels.extend(f"Row {r}" for r in range(len(labels), num_rows))
+        kinds.extend("main" for _ in range(len(kinds), num_rows))
+    elif len(labels) > num_rows:
+        labels = labels[:num_rows]
+        kinds = kinds[:num_rows]
 
     return (labels, kinds) if return_kinds else labels
 

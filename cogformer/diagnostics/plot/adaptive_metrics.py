@@ -34,10 +34,10 @@ def adaptive_metrics(
     main_effect_color: str = "#6969ff",
     interaction_color: str = "#ff6969",
     figsize: tuple | None = None,
-    title_fontsize: int = 18,
-    label_fontsize: int = 15,
-    tick_fontsize: int = 13,
-    annot_fontsize: int = 11,
+    title_fontsize: int = 16,
+    label_fontsize: int = 12,
+    tick_fontsize: int = 10,
+    annot_fontsize: int = 10,
     fmt: str = ".3f",
     global_params: list[str] = None,
     global_only: bool = False,
@@ -210,7 +210,7 @@ def adaptive_metrics(
         metric_specs.append(("Log Gamma", "flare", None, None))
 
     n_metrics = len(metric_specs)
-    cell_size = 1.0  # inches per cell
+    cell_size = 1.5  # inches per cell
     if figsize is None:
         figsize = (
             n_metrics * num_cols * cell_size + 2.0,
@@ -264,7 +264,6 @@ def adaptive_metrics(
                         c, r, "N/A",
                         ha="center", va="center",
                         fontsize=annot_fontsize + 1,
-                        fontweight="bold",
                         color=tint, alpha=0.7, zorder=3,
                     )
 
