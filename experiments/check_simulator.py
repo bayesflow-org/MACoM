@@ -41,7 +41,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from cogformer.simulator.benchmarks.ssms.priors import ddm_priors, rdm_priors, cdm_priors
 from cogformer.simulator.benchmarks.ssms.link_funs import ddm_link_fun, rdm_link_fun, cdm_link_fun
 from cogformer.simulator.benchmarks.ssms.ddm import _simulate_ddm_serial, _simulate_ddm_parallel
-from cogformer.simulator.benchmarks.ssms.rdm import _simulate_rdm_serial_m2, _simulate_rdm_parallel
+from cogformer.simulator.benchmarks.ssms.rdm import _rdm_serial_kernel, _simulate_rdm_parallel
 from cogformer.simulator.benchmarks.ssms.cdm import _simulate_cdm_serial, _simulate_cdm_parallel
 
 # Defaults mirror the production model classes (DDM/RDM/CDM __init__).
@@ -91,7 +91,7 @@ def _simulate_rdm(n, rng):
     a, tau = p["a"].astype(np.float64), p["tau"].astype(np.float64)
     s_v, s_tau = p["s_v"].astype(np.float64), p["s_tau"].astype(np.float64)
     ref = _simulate_rdm_parallel(v, a, tau, s_v, s_tau, 0.0, 1.0, DT, MAX_STEPS)
-    new = _simulate_rdm_serial_m2(v, a, tau, s_v, s_tau, 1.0, DT, MAX_STEPS)
+    new = _rdm_serial_kernel(v.shape[1])(v, a, tau, s_v, s_tau, 1.0, DT, MAX_STEPS)
     return ref, new
 
 
