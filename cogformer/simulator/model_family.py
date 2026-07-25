@@ -19,6 +19,7 @@ from .design_utils import (
     design_config_signature,
     build_position_codes,
 )
+from .coefficient_priors import sample_parameter_matrix_budget, estimate_prior_scales
 
 from ..utils.simulator_utils import softplus, inspect
 
@@ -58,6 +59,22 @@ class ModelFamily:
         self._num_workers: int = num_workers if num_workers is not None else default_workers
         self._executor: ThreadPoolExecutor | None = None
         self._holdout_signatures: set = set()
+        self._prior_scale_cache: dict[int, dict[str, float]] = {}
+
+    def _prior_scales(self, prior: dict) -> dict[str, float]:
+        """Reference SDs for the variance budget, cached per prior object.
+
+        Must be called with the RAW prior (the ``{name: spec}`` dict held by the family),
+        never the per-sample dict from ``build_intrinsic_priors``. That one is rebuilt on
+        every ``sample()`` call, so its ``id`` never repeats and the cache never hits;
+        worse, it wraps scipy specs in lambdas, which hides ``.std()`` and forces
+        ``estimate_prior_scales`` into thousands of ``rvs()`` draws per dataset. That
+        combination cost ~110x simulation throughput before it was caught.
+        """
+        key = id(prior)
+        if key not in self._prior_scale_cache:
+            self._prior_scale_cache[key] = estimate_prior_scales(prior)
+        return self._prior_scale_cache[key]
 
     @property
     def _pool(self) -> ThreadPoolExecutor:
@@ -201,7 +218,19 @@ class ModelFamily:
         eta: float | None = None,
         category_concentration: float | None = None,
         allowed_slope_patterns: list[frozenset[str]] | None = None,
+        design_generator: str = "mixture",
+        coefficient_prior: str = "budget",
+        design_generator_kwargs: dict | None = None,
+        coefficient_prior_kwargs: dict | None = None,
     ):
+        """
+        design_generator : ``"mixture"`` (default, latent-class / nominal categories) or
+            ``"quantile"`` (the pre-2026-07 shared-latent construction). See
+            :func:`design_utils.build_design_matrix`.
+        coefficient_prior : ``"budget"`` (default, R^2 variance budget with cell-means
+            contrasts) or ``"iid"`` (the original per-row ``N(0, 1)``). See
+            :mod:`coefficient_priors`.
+        """
         if prior is None:
             prior = self.prior
         kwargs = mask_randomizer_kwargs if mask_randomizer_kwargs is not None else (self.mask_randomizer_kwargs or {})
@@ -240,7 +269,7 @@ class ModelFamily:
         if context is None and hasattr(self.model, 'build_default_context'):
             context = self.model.build_default_context(num_obs=num_obs)
 
-        design_matrix, actual_col_counts = build_design_matrix(
+        design_matrix, actual_col_counts, design_diagnostics = build_design_matrix(
             design_config=design_config,
             num_obs=num_obs,
             context=context,
@@ -251,6 +280,9 @@ class ModelFamily:
             eta=eta,
             category_concentration=category_concentration,
             return_category_counts=True,
+            return_diagnostics=True,
+            generator=design_generator,
+            **(design_generator_kwargs or {}),
         )
 
         # Rebuild the mask with actual category counts so that rows corresponding to
@@ -275,12 +307,31 @@ class ModelFamily:
         realized_cols = (np.abs(design_matrix) > 0).any(axis=0)
         parameter_mask[~realized_cols] = 0.0
 
-        parameter_matrix = sample_parameter_matrix(
-            parameter_mask=parameter_mask,
-            prior=intrinsic_prior,
-            intrinsic_params=self.intrinsic_params,
-            keep_intercept=keep_intercept,
-        )
+        if coefficient_prior == "budget":
+            parameter_matrix = sample_parameter_matrix_budget(
+                parameter_mask=parameter_mask,
+                design_matrix=design_matrix,
+                design_config=design_config,
+                intrinsic_params=self.intrinsic_params,
+                prior=intrinsic_prior,
+                max_num_categories=max_num_categories,
+                prior_scales=self._prior_scales(prior),
+                category_counts=actual_col_counts,
+                categorical_keys=design_diagnostics.get("categorical_keys"),
+                keep_intercept=keep_intercept,
+                **(coefficient_prior_kwargs or {}),
+            )
+        elif coefficient_prior == "iid":
+            parameter_matrix = sample_parameter_matrix(
+                parameter_mask=parameter_mask,
+                prior=intrinsic_prior,
+                intrinsic_params=self.intrinsic_params,
+                keep_intercept=keep_intercept,
+            )
+        else:
+            raise ValueError(
+                f"coefficient_prior must be 'budget' or 'iid'; got {coefficient_prior!r}"
+            )
 
         link_funs = build_link_functions(
             intrinsic_params=self.intrinsic_params,
@@ -372,6 +423,10 @@ class ModelFamily:
         eta: float | None = None,
         category_concentration: float | None = None,
         allowed_slope_patterns: list[frozenset[str]] | None = None,
+        design_generator: str = "mixture",
+        coefficient_prior: str = "budget",
+        design_generator_kwargs: dict | None = None,
+        coefficient_prior_kwargs: dict | None = None,
     ) -> list[dict] | dict:
         if prior is None:
             prior = self.prior
@@ -416,6 +471,10 @@ class ModelFamily:
                 eta=eta,
                 category_concentration=category_concentration,
                 allowed_slope_patterns=allowed_slope_patterns,
+                design_generator=design_generator,
+                coefficient_prior=coefficient_prior,
+                design_generator_kwargs=design_generator_kwargs,
+                coefficient_prior_kwargs=coefficient_prior_kwargs,
             )
             sim_instance["num_obs"] = num_obs
             sim_instance["num_regressors"] = num_regressors_array[i]

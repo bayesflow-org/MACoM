@@ -110,6 +110,10 @@ class ModelClass:
         flatten_param_outputs: bool = True,
         fixed_config: bool = False,
         add_interaction: bool = False,
+        design_generator: str = "mixture",
+        coefficient_prior: str = "budget",
+        design_generator_kwargs: dict | None = None,
+        coefficient_prior_kwargs: dict | None = None,
     ) -> dict:
         if num_obs is None:
             num_obs = np.random.randint(min_num_obs, max_num_obs + 1)
@@ -150,6 +154,10 @@ class ModelClass:
                 fixed_config=fixed_config,
                 add_interaction=add_interaction,
                 link_fun=self.link_funs[model_name],
+                design_generator=design_generator,
+                coefficient_prior=coefficient_prior,
+                design_generator_kwargs=design_generator_kwargs,
+                coefficient_prior_kwargs=coefficient_prior_kwargs,
             )
             sim_instance["model_id"] = self.model_index[model_name]
             sim_instance["num_obs"] = num_obs

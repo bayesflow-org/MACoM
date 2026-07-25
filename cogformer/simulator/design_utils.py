@@ -625,6 +625,69 @@ def build_random_parameter_mask(
     return parameter_mask, design_config
 
 
+def draw_correlated_normals(R: np.ndarray, num_obs: int) -> np.ndarray:
+    """Draw ``num_obs`` rows from ``MVN(0, R)`` via a Cholesky factor.
+
+    ``np.random.multivariate_normal`` runs an SVD plus ``isclose`` symmetry checks on
+    every call (~26 us at k=3, n=128) against ~8 us here, and it is called once per
+    simulated dataset. ``R`` comes from :func:`sample_lkj_correlation`, which builds it
+    as ``L @ L.T`` and so is PSD by construction; the jitter fallback only guards the
+    near-singular tail at small ``eta``.
+
+    Draws are distributionally identical but not bit-identical to the SVD route, so a
+    fixed seed no longer reproduces pre-optimization design matrices.
+    """
+    k = R.shape[0]
+    try:
+        L = np.linalg.cholesky(R)
+    except np.linalg.LinAlgError:
+        L = np.linalg.cholesky(R + 1e-10 * np.eye(k))
+    return np.random.randn(num_obs, k) @ L.T
+
+
+def _standard_normal_slope() -> float:
+    return np.random.normal(0.0, 1.0)
+
+
+def _zero_slope() -> float:
+    return 0.0
+
+
+def _fast_scalar_sampler(spec) -> Callable:
+    """Wrap a prior spec in the cheapest correct scalar sampler.
+
+    ``scipy``'s frozen ``.rvs()`` costs ~24 us per scalar draw -- it broadcasts, validates
+    and reduces arguments on every call -- against ~1 us for the equivalent numpy call.
+    At one draw per free parameter per simulated dataset that dominated the non-numba
+    portion of the sampling loop, so normal priors (which is all of the SSM priors) are
+    rerouted to ``np.random.normal`` with the loc/scale read out once.
+    """
+    dist = getattr(spec, "dist", None)
+    if dist is not None and getattr(dist, "name", None) == "norm":
+        args, kwds = getattr(spec, "args", ()), getattr(spec, "kwds", {})
+        loc = float(kwds.get("loc", args[0] if len(args) > 0 else 0.0))
+        scale = float(kwds.get("scale", args[1] if len(args) > 1 else 1.0))
+        return lambda: float(np.random.normal(loc, scale))
+    if hasattr(spec, "rvs"):
+        return lambda rv=spec: float(rv.rvs())
+    return spec
+
+
+# Per-prior sampler cache. Keyed by id() but the prior object is stored alongside, both
+# to pin the id (so it cannot be reused after a GC) and to verify identity on lookup.
+_INTRINSIC_SAMPLER_CACHE: dict[int, tuple[dict, dict[str, Callable]]] = {}
+
+
+def _cached_intrinsic_samplers(prior: dict) -> dict[str, Callable]:
+    key = id(prior)
+    hit = _INTRINSIC_SAMPLER_CACHE.get(key)
+    if hit is not None and hit[0] is prior:
+        return hit[1]
+    samplers = {k: _fast_scalar_sampler(v) for k, v in prior.items()}
+    _INTRINSIC_SAMPLER_CACHE[key] = (prior, samplers)
+    return samplers
+
+
 def build_intrinsic_priors(
     prior: Callable | dict,
     design_config: dict[str, list[str]],
@@ -634,28 +697,18 @@ def build_intrinsic_priors(
         fixed_values = {}
 
     free_intrinsics = design_config.get("1", [])
-    fixed_intrinsics = list(set(prior.keys()) - set(free_intrinsics))
+    free_set = set(free_intrinsics)
+    samplers = _cached_intrinsic_samplers(prior)
 
     priors = {}
-    for k, spec in prior.items():
-        if k in free_intrinsics:
-            if hasattr(spec, "rvs"):
-                scale = spec.std()
-                sampler = lambda rv=spec: rv.rvs()
-                priors[k] = {
-                    "intercept": sampler,
-                    "slope": lambda std=scale: np.random.normal(0.0, 1.0),
-                }
-            else:
-                priors[k] = {
-                    "intercept": spec,
-                    "slope": lambda: np.random.normal(0.0, 1.0),
-                }
-        elif k in fixed_intrinsics:
+    for k in prior:
+        if k in free_set:
+            priors[k] = {"intercept": samplers[k], "slope": _standard_normal_slope}
+        else:
             fixed_value = fixed_values.get(k, 0.0)
             priors[k] = {
                 "intercept": lambda v=fixed_value: v,
-                "slope": lambda: 0.0,
+                "slope": _zero_slope,
             }
 
     return priors
@@ -700,11 +753,20 @@ def build_discrete_mask(
 
 def build_random_discrete_mask(
     num_regressors: int,
-    discrete_prob: float = 0.5,
+    discrete_prob: float | None = 0.5,
 ) -> np.ndarray:
-    """Bernoulli mask over regressors: 1 -> discrete {0,1}, 0 -> continuous U[0,1]."""
+    """Bernoulli mask over regressors: 1 -> categorical, 0 -> continuous.
+
+    ``discrete_prob=None`` draws the rate per dataset from ``Beta(2, 2)`` instead of
+    fixing it, mirroring the hierarchical treatment ``free_prob`` and ``intercept_prob``
+    already get in :func:`build_random_design_config`. That puts real mass on the
+    all-categorical and all-continuous corners -- the two regimes actual experiments
+    live in -- which an iid Bernoulli(0.5) reaches only with probability 0.5**R.
+    """
     if num_regressors == 0:
         return np.array([])
+    if discrete_prob is None:
+        discrete_prob = float(np.random.beta(2, 2))
     return np.array(1 * (np.random.rand(num_regressors) < discrete_prob))
 
 
@@ -733,9 +795,72 @@ def build_design_matrix(
     eta: float | None = None,
     category_concentration: float | None = None,
     return_category_counts: bool = False,
-) -> np.ndarray | tuple[np.ndarray, dict[str, int]]:
+    return_diagnostics: bool = False,
+    generator: str = "mixture",
+    **generator_kwargs,
+) -> np.ndarray | tuple:
     """
-    Build design matrix based on the respective configuration of free intrinsic parameters.
+    Build a design matrix from a configuration of free intrinsic parameters.
+
+    generator : which construction to use.
+
+      ``"mixture"`` (default) -- latent-class: category assignment is drawn first from a
+        joint contingency table over all categorical regressors, then each continuous
+        regressor is drawn from one Gaussian per category.  Categories are nominal, the
+        categorical/continuous association is a directly dialable correlation ratio, and
+        balanced factorial designs are a first-class case.  See
+        :func:`_build_design_matrix_mixture` for the extra keyword arguments.
+
+      ``"quantile"`` -- the pre-2026-07 construction, kept selectable so the old
+        training distribution stays reproducible.  Cuts a single shared LKJ latent at
+        Dirichlet-sampled quantiles, which makes categories ordinal by construction
+        (group means of any correlated continuous regressor are monotone in category
+        index ~92% of the time) and caps the reachable association strength.
+
+    return_diagnostics : also return the sampled/realized design hyperparameters.  Both
+        generators report at least ``categorical_keys`` / ``continuous_keys``, which
+        downstream coefficient priors need in order to identify categorical blocks.
+    """
+    if generator == "mixture":
+        design_matrix, counts, diagnostics = _build_design_matrix_mixture(
+            design_config=design_config, num_obs=num_obs, context=context,
+            discrete_prob=discrete_prob, min_num_categories=min_num_categories,
+            max_num_categories=max_num_categories, main_discrete_mask=main_discrete_mask,
+            eta=eta, category_concentration=category_concentration, **generator_kwargs,
+        )
+    elif generator == "quantile":
+        design_matrix, counts, diagnostics = _build_design_matrix_quantile(
+            design_config=design_config, num_obs=num_obs, context=context,
+            discrete_prob=discrete_prob, min_num_categories=min_num_categories,
+            max_num_categories=max_num_categories, main_discrete_mask=main_discrete_mask,
+            eta=eta, category_concentration=category_concentration, **generator_kwargs,
+        )
+    else:
+        raise ValueError(f"generator must be 'mixture' or 'quantile'; got {generator!r}")
+
+    if not (return_category_counts or return_diagnostics):
+        return design_matrix
+    out: tuple = (design_matrix,)
+    if return_category_counts:
+        out = out + (counts,)
+    if return_diagnostics:
+        out = out + (diagnostics,)
+    return out
+
+
+def _build_design_matrix_quantile(
+    design_config: dict[str, list[str]],
+    num_obs: int,
+    context: dict[str, np.ndarray] | None = None,
+    discrete_prob: float = 0.5,
+    min_num_categories: int = 2,
+    max_num_categories: int = 4,
+    main_discrete_mask: np.ndarray = None,
+    eta: float | None = None,
+    category_concentration: float | None = None,
+) -> tuple[np.ndarray, dict[str, int], dict]:
+    """
+    Legacy generator. Reachable via ``build_design_matrix(generator="quantile")``.
 
     All regressors (not context vars) are drawn jointly from X ~ MVN(0, R),
     R ~ LKJ(eta), giving a shared latent correlation structure across both
@@ -747,6 +872,9 @@ def build_design_matrix(
     unit diagonal). Discrete columns are discretized via Dirichlet-sampled
     quantile cuts:
       p ~ Dirichlet(category_concentration * 1_k), then z is cut at quantiles implied by cumsum(p).
+
+    Because every category is a contiguous interval of the same latent axis, categories
+    carry an implicit ordering: see the module docstring notes on ``"mixture"``.
     """
     context = context or {}
     regressor_keys = list(design_config.keys())
@@ -773,10 +901,11 @@ def build_design_matrix(
         j for j, key in enumerate(main_effect_keys) if key not in context
     ]
     k = len(non_context_indices)
+    eta_val = float(eta) if eta is not None else None
     if k > 0:
-        eta_val = float(eta) if eta is not None else np.random.uniform(0.5, 5.0)
+        eta_val = eta_val if eta_val is not None else float(np.random.uniform(0.5, 5.0))
         R = sample_lkj_correlation(k, eta_val)
-        X_mvn = np.random.multivariate_normal(np.zeros(k), R, size=num_obs)
+        X_mvn = draw_correlated_normals(R, num_obs)
         mvn_col_map = {j: X_mvn[:, i].astype(np.float32) for i, j in enumerate(non_context_indices)}
     else:
         mvn_col_map = {}
@@ -844,9 +973,19 @@ def build_design_matrix(
         interaction = (a_cols[:, :, None] * b_cols[:, None, :]).reshape(num_obs, inter_block_width)
         design_matrix[:, start:start + inter_block_width] = interaction
 
-    if return_category_counts:
-        return design_matrix, actual_col_counts
-    return design_matrix
+    diagnostics = {
+        "generator": "quantile",
+        "categorical_keys": [
+            key for j, key in enumerate(main_effect_keys)
+            if key not in context and main_discrete_mask[j] == 1
+        ],
+        "continuous_keys": [
+            key for j, key in enumerate(main_effect_keys)
+            if key not in context and main_discrete_mask[j] != 1
+        ],
+        "eta": eta_val,
+    }
+    return design_matrix, actual_col_counts, diagnostics
 
 
 def build_link_functions(
@@ -982,3 +1121,388 @@ def _discretize_column(
     bin_ids = np.digitize(z, boundaries)
     one_hot = (bin_ids[:, None] == np.arange(k)[None, :]).astype(np.float32)
     return one_hot[:, 1:]
+
+
+# ---------------------------------------------------------------------------
+# Latent-class ("one Gaussian per category") generator -- the default.
+#
+# Category assignment is drawn first, from a joint contingency table over all
+# categorical regressors; each continuous regressor is then drawn from one Gaussian
+# per category. This replaces cutting a single shared latent at quantiles, which made
+# categories ordinal by construction, capped the reachable association strength, and
+# put almost no mass on balanced factorial designs.
+# ---------------------------------------------------------------------------
+
+def sample_category_marginal(
+    num_categories: int,
+    num_obs: int,
+    balanced: bool = False,
+    concentration: float | None = None,
+    min_cell_count: int = 2,
+    min_cell_frac: float = 0.0,
+) -> np.ndarray:
+    """Category probabilities for one categorical regressor, with a cell-size floor.
+
+    ``balanced=True`` returns exact balance (the factorial-experiment case, which the
+    incumbent quantile-cut sampler reaches ~7% of the time).  Otherwise the
+    concentration defaults to ``LogUniform(0.5, 50)``: the upper end gives
+    near-uniform proportions, the lower end genuine imbalance, without the mass on
+    degenerate spikes that ``U(0.1, 2.0)`` carries.
+
+    The floor is applied as a convex shift ``floor + (1 - K*floor) * p`` rather than
+    clip-then-renormalize, which can push entries back below the floor.
+    """
+    if balanced:
+        p = np.full(num_categories, 1.0 / num_categories)
+    else:
+        if concentration is None:
+            concentration = float(np.exp(np.random.uniform(np.log(0.5), np.log(50.0))))
+        p = np.random.dirichlet(concentration * np.ones(num_categories))
+
+    floor = max(min_cell_count / max(num_obs, 1), min_cell_frac)
+    if num_categories * floor >= 1.0:
+        # Design too small to honour the requested floor; keep it feasible.
+        floor = 0.5 / num_categories
+    return floor + (1.0 - num_categories * floor) * p
+
+
+def ipf(table: np.ndarray, marginals: list[np.ndarray], num_iter: int = 200, tol: float = 1e-10) -> np.ndarray:
+    """Iterative proportional fitting: rescale ``table`` to the given marginals.
+
+    Alternates a multiplicative rescale along each axis until every axis sum matches
+    its target.  Converges in a handful of sweeps for the small tables here (at most
+    ``max_num_regressors`` axes of ``max_num_categories`` levels).
+    """
+    p = np.asarray(table, dtype=np.float64)
+    p = p / p.sum()
+    ndim = p.ndim
+    for _ in range(num_iter):
+        err = 0.0
+        for axis, target in enumerate(marginals):
+            axes = tuple(i for i in range(ndim) if i != axis)
+            current = p.sum(axis=axes)
+            err = max(err, float(np.abs(current - target).max()))
+            scale = np.divide(target, current, out=np.ones_like(current), where=current > 0)
+            shape = [1] * ndim
+            shape[axis] = -1
+            p = p * scale.reshape(shape)
+        if err < tol:
+            break
+    return p / p.sum()
+
+
+def build_joint_category_table(
+    marginals: list[np.ndarray],
+    assoc_lambda: float,
+    coupling_concentration: float = 1.0,
+) -> np.ndarray:
+    """Joint distribution over the categories of every categorical regressor, holding
+    each regressor's marginal EXACTLY at the value already drawn for its main effect.
+
+    ``P = (1 - lam) * (p_1 x ... x p_R) + lam * IPF(Q; p_1, ..., p_R)``
+
+    Reusing the main-effect marginals matters: drawing a free Dirichlet over the joint
+    cells would leave the marginals as whatever the axis sums happen to be, so a
+    regressor's category balance would depend on whether an interaction was sampled.
+    Both terms above share the marginals and the set of tables with fixed marginals is
+    convex, so the mixture has them for any ``lam``.  ``lam = 0`` is the orthogonal
+    factorial case; ``lam = 1`` is a maximally re-coupled table.  The raw coupling ``Q``
+    is exchangeable, so the induced association is non-monotone in category index --
+    unlike a comonotone (northwest-corner) coupling, which would reintroduce exactly
+    the ordinality this module exists to remove.
+    """
+    independent = marginals[0]
+    for m in marginals[1:]:
+        independent = np.multiply.outer(independent, m)
+
+    if len(marginals) < 2 or assoc_lambda <= 0.0:
+        return independent
+
+    shape = tuple(len(m) for m in marginals)
+    raw = np.random.dirichlet(
+        coupling_concentration * np.ones(int(np.prod(shape)))
+    ).reshape(shape)
+    coupled = ipf(raw, marginals)
+    return (1.0 - assoc_lambda) * independent + assoc_lambda * coupled
+
+
+def _compact_labels(assign: np.ndarray, shape: tuple[int, ...]) -> tuple[np.ndarray, list[int]]:
+    """Drop unpopulated categories and relabel survivors ``0..K'-1`` in random order.
+
+    Compaction keeps each dummy block contiguous (no all-zero column wedged between
+    populated ones, which would otherwise rely on the downstream ``realized_cols``
+    prune).  The random relabel makes the dropped reference category an arbitrary one,
+    which is what "nominal" requires.
+    """
+    out = np.empty_like(assign)
+    realized: list[int] = []
+    for r in range(assign.shape[1]):
+        counts = np.bincount(assign[:, r], minlength=shape[r])
+        present = np.flatnonzero(counts > 0)
+        lookup = np.full(shape[r], -1, dtype=np.int64)
+        lookup[present] = np.random.permutation(present.shape[0])
+        out[:, r] = lookup[assign[:, r]]
+        realized.append(int(present.shape[0]))
+    return out, realized
+
+
+def assign_categories(
+    table: np.ndarray,
+    num_obs: int,
+    min_cell_count: int = 2,
+    max_tries: int = 8,
+) -> tuple[np.ndarray, list[int]]:
+    """Draw per-trial category assignments from the joint table.
+
+    Unlike the incumbent empirical-quantile cut -- which pins realized proportions to
+    ``p`` exactly, with no sampling noise -- this draws assignments, so cell counts
+    carry proper multinomial variability.  Retries a bounded number of times if any
+    category lands below ``min_cell_count``; the marginal floor makes that rare.
+
+    Returns ``(assignments (num_obs, n_categorical), realized_num_categories)``.
+    """
+    shape = table.shape
+    flat = np.asarray(table, dtype=np.float64).ravel()
+    flat = flat / flat.sum()
+
+    assign = None
+    for _ in range(max_tries):
+        cells = np.random.choice(flat.shape[0], size=num_obs, p=flat)
+        assign = np.stack(np.unravel_index(cells, shape), axis=-1)
+        if all(
+            np.bincount(assign[:, r], minlength=shape[r]).min() >= min_cell_count
+            for r in range(len(shape))
+        ):
+            break
+    return _compact_labels(assign, shape)
+
+
+def sample_continuous_columns(
+    assign: np.ndarray,
+    num_continuous: int,
+    eta: float,
+    eta_squared: float,
+) -> np.ndarray:
+    """One Gaussian per category over the continuous regressors.
+
+    ``x_j = sqrt(eta2) * s_j + sqrt(1 - eta2) * eps_j`` with ``s_j`` the standardized
+    sum of per-category offsets and ``eps ~ MVN(0, LKJ(eta))``.  ``eta_squared`` is the
+    *joint* correlation ratio of all categorical regressors on each continuous column.
+    Per-column standardization is affine, so it preserves the LKJ correlation among the
+    ``eps`` columns while leaving every output column at unit variance.
+    """
+    num_obs = assign.shape[0]
+    n_cat = assign.shape[1]
+
+    R = sample_lkj_correlation(num_continuous, float(eta))
+    eps = draw_correlated_normals(R, num_obs)
+    eps_sd = eps.std(axis=0)
+    eps = (eps - eps.mean(axis=0)) / np.where(eps_sd == 0.0, 1.0, eps_sd)
+
+    if n_cat == 0 or eta_squared <= 0.0:
+        return eps.astype(np.float32)
+
+    signal = np.zeros((num_obs, num_continuous))
+    for r in range(n_cat):
+        k = int(assign[:, r].max()) + 1
+        signal += np.random.randn(k, num_continuous)[assign[:, r]]
+
+    sig_sd = signal.std(axis=0)
+    signal = (signal - signal.mean(axis=0)) / np.where(sig_sd == 0.0, 1.0, sig_sd)
+
+    x = np.sqrt(eta_squared) * signal + np.sqrt(1.0 - eta_squared) * eps
+    return x.astype(np.float32)
+
+
+def _build_design_matrix_mixture(
+    design_config: dict[str, list[str]],
+    num_obs: int,
+    context: dict[str, np.ndarray] | None = None,
+    discrete_prob: float = 0.5,
+    min_num_categories: int = 2,
+    max_num_categories: int = 4,
+    main_discrete_mask: np.ndarray | None = None,
+    eta: float | None = None,
+    category_concentration: float | None = None,
+    balance_prob: float = 0.3,
+    factorial_prob: float = 0.5,
+    assoc_lambda: float | None = None,
+    eta_squared: float | None = None,
+    coupling_concentration: float | None = None,
+    min_cell_count: int = 2,
+    min_cell_frac: float = 0.0,
+) -> tuple[np.ndarray, dict[str, int], dict]:
+    """Build a design matrix with categories drawn first and continuous regressors
+    drawn conditionally, one Gaussian per category.
+
+    Signature mirrors :func:`design_utils.build_design_matrix` for the shared arguments;
+    the extras control the new sampling regime:
+
+    balance_prob      : probability a categorical regressor gets exactly balanced
+                        categories (the factorial-experiment case).
+    factorial_prob    : probability the categorical regressors are drawn mutually
+                        orthogonal (``assoc_lambda = 0``).
+    assoc_lambda      : categorical/categorical association strength in [0, 1].
+                        None -> 0 with probability ``factorial_prob``, else U(0, 1).
+    eta_squared       : joint correlation ratio of the categorical regressors on each
+                        continuous column. None -> Beta(1.2, 3.0) capped at 0.85.
+    coupling_concentration : Dirichlet concentration for the raw joint coupling.
+                        None -> LogUniform(0.3, 10).
+    min_cell_count    : floor on observations per category, enforced through the
+                        marginal floor plus bounded resampling of the assignments.
+    """
+    context = context or {}
+    regressor_keys = [k for k in design_config if k != "1"]
+    has_intercept = "1" in design_config
+
+    main_effect_keys = [k for k in regressor_keys if ":" not in k]
+    interaction_keys = [k for k in regressor_keys if ":" in k]
+
+    block_width = max_num_categories - 1
+    inter_block_width = block_width ** 2
+    num_cols = (
+        len(main_effect_keys) * block_width
+        + len(interaction_keys) * inter_block_width
+        + (1 if has_intercept else 0)
+    )
+    design_matrix = np.zeros((num_obs, num_cols))
+
+    if main_discrete_mask is None:
+        main_discrete_mask = build_random_discrete_mask(
+            num_regressors=len(main_effect_keys), discrete_prob=discrete_prob,
+        )
+
+    # Partition the non-context main effects into categorical and continuous.
+    cat_indices = [
+        j for j, key in enumerate(main_effect_keys)
+        if key not in context and main_discrete_mask[j] == 1
+    ]
+    cont_indices = [
+        j for j, key in enumerate(main_effect_keys)
+        if key not in context and main_discrete_mask[j] != 1
+    ]
+
+    if eta is None:
+        eta = float(np.random.uniform(0.5, 5.0))
+    if eta_squared is None:
+        eta_squared = float(min(np.random.beta(1.2, 3.0), 0.85))
+    if assoc_lambda is None:
+        assoc_lambda = 0.0 if np.random.rand() < factorial_prob else float(np.random.rand())
+    if coupling_concentration is None:
+        coupling_concentration = float(np.exp(np.random.uniform(np.log(0.3), np.log(10.0))))
+
+    # 1. Category marginals, one per categorical regressor.
+    nominal_k: list[int] = []
+    marginals: list[np.ndarray] = []
+    balanced_flags: list[bool] = []
+    for _ in cat_indices:
+        k = int(np.random.randint(min_num_categories, max_num_categories + 1))
+        balanced = bool(np.random.rand() < balance_prob)
+        nominal_k.append(k)
+        balanced_flags.append(balanced)
+        marginals.append(
+            sample_category_marginal(
+                num_categories=k, num_obs=num_obs, balanced=balanced,
+                concentration=category_concentration,
+                min_cell_count=min_cell_count, min_cell_frac=min_cell_frac,
+            )
+        )
+
+    # 2. Joint table over all categorical regressors, then per-trial assignment.
+    if cat_indices:
+        table = build_joint_category_table(marginals, assoc_lambda, coupling_concentration)
+        assign, realized_k = assign_categories(table, num_obs, min_cell_count=min_cell_count)
+    else:
+        assign = np.zeros((num_obs, 0), dtype=np.int64)
+        realized_k = []
+
+    # 3. Continuous columns, conditional on the assignment.
+    if cont_indices:
+        cont_cols = sample_continuous_columns(
+            assign=assign, num_continuous=len(cont_indices),
+            eta=eta, eta_squared=eta_squared,
+        )
+    else:
+        cont_cols = np.zeros((num_obs, 0), dtype=np.float32)
+
+    # Cumulative start positions: main effects get block_width cols, interactions block_width**2.
+    start_col: dict[str, int] = {}
+    cur = 1 if has_intercept else 0
+    for key in main_effect_keys:
+        start_col[key] = cur
+        cur += block_width
+    for key in interaction_keys:
+        start_col[key] = cur
+        cur += inter_block_width
+
+    if has_intercept:
+        design_matrix[:, 0] = 1.0
+
+    actual_col_counts: dict[str, int] = {}
+    cat_slot = {j: i for i, j in enumerate(cat_indices)}
+    cont_slot = {j: i for i, j in enumerate(cont_indices)}
+
+    for j, key in enumerate(main_effect_keys):
+        start = start_col[key]
+
+        if key in context:
+            col = np.asarray(context[key], dtype=np.float32).reshape(-1)
+            if col.shape[0] != num_obs:
+                raise ValueError(f"context['{key}'] length {col.shape[0]} != num_obs {num_obs}")
+            design_matrix[:, start] = col
+            actual_col_counts[key] = 1
+            continue
+
+        if j in cat_slot:
+            r = cat_slot[j]
+            k = realized_k[r]
+            # Dummy coding, reference category 0 dropped -- same as the incumbent.
+            dummies = (assign[:, r][:, None] == np.arange(k)[None, :]).astype(np.float32)[:, 1:]
+            width = min(dummies.shape[1], block_width)
+            design_matrix[:, start:start + width] = dummies[:, :width]
+            actual_col_counts[key] = width
+        else:
+            design_matrix[:, start] = cont_cols[:, cont_slot[j]]
+            actual_col_counts[key] = 1
+
+    for key in interaction_keys:
+        start = start_col[key]
+
+        if key in context:
+            col = np.asarray(context[key], dtype=np.float32).reshape(-1)
+            if col.shape[0] != num_obs:
+                raise ValueError(f"context['{key}'] length {col.shape[0]} != num_obs {num_obs}")
+            design_matrix[:, start] = col
+            continue
+
+        try:
+            a, b = key.split(":")
+        except ValueError:
+            continue
+
+        a0, b0 = start_col.get(a), start_col.get(b)
+        if a0 is None or b0 is None:
+            continue
+
+        a_cols = design_matrix[:, a0:a0 + block_width]
+        b_cols = design_matrix[:, b0:b0 + block_width]
+        interaction = (a_cols[:, :, None] * b_cols[:, None, :]).reshape(num_obs, inter_block_width)
+        design_matrix[:, start:start + inter_block_width] = interaction
+
+    diagnostics = {
+        "generator": "mixture",
+        "eta": eta,
+        "eta_squared": eta_squared,
+        "assoc_lambda": assoc_lambda,
+        "coupling_concentration": coupling_concentration,
+        "categorical_keys": [main_effect_keys[j] for j in cat_indices],
+        "continuous_keys": [main_effect_keys[j] for j in cont_indices],
+        "nominal_num_categories": nominal_k,
+        "realized_num_categories": realized_k,
+        "balanced": balanced_flags,
+        "min_cell_count": (
+            min(int(np.bincount(assign[:, r]).min()) for r in range(assign.shape[1]))
+            if assign.shape[1] else None
+        ),
+    }
+    return design_matrix, actual_col_counts, diagnostics
