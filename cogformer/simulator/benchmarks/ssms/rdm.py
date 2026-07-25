@@ -36,60 +36,77 @@ def sample_rdm_trial(
     return np.array([-1.0, -1.0], dtype=np.float32)
 
 
-@njit(fastmath=True, cache=True)
-def _simulate_rdm_serial_m2(
-    v: np.ndarray,
-    a: np.ndarray,
-    tau: np.ndarray,
-    s_v: np.ndarray,
-    s_tau: np.ndarray,
-    sigma: float = 1.0,
-    dt: float = 0.001,
-    max_steps: int = 10000,
-) -> np.ndarray:
-    # Fast path for the common 2-alternative, constant-threshold (decay == 0)
-    # case: scalar accumulators, threshold hoisted out of the step loop, and
-    # per-step scalar normal draws replaced by block-pregenerated noise (see
-    # _simulate_ddm_serial in ddm.py). Measured 2.1x vs the trial-loop kernel
-    # with an identical sampling distribution; serial only — the gain is zero
-    # under prange. Accumulators keep the original in-order semantics: if X0
-    # crosses, X1 is not updated that step (its draw is discarded, iid-safe).
+# Serial fast-path kernel, generated per accumulator count.
+#
+# The optimization that matters is keeping every accumulator in a scalar local: measured
+# per-trial cost at m=2 is 9.6 us with scalars against 21 us for any array-backed state.
+# That gap is per-iteration, not extra work (an array version was measured doing 1.05x
+# the accumulator-steps for 2.2x the time), and it survives hoisting the array element
+# into a local, reordering the loops, and making m a compile-time literal. So the kernel
+# has to be specialized per m -- but generating it keeps that from imposing a maximum
+# number of alternatives or duplicating a kernel per m by hand.
+#
+# Semantics match the reference `sample_rdm_trial` exactly: drifts are drawn per
+# accumulator in order, the threshold is hoisted out of the step loop (valid only for
+# decay == 0), per-step scalar normal draws are replaced by block-pregenerated noise, and
+# accumulators keep in-order crossing semantics -- if accumulator q crosses, accumulators
+# after it are not updated that step and their draws are discarded (iid-safe).
+# Serial only: the gain is zero under prange. KS-validated against the prange kernel.
+_RDM_SERIAL_TEMPLATE = '''
+def _rdm_serial(v, a, tau, s_v, s_tau, sigma, dt, max_steps):
     n = v.shape[0]
     sim_data = np.zeros((n, 2), dtype=np.float32)
     block = 128
     c = sigma * np.sqrt(dt)
-
     for i in range(n):
-        v0 = np.random.normal(v[i, 0], s_v[i])
-        v1 = np.random.normal(v[i, 1], s_v[i])
+{init}
         tau_i = tau[i] + np.random.uniform(0, s_tau[i])
         threshold = a[i]
-        d0 = v0 * dt
-        d1 = v1 * dt
-        X0 = 0.0
-        X1 = 0.0
         rt = -1.0
         choice = -1.0
         i_iter = 0
         while i_iter < max_steps and rt < 0.0:
             k = min(block, max_steps - i_iter)
-            noise = np.random.standard_normal(2 * k)
+            noise = np.random.standard_normal({m} * k)
             for j in range(k):
-                X0 += d0 + c * noise[2 * j]
-                if X0 >= threshold:
-                    rt = tau_i + i_iter * dt
-                    choice = 0.0
-                    break
-                X1 += d1 + c * noise[2 * j + 1]
-                if X1 >= threshold:
-                    rt = tau_i + i_iter * dt
-                    choice = 1.0
-                    break
+                b = {m} * j
+{steps}
                 i_iter += 1
         sim_data[i, 0] = rt
         sim_data[i, 1] = choice
-
     return sim_data
+'''
+
+_RDM_SERIAL_STEP = '''                X{q} += d{q} + c * noise[b + {q}]
+                if X{q} >= threshold:
+                    rt = tau_i + i_iter * dt
+                    choice = {q}.0
+                    break'''
+
+_RDM_SERIAL_KERNELS: dict[int, object] = {}
+
+
+def _rdm_serial_kernel(m: int):
+    """Compile (once per process, per m) the scalarized serial kernel for m accumulators.
+
+    Costs ~0.2-0.6 s the first time a given m is seen. Numba's on-disk ``cache=True``
+    cannot be used for generated source, so this is paid per worker process rather than
+    once per machine; at the 2-4 alternatives RDM trains over that is well under a second
+    of startup against a 2.2x steady-state gain.
+    """
+    kernel = _RDM_SERIAL_KERNELS.get(m)
+    if kernel is None:
+        init = "\n".join(
+            f"        d{q} = np.random.normal(v[i, {q}], s_v[i]) * dt\n        X{q} = 0.0"
+            for q in range(m)
+        )
+        steps = "\n".join(_RDM_SERIAL_STEP.format(q=q) for q in range(m))
+        source = _RDM_SERIAL_TEMPLATE.format(m=m, init=init, steps=steps)
+        namespace = {"np": np}
+        exec(compile(source, f"<rdm_serial_m{m}>", "exec"), namespace)
+        kernel = njit(fastmath=True)(namespace["_rdm_serial"])
+        _RDM_SERIAL_KERNELS[m] = kernel
+    return kernel
 
 
 @njit(parallel=True)
@@ -136,11 +153,13 @@ def simulate_rdm(
     max_steps: int = 10000
 ):
     """Dispatch to the fast serial kernel when numba has a single thread
-    (the training sim-worker configuration) and the fast path applies
-    (2 alternatives, constant threshold), else the prange kernel."""
+    (the training sim-worker configuration) and the threshold is constant
+    (decay == 0), else the prange kernel. Any number of accumulators is
+    supported: the serial kernel is generated per accumulator count."""
     import numba
-    if numba.get_num_threads() == 1 and decay == 0.0 and v.shape[1] == 2:
-        return _simulate_rdm_serial_m2(v, a, tau, s_v, s_tau, sigma, dt, max_steps)
+    if numba.get_num_threads() == 1 and decay == 0.0:
+        kernel = _rdm_serial_kernel(v.shape[1])
+        return kernel(v, a, tau, s_v, s_tau, sigma, dt, max_steps)
     return _simulate_rdm_parallel(v, a, tau, s_v, s_tau, decay, sigma, dt, max_steps)
 
 
