@@ -426,7 +426,10 @@ def parse_args():
     add_training_args(parser)
     parser.add_argument("--max_num_obs", type=int, default=500)
     parser.add_argument("--val_num_obs", type=int, default=500)
-    parser.add_argument("--val_batch_size", type=int, default=500)
+    parser.add_argument("--val_batch_size", type=int, default=100,
+                        help="Validation datasets per scenario. Sets the width of the SBC "
+                             "confidence band (~1/sqrt(N)); the standalone validate/ensemble "
+                             "scripts use 200.")
     parser.add_argument("--val_epoch_interval", type=int, default=2500,
                         help="Epochs between validation + checkpoint saves.")
     parser.add_argument("--early_val_epoch", type=int, default=None,
@@ -439,7 +442,10 @@ def parse_args():
                         help="Category floor for validation scenarios (default 2). Set equal to "
                              "--val_max_num_categories to validate at an exact number of categories.")
     parser.add_argument("--fm_sample_steps", type=int, default=100)
-    parser.add_argument("--fm_num_samples", type=int, default=100)
+    parser.add_argument("--fm_num_samples", type=int, default=100,
+                        help="Posterior draws per validation dataset. Sets SBC rank "
+                             "resolution: the rank statistic can only take "
+                             "fm_num_samples + 1 distinct values.")
     parser.add_argument("--fm_solver", type=str, default="euler",
                         choices=["euler", "midpoint", "rk4"])
     parser.add_argument("--val_samples_chunk_size", type=int, default=4,
@@ -496,12 +502,16 @@ if __name__ == "__main__":
         "max_num_categories": max_num_categories,
         "keep_intercept": keep_intercept,
         "add_interaction": args.add_interaction,
+        "design_generator": args.design_generator,
+        "coefficient_prior": args.coefficient_prior,
+        "coefficient_prior_kwargs": {"order_scale": args.coefficient_order_scale},
     }
 
     train_sample_config = {
         "min_num_regressors": 0,
         "min_num_obs": args.min_num_obs,
         "max_num_obs": args.max_num_obs,
+        "num_obs_bucket": args.num_obs_bucket,
         "fixed_config": False,
     }
 

@@ -1,86 +1,51 @@
-"""Block-structured coefficient priors: R^2 variance budget + cell-means contrasts.
+"""Coefficient priors with one latent Gaussian per category.
 
-Drop-in alternative to :func:`cogformer.simulator.design_utils.sample_parameter_matrix`,
-kept separate so it can be A/B'd against the incumbent before a retrain.
+Alternative to :func:`cogformer.simulator.design_utils.sample_parameter_matrix`, kept
+separate so it can be A/B'd against the incumbent.
 
-Two defects in the incumbent, both stemming from sampling coefficients one row at a
-time from a fixed ``N(0, 1)``:
+The incumbent draws every coefficient row iid from ``N(0, 1)``. With dummy coding and the
+reference level pinned at 0 that prior is **not exchangeable across categories**:
+``sd(mu_ref - mu_c) = 1`` but ``sd(mu_c - mu_c') = 1.41``. The reference level is a priori
+closer to every other level, for the arbitrary reason that it got index 0 -- so
+relabelling which level is the baseline changes the prior, and hence the posterior.
 
-1. **The induced prior on the intrinsic parameters depends on design complexity.**
-   Every active row contributes unit variance to the linear predictor, so predictor
-   SD grows like ``sqrt(R)`` in the number of active rows: for ``tau`` (intercept
-   prior ``N(-1.2, 0.5)``) the 99th percentile runs from 0.66 s at zero slope rows to
-   6.3 s at nine. The slope scale also ignores the parameter's own prior scale --
-   ``build_intrinsic_priors`` computes ``spec.std()`` and then discards it -- and
-   ignores each column's realized variance, so a dummy at p = 0.05 (column SD 0.22)
-   and a continuous column (SD 1.0) get the same coefficient prior.
+**The construction.** A categorical regressor carries one latent value per category,
+``mu_k ~ N(0, 1)``, on the same scale as a continuous regressor's single ``N(0, 1)``
+coefficient. Dummy coding is the differencing operator on that latent:
 
-2. **The contrast prior is not exchangeable across categories.** With ``beta_c ~
-   N(0,1)`` iid and the reference pinned at 0, ``sd(mu_ref - mu_c) = 1`` but
-   ``sd(mu_c - mu_c') = 1.41``. The reference category is a priori closer to every
-   other category, for the arbitrary reason that it got index 0 -- so relabelling
-   which level is the baseline changes the prior, and hence the posterior.
+    beta_c = mu_c - mu_0
 
-The fixes here:
+This is the random-utility / latent-variable representation of a factor, and everything
+follows from it rather than being chosen separately:
 
-**Variance budget.** Per intrinsic parameter, sample the share ``w`` of linear-predictor
-variance that is design-driven, set ``tau^2 = sigma_prior^2 * w / (1 - w)``, split it
-across active blocks with a Dirichlet, draw each block's raw coefficients, and rescale
-so the realized contribution variance hits its share. A final global rescale absorbs
-between-block covariance (correlated regressors), so ``Var_i(eta_slopes) == tau^2``
-exactly. Predictor scale is then invariant to the number of active rows and tied to the
-parameter's own prior scale.
+* only differences are identified (K latents, K-1 contrasts), so the reference level is
+  a normalization, not a parameter;
+* the prior is invariant to relabelling -- all pairwise category spreads are equal;
+* contrasts are correlated at ``rho = +0.5`` through the shared ``-mu_0``, which is what
+  "measured against a common, itself-uncertain baseline" means;
+* a continuous regressor is the same object with a linear latent ``mu(x) = beta * x``,
+  so one scale governs both regressor types.
 
-**Cell means.** A categorical block's contrasts are derived from ``K`` exchangeable
-category means rather than drawn iid: ``mu_k ~ N(0,1)``, ``beta_c = mu_c - mu_0``. All
-pairwise category spreads become equal and the contrasts pick up the ``rho = +0.5``
-correlation that encodes "measured against a common, itself-uncertain baseline".
-Two-way interactions use the corresponding two-way contrast
-``M[i,j] - M[i,0] - M[0,j] + M[0,0]``.
+The latent distribution is the probit/logit choice: Gaussian latents give Gaussian
+contrasts (implemented here); Gumbel latents would give logistic contrasts, i.e. heavier
+tails. Only the Gaussian variant exists at present.
+
+**Nothing is rescaled.** Coefficient scale is independent of category frequency, of the
+number of active blocks, and of any realized quantity, so predictor variance grows with
+the design exactly as it did under the incumbent. An earlier version of this module
+imposed an R^2 variance budget on top -- normalizing blocks by their realized
+contribution variance and splitting a fixed total across blocks with a Dirichlet. Both
+were mistakes with the same shape: bookkeeping constraints with no generative referent.
+The first sent categorical coefficients to ``|beta| = 33`` because ``Var(dummy) = p(1-p)``
+goes to zero for a rare category; the second made adding a regressor shrink the effects
+of the others, piling half of all slope coefficients below 0.2. Do not reintroduce either
+without a generative story that motivates it.
 
 The network's targets are unchanged -- still the contrasts, same rows, same mask, same
 collate. Only the distribution they are drawn from changes.
-
-Note that the per-parameter ``"slope"`` samplers in the intrinsic prior are bypassed:
-scale is set by the budget. ``"intercept"`` samplers are used as before.
 """
 
 import numpy as np
-
-
-def _var(x: np.ndarray) -> float:
-    """Population variance of a 1-D array.
-
-    ``ndarray.var()`` carries ~4.4 us of dispatch overhead against ~1.9 us here, and the
-    budget calls it once per block plus once per parameter on every simulated dataset.
-    """
-    n = x.shape[0]
-    if n == 0:
-        return 0.0
-    m = x.sum() / n
-    return float(x.dot(x) / n - m * m)
-
-
-def estimate_prior_scales(
-    prior: dict[str, dict],
-    num_draws: int = 2048,
-) -> dict[str, float]:
-    """Per-parameter SD of the intercept prior, used as the reference scale for the
-    variance budget.
-
-    Call once at setup: drawing these inside the per-dataset sampling loop would cost
-    ``num_draws`` extra samples per parameter per dataset.
-    """
-    scales: dict[str, float] = {}
-    for name, spec in prior.items():
-        sampler = spec["intercept"] if isinstance(spec, dict) else spec
-        if hasattr(sampler, "std"):
-            scales[name] = float(sampler.std())
-            continue
-        draws = np.array([float(sampler()) for _ in range(num_draws)])
-        sd = float(draws.std())
-        scales[name] = sd if sd > 0 else 1.0
-    return scales
 
 
 def iter_blocks(
@@ -119,9 +84,10 @@ def _num_categories(key: str, category_counts: dict[str, int] | None,
     """Realized category count for a main-effect key, or None if it is continuous.
 
     With ``categorical_keys`` unset, a width-1 block is read as continuous. That is
-    ambiguous only for K = 2 categoricals, and harmlessly so: a K = 2 cell-means draw
-    is ``mu_1 - mu_0``, which differs from an iid draw by a scale factor alone -- and
-    the budget rescales the block regardless, so the two are identical in distribution.
+    ambiguous only for K = 2 categoricals, where a cell-means draw ``mu_1 - mu_0`` has
+    SD ``sqrt(2)`` against ``1`` for a continuous draw. Nothing rescales that away, so
+    pass ``categorical_keys`` whenever the assignment is known -- ``ModelFamily.sample``
+    does, via the generator's diagnostics.
     """
     if categorical_keys is not None:
         if key not in categorical_keys:
@@ -197,48 +163,60 @@ def _draw_block_raw(
     return grid.reshape(-1)
 
 
-def sample_parameter_matrix_budget(
+def sample_parameter_matrix_cell_means(
     parameter_mask: np.ndarray,
-    design_matrix: np.ndarray,
     design_config: dict[str, list[str]],
     intrinsic_params: list[str],
     prior: dict[str, dict],
     max_num_categories: int,
-    prior_scales: dict[str, float] | None = None,
     category_counts: dict[str, int] | None = None,
     categorical_keys: set[str] | list[str] | None = None,
     keep_intercept: bool = False,
-    design_share: float | None = None,
-    design_share_prior: tuple[float, float] = (1.5, 3.0),
-    max_design_share: float = 0.9,
-    block_concentration: float = 1.0,
     cell_means: bool = True,
+    order_scale: float = 1.0,
 ) -> np.ndarray:
-    """Sample a parameter matrix under a per-parameter variance budget with cell-means
-    contrasts.
+    """Sample a parameter matrix with one latent Gaussian per category.
 
-    Mirrors :func:`design_utils.sample_parameter_matrix` in shape -- returns
-    ``(num_rows, num_intrinsic_params)`` -- but needs the design matrix and config to
-    work block-wise.
+    Same shape contract as :func:`design_utils.sample_parameter_matrix` --
+    ``(num_rows, num_intrinsic_params)`` -- and the same ``N(0, 1)`` coefficient scale.
+    The only change is the *structure* of a categorical block's draw.
 
-    design_share : ``w``, the fraction of linear-predictor variance that is
-        design-driven, so total predictor SD is ``sigma_prior / sqrt(1 - w)``
-        regardless of how many rows are active. None -> ``Beta(*design_share_prior)``,
-        drawn once per parameter and capped at ``max_design_share``.
-    block_concentration : Dirichlet concentration for splitting the budget across
-        active blocks. 1.0 is uniform over the simplex.
-    cell_means : draw categorical contrasts from exchangeable category means rather
-        than iid. Set False to isolate the budget in an A/B.
-    prior_scales : per-parameter reference SD; see :func:`estimate_prior_scales`.
-        Falls back to estimating on the fly, which is slow in a sampling loop.
+    A categorical regressor carries one latent value per category, ``mu_k ~ N(0, 1)``,
+    on the same scale as a continuous regressor's single ``N(0, 1)`` coefficient. Dummy
+    coding is the differencing operator on that latent: ``beta_c = mu_c - mu_0``. Only
+    differences are identified (K latents, K-1 contrasts), the reference level is an
+    arbitrary normalization, and the contrasts inherit ``rho = +0.5`` from the shared
+    ``-mu_0``. Two-way interactions use the corresponding two-way contrast
+    ``M[i,j] - M[i,0] - M[0,j] + M[0,0]``.
+
+    Nothing is rescaled. Coefficient scale does not depend on category frequency, on the
+    number of active blocks, or on any realized quantity, so predictor variance grows
+    with the design exactly as it did under the incumbent per-row ``N(0, 1)``.
+
+    cell_means : set False to draw contrasts iid instead, recovering the incumbent's
+        non-exchangeable prior (reference level a priori closer to every other level).
+    order_scale : effect-hierarchy multiplier ``lambda``. A block of interaction order
+        ``d`` (1 for main effects and continuous slopes, 2 for two-way interactions) is
+        scaled by ``lambda ** (d - 1)``. Default 1.0 imposes no hierarchy.
+
+        Hierarchy does NOT fall out of "one Gaussian per category" -- it is an extra
+        assumption and has to be asked for. With iid cell means each differencing step
+        adds variance (continuous sd 1, main-effect contrast sd sqrt(2), two-way contrast
+        sd 2), and the interaction subspace has ``(K-1)^2`` dimensions against ``K-1``
+        for a margin, so at r4c4 interactions carry ~69% of design-driven predictor
+        variance against ~31% for main effects. That inverts the usual effect-heredity
+        expectation. Reference points at K = 4:
+
+          lambda = 1.000  interactions 69% of design variance (no hierarchy, default)
+          lambda = 0.816  interaction and main-effect contributions equal
+          lambda = 0.577  interaction contribution half of main effects
+          lambda = 0.500  interaction contrast sd 1.0, below the main-effect sd 1.41
     """
     num_rows, num_params = parameter_mask.shape
     out = np.zeros((num_rows, num_params))
     if num_rows == 0:
         return out
 
-    if prior_scales is None:
-        prior_scales = estimate_prior_scales(prior, num_draws=256)
     if categorical_keys is not None:
         categorical_keys = set(categorical_keys)
 
@@ -257,43 +235,15 @@ def sample_parameter_matrix_budget(
         if has_intercept and col[0] == 1.0:
             out[0, j] = prior[name]["intercept"]()
 
-        active_blocks = [
-            b for b in blocks
-            if b["start"] < num_rows and col[b["start"]:b["start"] + b["width"]].any()
-        ]
-        if not active_blocks:
-            continue
-
-        w = design_share
-        if w is None:
-            w = float(np.random.beta(*design_share_prior))
-        w = min(float(w), max_design_share)
-        sigma = float(prior_scales.get(name, 1.0))
-        tau2 = (sigma ** 2) * w / (1.0 - w) if w > 0 else 0.0
-        if tau2 <= 0.0:
-            continue
-
-        phi = np.random.dirichlet(block_concentration * np.ones(len(active_blocks)))
-
-        # Stage 1: draw each block and scale it to its share of the budget.
-        for b, share in zip(active_blocks, phi):
-            rows = np.arange(b["start"], min(b["start"] + b["width"], num_rows))
-            raw = _draw_block_raw(b, block_width, cat_k, cell_means)[:rows.shape[0]]
-            raw = np.where(col[rows] == 1.0, raw, 0.0)
-
-            contribution = design_matrix[:, rows] @ raw
-            var = _var(contribution)
-            if var <= 1e-12:
+        for b in blocks:
+            if b["start"] >= num_rows:
                 continue
-            out[rows, j] = raw * np.sqrt(share * tau2 / var)
-
-        # Stage 2: renormalize the total. Blocks are correlated whenever the regressors
-        # are, so the per-block variances do not sum to tau^2; this makes the realized
-        # predictor variance exactly tau^2 while phi keeps setting the relative split.
-        slope_rows = np.arange(1 if has_intercept else 0, num_rows)
-        total = design_matrix[:, slope_rows] @ out[slope_rows, j]
-        total_var = _var(total)
-        if total_var > 1e-12:
-            out[slope_rows, j] *= np.sqrt(tau2 / total_var)
+            rows = np.arange(b["start"], min(b["start"] + b["width"], num_rows))
+            if not col[rows].any():
+                continue
+            raw = _draw_block_raw(b, block_width, cat_k, cell_means)[:rows.shape[0]]
+            if order_scale != 1.0 and b["kind"] == "interaction":
+                raw = raw * order_scale
+            out[rows, j] = np.where(col[rows] == 1.0, raw, 0.0)
 
     return out

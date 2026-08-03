@@ -19,7 +19,7 @@ from .design_utils import (
     design_config_signature,
     build_position_codes,
 )
-from .coefficient_priors import sample_parameter_matrix_budget, estimate_prior_scales
+from .coefficient_priors import sample_parameter_matrix_cell_means
 
 from ..utils.simulator_utils import softplus, inspect
 
@@ -59,22 +59,6 @@ class ModelFamily:
         self._num_workers: int = num_workers if num_workers is not None else default_workers
         self._executor: ThreadPoolExecutor | None = None
         self._holdout_signatures: set = set()
-        self._prior_scale_cache: dict[int, dict[str, float]] = {}
-
-    def _prior_scales(self, prior: dict) -> dict[str, float]:
-        """Reference SDs for the variance budget, cached per prior object.
-
-        Must be called with the RAW prior (the ``{name: spec}`` dict held by the family),
-        never the per-sample dict from ``build_intrinsic_priors``. That one is rebuilt on
-        every ``sample()`` call, so its ``id`` never repeats and the cache never hits;
-        worse, it wraps scipy specs in lambdas, which hides ``.std()`` and forces
-        ``estimate_prior_scales`` into thousands of ``rvs()`` draws per dataset. That
-        combination cost ~110x simulation throughput before it was caught.
-        """
-        key = id(prior)
-        if key not in self._prior_scale_cache:
-            self._prior_scale_cache[key] = estimate_prior_scales(prior)
-        return self._prior_scale_cache[key]
 
     @property
     def _pool(self) -> ThreadPoolExecutor:
@@ -219,7 +203,7 @@ class ModelFamily:
         category_concentration: float | None = None,
         allowed_slope_patterns: list[frozenset[str]] | None = None,
         design_generator: str = "mixture",
-        coefficient_prior: str = "budget",
+        coefficient_prior: str = "cell_means",
         design_generator_kwargs: dict | None = None,
         coefficient_prior_kwargs: dict | None = None,
     ):
@@ -227,9 +211,10 @@ class ModelFamily:
         design_generator : ``"mixture"`` (default, latent-class / nominal categories) or
             ``"quantile"`` (the pre-2026-07 shared-latent construction). See
             :func:`design_utils.build_design_matrix`.
-        coefficient_prior : ``"budget"`` (default, R^2 variance budget with cell-means
-            contrasts) or ``"iid"`` (the original per-row ``N(0, 1)``). See
-            :mod:`coefficient_priors`.
+        coefficient_prior : ``"cell_means"`` (default, one latent Gaussian per category,
+            contrasts as differences) or ``"iid"`` (the original per-row ``N(0, 1)``,
+            which is not exchangeable across categories). Both use the same ``N(0, 1)``
+            coefficient scale. See :mod:`coefficient_priors`.
         """
         if prior is None:
             prior = self.prior
@@ -307,15 +292,13 @@ class ModelFamily:
         realized_cols = (np.abs(design_matrix) > 0).any(axis=0)
         parameter_mask[~realized_cols] = 0.0
 
-        if coefficient_prior == "budget":
-            parameter_matrix = sample_parameter_matrix_budget(
+        if coefficient_prior == "cell_means":
+            parameter_matrix = sample_parameter_matrix_cell_means(
                 parameter_mask=parameter_mask,
-                design_matrix=design_matrix,
                 design_config=design_config,
                 intrinsic_params=self.intrinsic_params,
                 prior=intrinsic_prior,
                 max_num_categories=max_num_categories,
-                prior_scales=self._prior_scales(prior),
                 category_counts=actual_col_counts,
                 categorical_keys=design_diagnostics.get("categorical_keys"),
                 keep_intercept=keep_intercept,
@@ -330,7 +313,7 @@ class ModelFamily:
             )
         else:
             raise ValueError(
-                f"coefficient_prior must be 'budget' or 'iid'; got {coefficient_prior!r}"
+                f"coefficient_prior must be 'cell_means' or 'iid'; got {coefficient_prior!r}"
             )
 
         link_funs = build_link_functions(
@@ -406,6 +389,7 @@ class ModelFamily:
         link_fun: dict | Callable = softplus,
         min_num_obs: int = 10,
         max_num_obs: int = 600,
+        num_obs_bucket: int = 1,
         min_num_regressors: int = 0,
         max_num_regressors: int = 3,
         max_num_categories: int = 3,
@@ -424,7 +408,7 @@ class ModelFamily:
         category_concentration: float | None = None,
         allowed_slope_patterns: list[frozenset[str]] | None = None,
         design_generator: str = "mixture",
-        coefficient_prior: str = "budget",
+        coefficient_prior: str = "cell_means",
         design_generator_kwargs: dict | None = None,
         coefficient_prior_kwargs: dict | None = None,
     ) -> list[dict] | dict:
@@ -433,6 +417,16 @@ class ModelFamily:
 
         if num_obs is None:
             num_obs = np.random.randint(min_num_obs, max_num_obs + 1)
+            if num_obs_bucket > 1:
+                # Quantize the observation count so batch shapes repeat. Drawn uniformly
+                # over [200, 500] it takes ~300 distinct values, and torch.compile with
+                # max-autotune re-runs its kernel autotuning sweep per new shape -- spikes
+                # of up to 25 s against an 88 ms steady-state step. Bucketing collapses
+                # that to a handful of shapes that are all compiled within the first epoch.
+                num_obs = int(min(
+                    max_num_obs,
+                    -(-num_obs // num_obs_bucket) * num_obs_bucket,
+                ))
 
         if num_regressors is None:
             num_regressors_array = np.random.randint(min_num_regressors, max_num_regressors + 1, size=batch_size)

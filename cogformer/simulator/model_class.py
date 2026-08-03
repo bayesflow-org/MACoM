@@ -100,6 +100,7 @@ class ModelClass:
         num_regressors: int | None = None,
         min_num_obs: int = 10,
         max_num_obs: int = 600,
+        num_obs_bucket: int = 1,
         min_num_regressors: int = 0,
         max_num_regressors: int = 3,
         max_num_categories: int = 3,
@@ -111,12 +112,22 @@ class ModelClass:
         fixed_config: bool = False,
         add_interaction: bool = False,
         design_generator: str = "mixture",
-        coefficient_prior: str = "budget",
+        coefficient_prior: str = "cell_means",
         design_generator_kwargs: dict | None = None,
         coefficient_prior_kwargs: dict | None = None,
     ) -> dict:
         if num_obs is None:
             num_obs = np.random.randint(min_num_obs, max_num_obs + 1)
+            if num_obs_bucket > 1:
+                # Quantize the observation count so batch shapes repeat. Drawn uniformly
+                # over [200, 500] it takes ~300 distinct values, and torch.compile with
+                # max-autotune re-runs its kernel autotuning sweep per new shape -- spikes
+                # of up to 25 s against an 88 ms steady-state step. Bucketing collapses
+                # that to a handful of shapes that are all compiled within the first epoch.
+                num_obs = int(min(
+                    max_num_obs,
+                    -(-num_obs // num_obs_bucket) * num_obs_bucket,
+                ))
 
         if num_regressors is None:
             num_regressors_array = np.random.randint(

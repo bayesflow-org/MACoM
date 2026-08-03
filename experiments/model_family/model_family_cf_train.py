@@ -520,6 +520,9 @@ if __name__ == "__main__":
         "max_num_categories": max_num_categories,
         "keep_intercept": keep_intercept,
         "add_interaction": args.add_interaction,
+        "design_generator": args.design_generator,
+        "coefficient_prior": args.coefficient_prior,
+        "coefficient_prior_kwargs": {"order_scale": args.coefficient_order_scale},
     }
 
     train_params_kwargs = {
@@ -540,6 +543,7 @@ if __name__ == "__main__":
         "min_num_regressors": 0,
         "min_num_obs": args.min_num_obs,
         "max_num_obs": args.max_num_obs,
+        "num_obs_bucket": args.num_obs_bucket,
         "fixed_config": False,
     }
 

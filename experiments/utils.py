@@ -218,12 +218,39 @@ def add_training_args(parser):
     parser.add_argument("--epochs", type=int, default=5000)
     parser.add_argument("--steps_per_epoch", type=int, default=100)
     parser.add_argument("--min_num_obs", type=int, default=200)
+    parser.add_argument("--num_obs_bucket", type=int, default=1,
+                        help="Quantize num_obs to a multiple of this so batch shapes repeat. "
+                             "Uniform num_obs yields ~300 distinct shapes, and torch.compile "
+                             "max-autotune re-tunes per new shape (spikes to 25s against an "
+                             "88ms steady-state step). Measured: this is a ONE-OFF ~130s "
+                             "warmup cost, not per-step -- steady-state throughput is identical "
+                             "with and without bucketing (11.19 vs 10.96 it/s), so the default "
+                             "is off. Set e.g. 64 only to shorten warmup on very short runs, "
+                             "at the cost of narrowing the num_obs distribution.")
     parser.add_argument("--dry_run_epochs", type=int, default=None,
                         help="If set, train for this many epochs only and record extrapolated time.")
     parser.add_argument("--max_num_regressors", type=int, default=5)
     parser.add_argument("--max_num_categories", type=int, default=5)
     parser.add_argument("--keep_intercept", action="store_true", default=True)
     parser.add_argument("--add_interaction", action="store_true", default=True)
+    parser.add_argument("--design_generator", choices=["mixture", "quantile"], default="mixture",
+                        help="Design-matrix construction. 'mixture' (default) draws category "
+                             "assignments first, then one Gaussian per category: nominal categories, "
+                             "dialable association, balanced factorials. 'quantile' is the "
+                             "pre-2026-07 shared-latent cut, kept for A/B against old runs.")
+    parser.add_argument("--coefficient_order_scale", type=float, default=1.0,
+                        help="Effect-hierarchy multiplier: a two-way interaction block is "
+                             "scaled by this factor. 1.0 (default) imposes no hierarchy, which "
+                             "is what 'one Gaussian per category' implies on its own -- at r4c4 "
+                             "that leaves interactions carrying ~69%% of design-driven predictor "
+                             "variance. 0.816 equalizes interaction and main-effect contributions; "
+                             "0.577 puts interactions at half. Only used with "
+                             "--coefficient_prior cell_means.")
+    parser.add_argument("--coefficient_prior", choices=["cell_means", "iid"], default="cell_means",
+                        help="Coefficient prior. 'cell_means' (default) draws one latent Gaussian "
+                             "per category and takes contrasts as differences, making categories "
+                             "exchangeable. 'iid' is the original per-row N(0, 1), under which the "
+                             "reference level is a priori closer to every other level. Same scale.")
 
 
 def chunked_sample(model, adapted, num_samples, steps, solver="euler",

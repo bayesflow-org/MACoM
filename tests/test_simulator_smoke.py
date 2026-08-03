@@ -30,7 +30,7 @@ from cogformer.simulator.model_class import ModelClass
 from cogformer.simulator.model_family import ModelFamily
 
 GENERATORS = ("mixture", "quantile")
-COEF_PRIORS = ("budget", "iid")
+COEF_PRIORS = ("cell_means", "iid")
 
 CONFIG = {"1": ["v", "a"], "u_1": ["v"], "u_2": ["v", "a"], "u_1:u_2": ["v"]}
 
@@ -125,42 +125,45 @@ def test_model_class_batch_sample():
         assert len(batch["model_names"]) == 8, coefficient_prior
 
 
-def test_budget_makes_predictor_scale_design_invariant():
-    """The point of the variance budget: predictor SD must not grow with design size.
+def test_cell_means_is_exchangeable_across_categories():
+    """The property cell_means exists to provide.
 
-    Guards a regression where the budget silently stops being applied. The iid prior
-    grows like sqrt(active rows), so the ratio across design sizes separates them.
+    With dummy coding and the reference level pinned at 0, iid contrasts make the
+    reference a priori closer to every other level: sd(mu_ref - mu_c) = 1 but
+    sd(mu_c - mu_c') = sqrt(2). Relabelling which level is the baseline then changes the
+    prior. Drawing one latent per category and taking differences equalizes all pairwise
+    spreads and induces rho = +0.5 between contrasts through the shared -mu_0.
 
-    Only draws where the parameter actually has an active slope row are counted. Under
-    a random design config a parameter is often not regressed at all, and those zeros
-    dilute the small-design mean -- which would look like scale growth even if the
-    budget were working perfectly.
+    Both priors keep the same N(0, 1) scale, so this is about structure, not width.
     """
-    np.random.seed(4)
-    sds = {}
+    stats = {}
     for prior_name in COEF_PRIORS:
-        by_size = []
-        for num_regressors in (1, 3):
-            mf = make_family()
-            vals = []
-            while len(vals) < 50:
-                out = mf.sample(
-                    num_obs=200, num_regressors=num_regressors, max_num_categories=4,
-                    keep_intercept=True, add_interaction=num_regressors > 1,
-                    flatten_param_outputs=False, link_fun=ddm_link_fun(),
-                    coefficient_prior=prior_name,
-                )
-                if not out["param_mask"][1:, 0].any():
-                    continue
-                eta = out["design_matrix"] @ out["param_matrix"]
-                vals.append(eta[:, 0].std())
-            by_size.append(float(np.mean(vals)))
-        sds[prior_name] = by_size
+        np.random.seed(6)
+        mf = make_family()
+        rows = []
+        while len(rows) < 800:
+            out = mf.sample(
+                num_obs=300, num_regressors=1, max_num_categories=4,
+                keep_intercept=True, flatten_param_outputs=False,
+                link_fun=ddm_link_fun(), categorical_regressors=["u_1"],
+                coefficient_prior=prior_name,
+            )
+            b = out["param_matrix"][1:4, 0]
+            if np.count_nonzero(b) == 3:
+                rows.append(b)
+        b = np.array(rows)
+        mu = np.concatenate([np.zeros((len(b), 1)), b], axis=1)
+        ref = np.mean([np.std(mu[:, 0] - mu[:, c]) for c in (1, 2, 3)])
+        oth = np.mean([np.std(mu[:, i] - mu[:, j]) for i in (1, 2) for j in range(i + 1, 4)])
+        rho = np.mean([np.corrcoef(b[:, i], b[:, j])[0, 1] for i in range(3) for j in range(i + 1, 3)])
+        stats[prior_name] = (ref, oth, oth / ref, rho)
 
-    iid_growth = sds["iid"][1] / max(sds["iid"][0], 1e-9)
-    budget_growth = sds["budget"][1] / max(sds["budget"][0], 1e-9)
-    assert iid_growth > 1.3, sds
-    assert 0.7 < budget_growth < 1.4, sds
+    _, _, cm_ratio, cm_rho = stats["cell_means"]
+    _, _, iid_ratio, iid_rho = stats["iid"]
+    assert 0.90 < cm_ratio < 1.10, stats     # exchangeable
+    assert cm_rho > 0.35, stats              # shared -mu_0
+    assert iid_ratio > 1.25, stats           # incumbent asymmetry, ~sqrt(2)
+    assert abs(iid_rho) < 0.15, stats        # incumbent contrasts independent
 
 
 def test_hierarchical_discrete_prob_reaches_corners():
