@@ -1,4 +1,7 @@
-# CogFormer 2: Learn All Your Models More
+# MetaCog
+
+**Meta-amortized cognitive models**
+
 Jerry M. Huang, Lukas Schumacher, Niek Stevenson, Mischa von Krause, and Stefan T. Radev
 
 Repository for the Nature Communications paper on meta-amortized cognitive models.
