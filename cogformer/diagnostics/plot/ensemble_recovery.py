@@ -29,6 +29,7 @@ def ensemble_recovery(
     label_fontsize: int = 12,
     legend_fontsize: int = 17,
     thumb_scale: float = 1.0,
+    thumb_per_row: int | None = None,
     alpha: float = 0.5,
     figsize: tuple = None,
     global_params: list[str] = None,
@@ -256,7 +257,7 @@ def ensemble_recovery(
         compact_masks = [m[row_idx] for m in parameter_masks]
         _add_mask_legend(fig, compact_masks, colors, labels, n_kept, num_cols,
                          label_fontsize=legend_fontsize, pixel_alphas=pixel_alpha_maps,
-                         thumb_scale=thumb_scale)
+                         thumb_scale=thumb_scale, per_row=thumb_per_row)
     return fig
 
 

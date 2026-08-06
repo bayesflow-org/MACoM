@@ -31,6 +31,7 @@ def ensemble_ecdf(
     tick_fontsize: int = 10,
     legend_fontsize: int = 17,
     thumb_scale: float = 1.0,
+    thumb_per_row: int | None = None,
     prob: float = 0.95,
     difference: bool = True,
     band_alpha: float = 0.07,
@@ -255,7 +256,7 @@ def ensemble_ecdf(
         compact_masks = [m[row_idx] for m in parameter_masks]
         strip_w_fig = _add_mask_legend(fig, compact_masks, colors, labels, n_kept, num_cols,
                                        label_fontsize=legend_fontsize, pixel_alphas=pixel_alphas,
-                                       thumb_scale=thumb_scale)
+                                       thumb_scale=thumb_scale, per_row=thumb_per_row)
 
     # Reserve space at the bottom of the main plot area for the band/ECDF legend
     legend_gap = 0.07

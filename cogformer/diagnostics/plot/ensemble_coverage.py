@@ -29,6 +29,7 @@ def ensemble_coverage(
     tick_fontsize: int = 10,
     legend_fontsize: int = 17,
     thumb_scale: float = 1.0,
+    thumb_per_row: int | None = None,
     prob: float = 0.95,
     interval_type: str = "central",
     difference: bool = True,
@@ -240,7 +241,7 @@ def ensemble_coverage(
     else:
         compact_masks = [m[row_idx] for m in parameter_masks]
         _add_mask_legend(fig, compact_masks, colors, labels, n_kept, num_cols,
-                         label_fontsize=legend_fontsize, thumb_scale=thumb_scale)
+                         label_fontsize=legend_fontsize, thumb_scale=thumb_scale, per_row=thumb_per_row)
     return fig
 
 

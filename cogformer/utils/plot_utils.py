@@ -86,6 +86,7 @@ def _add_mask_legend(
     pixel_alphas: list[float] | None = None,
     thumb_scale: float = 1.0,
     max_per_column: int = 6,
+    per_row: int | None = None,
 ):
     """
     Add parameter mask thumbnails as a visual legend in a strip on the LEFT
@@ -113,7 +114,13 @@ def _add_mask_legend(
     gap : float
         Horizontal gap between legend columns, in figure coords.
     max_per_column : int
-        Thumbnails per legend column; more configs wrap into further columns.
+        Thumbnails per legend column when ``per_row`` is None (column-major fill).
+    per_row : int, optional
+        When given, thumbnails are laid out ROW-MAJOR with this many per row, so
+        configs that are adjacent in ``parameter_masks`` stay adjacent in the legend.
+        The ensemble plots sequence configs by model family, so ``per_row=2`` gives
+        one family per pair of rows (DDM 1-2 / DDM 3-4 / RDM 1-2 / ...), and
+        ``per_row=n`` puts a single family's configs on one row.
 
     Returns
     -------
@@ -122,43 +129,78 @@ def _add_mask_legend(
     """
     figW, figH = fig.get_size_inches()
     n = len(parameter_masks)
-    n_cols_leg = int(np.ceil(n / max_per_column))
-    n_per_col = int(np.ceil(n / n_cols_leg))
+    if per_row is not None and per_row > 0:
+        # Row-major: per_row thumbnails across, as many rows as needed.
+        n_cols_leg = min(per_row, n)
+        n_per_col = int(np.ceil(n / n_cols_leg))
+        row_major = True
+    else:
+        n_cols_leg = int(np.ceil(n / max_per_column))
+        n_per_col = int(np.ceil(n / n_cols_leg))
+        row_major = False
 
     # Rough label height in figure coords (1 line of text below each thumbnail)
     label_h_fig = (label_fontsize * 2.2 / 72) / figH
 
-    # Size thumbnails so a full legend column fits in ~90% of the figure height
-    # (square pixels); cap the width so the strip stays a narrow sidebar. The
-    # lower clamp keeps small figures (e.g. single-cell global panels) valid.
     cell_gap_fig = 2 * pad
-    thumb_h_fig = max(thumb_scale * (0.9 / n_per_col - label_h_fig - cell_gap_fig), 0.02)
-    thumb_h_in  = thumb_h_fig * figH
-    thumb_w_in  = thumb_h_in * num_cols / num_rows   # square pixels
-    thumb_w_fig = thumb_w_in / figW
-    max_w_fig = 0.11 * thumb_scale
-    if thumb_w_fig > max_w_fig:
-        thumb_w_fig = max_w_fig
+
+    # A single row of thumbnails goes in a horizontal band along the BOTTOM; anything
+    # taller stays a left sidebar. Forcing a wide row into the sidebar makes the strip
+    # as wide as the number of configs and squashes the main axes to half the figure.
+    bottom_band = row_major and n_per_col == 1
+
+    if bottom_band:
+        # Size to fit n thumbnails across ~85% of the figure width, square pixels.
+        thumb_w_fig = min(thumb_scale * (0.85 - (n - 1) * gap) / n, 0.20)
         thumb_w_in  = thumb_w_fig * figW
         thumb_h_in  = thumb_w_in * num_rows / num_cols
         thumb_h_fig = thumb_h_in / figH
+        max_h_fig = 0.22 * thumb_scale
+        if thumb_h_fig > max_h_fig:
+            thumb_h_fig = max_h_fig
+            thumb_h_in  = thumb_h_fig * figH
+            thumb_w_in  = thumb_h_in * num_cols / num_rows
+            thumb_w_fig = thumb_w_in / figW
+        strip_h_fig = pad + thumb_h_fig + label_h_fig + pad
+        strip_w_fig = 0.0
 
-    strip_w_fig = pad + n_cols_leg * thumb_w_fig + (n_cols_leg - 1) * gap + pad
+        fig.tight_layout(rect=[0, strip_h_fig, 1, 1])
+        fig.add_artist(Line2D(
+            [0.02, 0.98], [strip_h_fig, strip_h_fig], transform=fig.transFigure,
+            color="lightgray", linewidth=0.7, zorder=10,
+        ))
+        row_w_fig = n * thumb_w_fig + (n - 1) * gap
+        x_left = max((1.0 - row_w_fig) / 2, pad)
+        y_bottom = pad + label_h_fig
+    else:
+        # Size thumbnails so a full legend column fits in ~90% of the figure height
+        # (square pixels); cap the width so the strip stays a narrow sidebar. The
+        # lower clamp keeps small figures (e.g. single-cell global panels) valid.
+        thumb_h_fig = max(thumb_scale * (0.9 / n_per_col - label_h_fig - cell_gap_fig), 0.02)
+        thumb_h_in  = thumb_h_fig * figH
+        thumb_w_in  = thumb_h_in * num_cols / num_rows   # square pixels
+        thumb_w_fig = thumb_w_in / figW
+        max_w_fig = 0.11 * thumb_scale
+        if thumb_w_fig > max_w_fig:
+            thumb_w_fig = max_w_fig
+            thumb_w_in  = thumb_w_fig * figW
+            thumb_h_in  = thumb_w_in * num_rows / num_cols
+            thumb_h_fig = thumb_h_in / figH
 
-    # Re-layout main subplots leaving the left strip free
-    fig.tight_layout(rect=[strip_w_fig, 0, 1, 1])
+        strip_w_fig = pad + n_cols_leg * thumb_w_fig + (n_cols_leg - 1) * gap + pad
 
-    # Vertical divider between the thumbnail strip and the main plot
-    line = Line2D(
-        [strip_w_fig, strip_w_fig], [0.02, 0.98],
-        transform=fig.transFigure,
-        color="lightgray", linewidth=0.7, zorder=10,
-    )
-    fig.add_artist(line)
+        # Re-layout main subplots leaving the left strip free
+        fig.tight_layout(rect=[strip_w_fig, 0, 1, 1])
 
-    # Centre each legend column vertically
-    cell_h_fig = thumb_h_fig + label_h_fig + cell_gap_fig
-    y_top = 0.5 + (n_per_col * cell_h_fig) / 2
+        # Vertical divider between the thumbnail strip and the main plot
+        fig.add_artist(Line2D(
+            [strip_w_fig, strip_w_fig], [0.02, 0.98], transform=fig.transFigure,
+            color="lightgray", linewidth=0.7, zorder=10,
+        ))
+
+        # Centre each legend column vertically
+        cell_h_fig = thumb_h_fig + label_h_fig + cell_gap_fig
+        y_top = 0.5 + (n_per_col * cell_h_fig) / 2
 
     for k in range(n):
         mask_k = np.array(parameter_masks[k])
@@ -194,10 +236,16 @@ def _add_mask_legend(
             img[mask_k == 1.0, :3] = config_rgb
             img[mask_k == 1.0,  3] = 1.0
 
-        leg_col = k // n_per_col
-        leg_row = k % n_per_col
-        x0 = pad + leg_col * (thumb_w_fig + gap)
-        y0 = y_top - leg_row * cell_h_fig - thumb_h_fig
+        if bottom_band:
+            x0 = x_left + k * (thumb_w_fig + gap)
+            y0 = y_bottom
+        else:
+            if row_major:
+                leg_row, leg_col = divmod(k, n_cols_leg)
+            else:
+                leg_col, leg_row = divmod(k, n_per_col)
+            x0 = pad + leg_col * (thumb_w_fig + gap)
+            y0 = y_top - leg_row * cell_h_fig - thumb_h_fig
 
         ax_t = fig.add_axes([x0, y0, thumb_w_fig, thumb_h_fig])
         ax_t.imshow(img, aspect="equal", interpolation="nearest")
