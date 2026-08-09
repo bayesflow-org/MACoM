@@ -249,7 +249,7 @@ def main(model_key: str, case: str, batch_size: int = 200, num_samples: int = 20
                 interaction_color=adaptive_colors["interaction"],
             )
             posterior_fig.savefig(figures_dir / f"{model_name}_family_{case}_bf_posterior_{i}.pdf", bbox_inches="tight")
-            plt.close(posterior_fig.fig)
+            plt.close(posterior_fig)
 
 
 if __name__ == "__main__":

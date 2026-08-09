@@ -338,7 +338,20 @@ def main():
             args.batch_size, args.num_samples, case["n_rows"], n_global_params
         )[:, :, :, case["global_indices"]]
 
-    # Phase 3: save predictions and generate figures
+        # Persist immediately rather than at the top of phase 3. Sampling is the
+        # expensive part (~20 min/case) and lives only in memory until written, so a
+        # failure anywhere in phase-3 plotting used to discard every case that had not
+        # yet been plotted -- one AttributeError in a posterior plot cost a full 7-hour
+        # run. Each case is now durable the moment its ODE integration finishes.
+        tag = f"{case['model_name'].lower()}_{case['cfg_name']}"
+        np.savez(
+            pred_dir / f"{tag}_cf_pred.npz",
+            pred_set=case["pred_set"], true_set=case["true_set"],
+            params_mask=case["params_mask"],
+        )
+        logging.info(f"[saved] {pred_dir / f'{tag}_cf_pred.npz'}")
+
+    # Phase 3: generate figures (predictions are already written in phase 2)
     for case in cases:
         model_name    = case["model_name"]
         cfg_name      = case["cfg_name"]
@@ -357,12 +370,6 @@ def main():
             "max_num_regressors": args.max_num_regressors,
             "categorical_regressors": categorical_regressors,
         }
-
-        np.savez(
-            pred_dir / f"{tag}_cf_pred.npz",
-            pred_set=pred_set, true_set=true_set, params_mask=params_mask,
-        )
-        logging.info(f"[saved] {pred_dir / f'{tag}_cf_pred.npz'}")
 
         fig = adaptive_recovery(
             true=true_set, pred=pred_set,
@@ -534,7 +541,7 @@ def main():
                 )
                 posterior_path = outdir / f"{tag}_fm_posterior_{i}.pdf"
                 posterior_fig.savefig(posterior_path, bbox_inches="tight")
-                plt.close(posterior_fig.fig)
+                plt.close(posterior_fig)
 
     logging.info("Done.")
 

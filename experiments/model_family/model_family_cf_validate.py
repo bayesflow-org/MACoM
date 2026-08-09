@@ -450,7 +450,7 @@ def main():
                 )
                 posterior_path = outdir / f"{model_name}_family_{cfg_name}_fm_mixed_posterior_{i}.pdf"
                 posterior.savefig(posterior_path, bbox_inches="tight")
-                plt.close(posterior.fig)
+                plt.close(posterior)
 
     logging.info("Done.")
 
