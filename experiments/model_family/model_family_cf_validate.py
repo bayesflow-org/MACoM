@@ -62,7 +62,10 @@ def parse_args():
     p.add_argument("--checkpoint", type=str, required=True)
     p.add_argument("--outdir", type=str, default=None,
                    help="Output directory (defaults to model-specific path)")
-    p.add_argument("--pred_dir", type=str, default="./outputs/data/model_family/")
+    p.add_argument("--pred_dir", type=str, default=None,
+                   help="Where prediction .npz files go. Defaults to <outdir>/predictions so a single "
+                        "--outdir keeps figures and predictions together; pass explicitly to "
+                        "separate them.")
     p.add_argument("--data_dir", type=str, default=None)
     p.add_argument("--batch_size", type=int, default=500)
     p.add_argument("--num_obs", type=int, default=500)
@@ -274,8 +277,9 @@ def main():
         ).reshape(args.batch_size, args.num_samples, case["n_rows"], n_cols)
 
     # Phase 3: save predictions and generate figures
-    pred_dir = Path(args.pred_dir)
+    pred_dir = Path(args.pred_dir) if args.pred_dir else outdir_root / "predictions"
     pred_dir.mkdir(parents=True, exist_ok=True)
+    logging.info(f"Predictions -> {pred_dir}")
     for case in cases:
         cfg_name     = case["cfg_name"]
         design_config = case["design_config"]

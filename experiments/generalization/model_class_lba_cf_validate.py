@@ -44,7 +44,8 @@ from cogformer.diagnostics.metric.adaptive_metrics import (
 from cogformer.utils.plot_utils import cogformer_mc_colors
 
 from ..configs import MODELS as _BASE_MODELS, LBA_CONFIG
-from ..utils import add_global_params, infer_free_fixed_intrinsics, build_encoder_input_dim, chunked_sample
+from ..utils import (add_global_params, infer_free_fixed_intrinsics, build_encoder_input_dim,
+                     chunked_sample, resolve_val_scenario)
 
 
 GLOBAL_PARAMS = ["pi"]
@@ -94,7 +95,10 @@ def parse_args():
     p = argparse.ArgumentParser()
     p.add_argument("--checkpoint", type=str, required=True)
     p.add_argument("--outdir", type=str, default="./outputs/figures/generalization/model_class_lba/cf/")
-    p.add_argument("--pred_dir", type=str, default="./outputs/data/generalization/model_class_lba/cf/")
+    p.add_argument("--pred_dir", type=str, default=None,
+                   help="Where prediction .npz files go. Defaults to <outdir>/predictions so a "
+                        "single --outdir keeps figures and predictions together; pass explicitly "
+                        "to separate them.")
 
     # Which model embedding to use during inference (default: RDM=1)
     p.add_argument("--eval_model_id", type=int, default=1,
@@ -104,7 +108,10 @@ def parse_args():
                    help="Evaluate LBA under each of the 3 known model IDs.")
 
     # Benchmark cases
-    p.add_argument("--include_full", action="store_true", default=False)
+    p.add_argument("--include_full", action="store_true", default=False,
+                   help="Deprecated / no effect: LBA zero-shot now runs the same six "
+                        "val_scenarios as every other family, so there is no 'full' "
+                        "benchmark config to opt into.")
 
     # Validation settings
     p.add_argument("--batch_size", type=int, default=200)
@@ -227,9 +234,12 @@ def main():
 
     colors = cogformer_mc_colors()
 
-    benchmarks = dict(_LBA_WITH_PI["benchmark_configs"])
-    if not args.include_full:
-        benchmarks.pop("full", None)
+    # Zero-shot LBA is validated on the SAME six scenarios as every other family
+    # (intercept_only, fixed, regressed, fixed_regressed, interaction, mixed_predictor)
+    # so generalization numbers are comparable with the in-distribution validation.
+    # The older `benchmark_configs` set diverged: it ran up to 5 regressors and 3-way
+    # pairwise interactions, so its numbers were not comparable with anything.
+    benchmarks = _LBA_WITH_PI["val_scenarios"]
 
     model_family_config = {
         "max_num_regressors": args.max_num_regressors,
@@ -245,15 +255,29 @@ def main():
     )
     id_to_name = {v: k for k, v in model_class.model_index.items()}
 
-    pred_dir = Path(args.pred_dir)
+    pred_dir = Path(args.pred_dir) if args.pred_dir else Path(args.outdir) / "predictions"
     pred_dir.mkdir(parents=True, exist_ok=True)
+    logging.info(f"Predictions -> {pred_dir}")
 
     variable_names   = _LBA_WITH_PI["variable_names"]
     intrinsic_params = LBA_LOCAL_PARAMS
 
     # Phase 1: prepare all data (one dataset per config, shared across eval_ids)
     config_data = []
-    for cfg_name, design_config in benchmarks.items():
+    training_max_cats = args.max_num_categories
+    for cfg_name, design_config, scenario_opts in benchmarks:
+        max_cats, min_cats, mix_opts, skip = resolve_val_scenario(
+            scenario_opts, training_max_cats
+        )
+        n_main_effects = sum(1 for k in design_config if k != "1" and ":" not in k)
+        if n_main_effects > args.max_num_regressors:
+            print(f"Skipping LBA / {cfg_name}: needs {n_main_effects} regressors, "
+                  f"model trained with max_num_regressors={args.max_num_regressors}")
+            continue
+        if skip:
+            print(f"Skipping LBA / {cfg_name}: needs max_num_categories={max_cats} "
+                  f"> training {training_max_cats}")
+            continue
         print(f"Preparing LBA data: {cfg_name}")
         free_intr, fixed_intr, fixed_vals = infer_free_fixed_intrinsics(
             design_config, LBA_LOCAL_PARAMS, _LBA_WITH_PI["default_fixed_values"]
@@ -271,7 +295,14 @@ def main():
             flatten_param_outputs=True,
             fixed_config=True,
             link_fun=lba_link_fn,
-            **model_family_config,
+            # Scenarios pin their own (usually narrower) category count, so the design
+            # matrix must be padded back to the training width or the encoder input dim
+            # will not match the checkpoint.
+            pad_to_max_num_categories=training_max_cats,
+            **{**model_family_config,
+               "max_num_categories": max_cats,
+               "min_num_categories": min_cats,
+               **mix_opts},
         )
         pm_global, mask_global = lift_lba_to_global(
             test_samples["param_matrices"],

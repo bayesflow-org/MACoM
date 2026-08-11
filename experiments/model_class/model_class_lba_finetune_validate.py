@@ -65,7 +65,10 @@ def parse_args():
     p = argparse.ArgumentParser()
     p.add_argument("--checkpoint", type=str, required=True)
     p.add_argument("--outdir", type=str, default="./outputs/figures/model_class/cf/lba_finetune/")
-    p.add_argument("--pred_dir", type=str, default="./outputs/data/model_class/cf/lba_finetune/")
+    p.add_argument("--pred_dir", type=str, default=None,
+                   help="Where prediction .npz files go. Defaults to <outdir>/predictions so a single "
+                        "--outdir keeps figures and predictions together; pass explicitly to "
+                        "separate them.")
 
     p.add_argument("--batch_size", type=int, default=200)
     p.add_argument("--num_obs", type=int, default=500)
@@ -180,7 +183,7 @@ def main():
     cogformer = torch.compile(cogformer, dynamic=True)
 
     colors = cogformer_mc_colors()
-    pred_dir = Path(args.pred_dir)
+    pred_dir = Path(args.pred_dir) if args.pred_dir else Path(args.outdir) / "predictions"
     pred_dir.mkdir(parents=True, exist_ok=True)
 
     model_family_config = {

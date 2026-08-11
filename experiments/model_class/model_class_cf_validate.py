@@ -115,7 +115,10 @@ def parse_args():
     p = argparse.ArgumentParser()
     p.add_argument("--checkpoint", type=str, required=True)
     p.add_argument("--outdir", type=str, default="./outputs/figures/model_class/cf/")
-    p.add_argument("--pred_dir", type=str, default="./outputs/data/model_class/")
+    p.add_argument("--pred_dir", type=str, default=None,
+                   help="Where prediction .npz files go. Defaults to <outdir>/predictions so a single "
+                        "--outdir keeps figures and predictions together; pass explicitly to "
+                        "separate them.")
     p.add_argument("--data_dir", type=str, default=None, help="Directory with BayesFlow validation data")
 
     # Validation settings
@@ -233,8 +236,9 @@ def main():
         "add_interaction": args.add_interaction,
     }
 
-    pred_dir = Path(args.pred_dir)
+    pred_dir = Path(args.pred_dir) if args.pred_dir else Path(args.outdir) / "predictions"
     pred_dir.mkdir(parents=True, exist_ok=True)
+    logging.info(f"Predictions -> {pred_dir}")
 
     # Phase 1: prepare all data
     cases = []

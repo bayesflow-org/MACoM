@@ -122,7 +122,10 @@ def parse_args():
     p.add_argument("--holdout_type", type=str, required=True, choices=HOLDOUT_TYPES)
     p.add_argument("--checkpoint", type=str, required=True)
     p.add_argument("--outdir", type=str, default=None)
-    p.add_argument("--pred_dir", type=str, default="./outputs/data/generalization/")
+    p.add_argument("--pred_dir", type=str, default=None,
+                   help="Where prediction .npz files go. Defaults to <outdir>/predictions so a single "
+                        "--outdir keeps figures and predictions together; pass explicitly to "
+                        "separate them.")
 
     # Validation settings
     p.add_argument("--batch_size", type=int, default=200)
@@ -239,8 +242,12 @@ def main():
         else Path(f"./outputs/figures/generalization/cf/{model_name}/{args.holdout_type}")
     )
 
-    pred_dir = Path(args.pred_dir) / model_name / args.holdout_type
+    # An explicit --pred_dir keeps the historical <pred_dir>/<model>/<holdout> nesting;
+    # derived paths need no nesting because outdir_root already carries both.
+    pred_dir = (Path(args.pred_dir) / model_name / args.holdout_type
+                if args.pred_dir else outdir_root / "predictions")
     pred_dir.mkdir(parents=True, exist_ok=True)
+    logging.info(f"Predictions -> {pred_dir}")
 
     holdout_cases = _holdout_configs(args.holdout_type, model_cfg, args)
 
