@@ -81,9 +81,28 @@ class LBA(Model):
     class-level hyperparameter (default 0.5).
     """
 
-    def __init__(self, b_offset: float = 0.5, max_time: int = 10):
+    def __init__(self, b_offset: float = 0.5, max_time: int = 10,
+                 fixed_A: float | None = None):
+        """
+        fixed_A : selects what the intrinsic parameter ``a`` means.
+
+            None (default) -- the original parameterization: ``a`` is ``A``, the
+            start-point range, and the threshold is ``A + b_offset``. Raising ``a`` then
+            raises the threshold AND widens the start-point distribution, so its net
+            effect on mean RT is only half that of a true threshold and it is entangled
+            with RT variability. That is why ``a`` recovers poorly and why it does not
+            transfer to model families where ``a`` is a threshold.
+
+            A float -- ``A`` is pinned at this value and ``a`` IS the response
+            threshold: ``b = a - min(fixed_A, a)``, so ``A + b == a`` exactly. The min
+            keeps ``b >= 0`` for the ~3% of draws with ``a < 0.5``; in those cases the
+            start-point range shrinks to ``a`` rather than the threshold going invalid.
+            ``fixed_A=0`` removes start-point variability entirely, leaving a pure
+            threshold model directly comparable to RDM.
+        """
         self.b_offset = b_offset
         self.max_time = max_time
+        self.fixed_A = fixed_A
 
     def prepare_params(
         self,
@@ -124,9 +143,14 @@ class LBA(Model):
                 v[i, :] = v_base[i]
                 v[i, int(favored_idx[i])] = v_base[i] + v_diff[i]
 
-        b = np.full(num_obs, self.b_offset, dtype=np.float64)
+        if self.fixed_A is None:
+            A = a
+            b = np.full(num_obs, self.b_offset, dtype=np.float64)
+        else:
+            A = np.minimum(float(self.fixed_A), a)
+            b = a - A          # threshold = A + b = a
 
-        return {"v": v, "A": a, "b": b, "tau": tau, "s_v": s_v, "s_tau": s_tau, "pi": pi}
+        return {"v": v, "A": A, "b": b, "tau": tau, "s_v": s_v, "s_tau": s_tau, "pi": pi}
 
     @staticmethod
     def build_context(num_obs: int, num_alternatives: int = 2) -> dict[str, np.ndarray]:

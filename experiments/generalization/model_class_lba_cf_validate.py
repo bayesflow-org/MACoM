@@ -108,6 +108,12 @@ def parse_args():
                    help="Evaluate LBA under each of the 3 known model IDs.")
 
     # Benchmark cases
+    p.add_argument("--lba_fixed_A", type=float, default=None,
+                   help="Pin LBA's start-point range A and make the intrinsic `a` the real "
+                        "response threshold (A + b == a). Default None keeps the original "
+                        "parameterization where `a` IS A and the threshold is a + b_offset.")
+    p.add_argument("--scenarios", type=str, default=None,
+                   help="Comma-separated val_scenario tags to run (default: all six).")
     p.add_argument("--include_full", action="store_true", default=False,
                    help="Deprecated / no effect: LBA zero-shot now runs the same six "
                         "val_scenarios as every other family, so there is no 'full' "
@@ -183,7 +189,7 @@ def main():
 
     # Standalone LBA family for simulation only
     lba_family = ModelFamily(
-        model=LBA(),
+        model=LBA(fixed_A=args.lba_fixed_A),
         name="LBA",
         prior=lba_priors(),
         intrinsic_params=LBA_LOCAL_PARAMS,
@@ -240,6 +246,14 @@ def main():
     # The older `benchmark_configs` set diverged: it ran up to 5 regressors and 3-way
     # pairwise interactions, so its numbers were not comparable with anything.
     benchmarks = _LBA_WITH_PI["val_scenarios"]
+    if args.scenarios:
+        want = {t.strip() for t in args.scenarios.split(",") if t.strip()}
+        benchmarks = [b for b in benchmarks if b[0] in want]
+        missing = want - {b[0] for b in benchmarks}
+        if missing:
+            raise ValueError(f"--scenarios unknown tags {sorted(missing)}; "
+                             f"available: {[b[0] for b in _LBA_WITH_PI['val_scenarios']]}")
+        logging.info(f"Running scenarios: {[b[0] for b in benchmarks]}")
 
     model_family_config = {
         "max_num_regressors": args.max_num_regressors,
