@@ -236,3 +236,4 @@ wandb/
 
 # Datasets
 datasets/
+*.npz
