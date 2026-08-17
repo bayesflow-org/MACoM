@@ -45,7 +45,7 @@ from cogformer.utils.plot_utils import cogformer_mc_colors
 
 from ..configs import MODELS as _BASE_MODELS, LBA_CONFIG
 from ..utils import (add_global_params, infer_free_fixed_intrinsics, build_encoder_input_dim,
-                     chunked_sample, resolve_val_scenario)
+                     chunked_sample, resolve_val_scenario, seed_case, add_seed_arg)
 
 
 GLOBAL_PARAMS = ["pi"]
@@ -154,6 +154,7 @@ def parse_args():
                    help="Must match the flag the --checkpoint (MC base) was trained with. Use "
                         "--no-self_attn_padding_mask for a mask-off checkpoint.")
 
+    add_seed_arg(p)
     return p.parse_args()
 
 
@@ -187,11 +188,14 @@ def main():
         f"got {model_class.n_global_params} ({model_class.global_param_names})"
     )
 
-    # Standalone LBA family for simulation only
+    # Standalone LBA family for simulation only.
+    # num_workers=1 under --seed: the simulation pool carries its own RNG state, so a
+    # parallel batch_sample is not reproducible (see seed_case).
     lba_family = ModelFamily(
         model=LBA(fixed_A=args.lba_fixed_A),
         name="LBA",
         prior=lba_priors(),
+        num_workers=1 if args.seed is not None else None,
         intrinsic_params=LBA_LOCAL_PARAMS,
         mask_randomizer_kwargs={
             "free_intrinsics": _LBA_WITH_PI["free_params"],
@@ -293,6 +297,8 @@ def main():
                   f"> training {training_max_cats}")
             continue
         print(f"Preparing LBA data: {cfg_name}")
+        # Keyed on "LBA" so the zero-shot and finetuned runs draw identical test sets.
+        seed_case(args.seed, "LBA", cfg_name)
         free_intr, fixed_intr, fixed_vals = infer_free_fixed_intrinsics(
             design_config, LBA_LOCAL_PARAMS, _LBA_WITH_PI["default_fixed_values"]
         )
@@ -344,6 +350,7 @@ def main():
             samples_copy["model_ids"] = np.full(args.batch_size, model_id, dtype=np.int64)
             adapted = adapter.adapt(samples_copy, device=device)
             print(f"Sampling: {cd['cfg_name']} / model_id={model_id} ({id_label})")
+            seed_case(args.seed, "LBA", cd["cfg_name"], salt="ode")
             raw = chunked_sample(
                 cogformer, adapted,
                 num_samples=args.num_samples,

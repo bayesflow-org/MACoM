@@ -10,9 +10,49 @@ import os
 # the first CUDA allocation; setdefault respects an explicit user override.
 os.environ.setdefault("PYTORCH_CUDA_ALLOC_CONF", "expandable_segments:True")
 
+import hashlib
+
 import numpy as np
 import torch
 import torch.utils.data
+
+
+def seed_case(base_seed: int | None, *keys: object, salt: str = "") -> None:
+    """Seed numpy and torch for one validation case, order-independently.
+
+    Comparing two checkpoints on the same test sets requires the sampled datasets to be
+    identical across runs that build *different* ModelClass objects (3-family pretrained
+    vs 4-family finetuned) and iterate cases in a different order. Advancing one global
+    RNG stream cannot do that, because the nth case is not the same case in both runs.
+    So the seed is derived from the case's identity (family, scenario) rather than from
+    its position, and re-seeding per case makes each one independently reproducible.
+
+    blake2b rather than ``hash()``: Python randomizes string hashing per process, which
+    would silently give different seeds on every invocation.
+
+    NOTE: this only determinises sampling that runs in THIS process. ``batch_sample``
+    dispatches to a process pool when ``num_workers > 1`` (model_family.py:479), and
+    those workers carry their own RNG state with nondeterministic task assignment, so a
+    seeded run must build its ModelFamily objects with ``num_workers=1``.
+    """
+    if base_seed is None:
+        return
+    key = ("|".join(str(k) for k in keys) + "|" + salt).encode()
+    digest = hashlib.blake2b(key, digest_size=4).digest()
+    seed = (int(base_seed) + int.from_bytes(digest, "big")) % (2 ** 32)
+    np.random.seed(seed)
+    torch.manual_seed(seed)
+    if torch.cuda.is_available():
+        torch.cuda.manual_seed_all(seed)
+
+
+def add_seed_arg(parser) -> None:
+    """Register --seed, shared by the validation scripts (see ``seed_case``)."""
+    parser.add_argument("--seed", type=int, default=None,
+                        help="Base seed for test-set generation. When set, each case is "
+                             "seeded from its (family, scenario) identity, so two runs "
+                             "produce identical datasets and their metrics can be "
+                             "compared as a paired difference. Forces serial simulation.")
 
 
 def recommend_batch_size(base: int = 64) -> int:
@@ -149,7 +189,10 @@ class ModelClassDataset(torch.utils.data.IterableDataset):
         set_numba_threads((os.cpu_count() or 1) // (n_workers * num_par))
         families = {
             name: ModelFamily(
-                model=cfg["model_cls"](), name=name,
+                # model_kwargs lets a family be constructed with non-default settings
+                # (e.g. LBA(fixed_A=...)) from inside a spawned worker, where the
+                # already-instantiated object from the parent process is unavailable.
+                model=cfg["model_cls"](**cfg.get("model_kwargs", {})), name=name,
                 prior=cfg["prior_fn"](),
                 intrinsic_params=cfg["intrinsic_params"],
                 mask_randomizer_kwargs=cfg["mask_randomizer_kwargs"],

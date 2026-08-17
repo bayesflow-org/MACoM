@@ -45,7 +45,8 @@ from cogformer.utils.plot_utils import cogformer_mc_colors
 
 from ..configs import MODELS as _BASE_MODELS, LBA_CONFIG
 from ..utils import (
-    add_global_params, infer_free_fixed_intrinsics, build_encoder_input_dim, chunked_sample
+    add_global_params, infer_free_fixed_intrinsics, build_encoder_input_dim, chunked_sample,
+    resolve_val_scenario, seed_case, add_seed_arg
 )
 
 GLOBAL_PARAMS = ["pi"]
@@ -63,6 +64,12 @@ LBA_LOCAL_PARAMS = _LBA_WITH_PI["intrinsic_params"]
 
 def parse_args():
     p = argparse.ArgumentParser()
+    p.add_argument("--lba_fixed_A", type=float, default=0.5,
+                   help="MUST match the value the checkpoint was finetuned with. Pin LBA's start-point range A so the intrinsic `a` is the real response "
+                             "threshold (A + b == a), matching what `a` means for DDM/RDM/CDM. "
+                             "Without this the shared `a` column carries two incompatible "
+                             "meanings across families. Pass 0 to also remove start-point "
+                             "variability entirely; None restores the original parameterization.")
     p.add_argument("--checkpoint", type=str, required=True)
     p.add_argument("--outdir", type=str, default="./outputs/figures/model_class/cf/lba_finetune/")
     p.add_argument("--pred_dir", type=str, default=None,
@@ -102,6 +109,7 @@ def parse_args():
                    help="Must match the flag the finetuned checkpoint was trained with. Use "
                         "--no-self_attn_padding_mask for checkpoints finetuned mask-off.")
 
+    add_seed_arg(p)
     return p.parse_args()
 
 
@@ -131,17 +139,23 @@ def main():
                 "global_params": GLOBAL_PARAMS},
     }
 
+    # Seeded runs must simulate serially; the worker pool has its own RNG state.
+    _sim_workers = 1 if args.seed is not None else None
     model_families = {
         "DDM": ModelFamily(model=DDM(), name="DDM", prior=ddm_priors(),
+                           num_workers=_sim_workers,
                            intrinsic_params=_MODELS_WITH_PI["ddm"]["intrinsic_params"],
                            mask_randomizer_kwargs=mask_kwargs["DDM"]),
         "RDM": ModelFamily(model=RDM(), name="RDM", prior=rdm_priors(),
+                           num_workers=_sim_workers,
                            intrinsic_params=_MODELS_WITH_PI["rdm"]["intrinsic_params"],
                            mask_randomizer_kwargs=mask_kwargs["RDM"]),
         "CDM": ModelFamily(model=CDM(), name="CDM", prior=cdm_priors(),
+                           num_workers=_sim_workers,
                            intrinsic_params=_MODELS_WITH_PI["cdm"]["intrinsic_params"],
                            mask_randomizer_kwargs=mask_kwargs["CDM"]),
-        "LBA": ModelFamily(model=LBA(), name="LBA", prior=lba_priors(),
+        "LBA": ModelFamily(model=LBA(fixed_A=args.lba_fixed_A), name="LBA", prior=lba_priors(),
+                           num_workers=_sim_workers,
                            intrinsic_params=LBA_LOCAL_PARAMS,
                            mask_randomizer_kwargs=mask_kwargs["LBA"]),
     }
@@ -186,79 +200,49 @@ def main():
     pred_dir = Path(args.pred_dir) if args.pred_dir else Path(args.outdir) / "predictions"
     pred_dir.mkdir(parents=True, exist_ok=True)
 
-    model_family_config = {
-        "max_num_regressors": args.max_num_regressors,
-        "max_num_categories": args.max_num_categories,
-        "keep_intercept": args.keep_intercept,
-        "add_interaction": args.add_interaction,
-    }
     n_global = model_class.n_global_params
 
-    # ── Build cases: LBA + DDM/RDM/CDM ────────────────────────────────────────
+    # ── Build cases: all four families on the shared six val_scenarios ────────
+    # val_scenarios, NOT benchmark_configs. The six val_scenarios are the set every other
+    # validation path uses (training val_step, model_class_cf_validate, the zero-shot LBA
+    # script), and they include `mixed_predictor`, which benchmark_configs does not have;
+    # benchmark_configs in turn carries four tags nothing else validates on. Iterating it
+    # here produced a set that could not be compared against any other run.
+    training_max_cats = args.max_num_categories
     cases = []
 
-    # LBA benchmarks (model_id = LBA = 3)
-    lba_benchmarks = dict(_LBA_WITH_PI["benchmark_configs"])
-    if not args.include_full:
-        lba_benchmarks.pop("full", None)
-    lba_model_id = model_class.model_index["LBA"]
-    lba_global_indices = model_class.local_to_global["LBA"]
-    lba_link = link_funs["LBA"]
-
-    for cfg_name, design_config in lba_benchmarks.items():
-        print(f"Preparing LBA / {cfg_name}")
-        free, fixed, fixed_vals = infer_free_fixed_intrinsics(
-            design_config, LBA_LOCAL_PARAMS, _LBA_WITH_PI["default_fixed_values"]
-        )
-        samples = model_families["LBA"].batch_sample(
-            design_config=design_config,
-            batch_size=args.batch_size,
-            num_obs=args.num_obs,
-            mask_randomizer_kwargs={"free_intrinsics": free, "fixed_intrinsics": fixed,
-                                    "fixed_values": fixed_vals, "global_params": GLOBAL_PARAMS},
-            flatten_param_outputs=True,
-            fixed_config=True,
-            link_fun=lba_link,
-            **model_family_config,
-        )
-        pm_g, mask_g = model_class.lift_to_global_space("LBA", samples["param_matrices"],
-                                                         samples["param_masks"])
-        samples["param_matrices"] = pm_g
-        samples["param_masks"] = mask_g
-        samples["n_params"] = n_global
-        samples["model_ids"] = np.full(args.batch_size, lba_model_id, dtype=np.int64)
-
-        n_rows = pm_g.shape[1] // n_global
-        true_set = pm_g.reshape(args.batch_size, n_rows, n_global)[:, :, lba_global_indices]
-        params_mask = mask_g.reshape(args.batch_size, n_rows, n_global)[0][:, lba_global_indices]
-
-        outdir = Path(args.outdir) / "lba" / cfg_name
-        outdir.mkdir(parents=True, exist_ok=True)
-        cases.append({
-            "label": "lba", "cfg_name": cfg_name, "design_config": design_config,
-            "intrinsic_params": LBA_LOCAL_PARAMS,
-            "variable_names": _LBA_WITH_PI["variable_names"],
-            "samples": samples, "true_set": true_set, "params_mask": params_mask,
-            "n_rows": n_rows, "global_indices": lba_global_indices, "outdir": outdir,
-        })
-
-    # DDM/RDM/CDM benchmarks (forgetting check)
-    for model_name, model_cfg in {
+    family_configs = {
+        "LBA": _LBA_WITH_PI,
         "DDM": _MODELS_WITH_PI["ddm"],
         "RDM": _MODELS_WITH_PI["rdm"],
         "CDM": _MODELS_WITH_PI["cdm"],
-    }.items():
+    }
+
+    for model_name, model_cfg in family_configs.items():
         mf = model_families[model_name]
         model_id = model_class.model_index[model_name]
         link_fn = link_funs[model_name]
         global_indices = model_class.local_to_global[model_name]
-        intrinsic_params = model_cfg["intrinsic_params"]
-        benchmarks = dict(model_cfg["benchmark_configs"])
-        if not args.include_full:
-            benchmarks.pop("full", None)
+        intrinsic_params = (LBA_LOCAL_PARAMS if model_name == "LBA"
+                            else model_cfg["intrinsic_params"])
 
-        for cfg_name, design_config in benchmarks.items():
+        for cfg_name, design_config, scenario_opts in model_cfg["val_scenarios"]:
+            max_cats, min_cats, mix_opts, skip = resolve_val_scenario(
+                scenario_opts, training_max_cats
+            )
+            n_main_effects = sum(1 for k in design_config if k != "1" and ":" not in k)
+            if n_main_effects > args.max_num_regressors:
+                print(f"Skipping {model_name} / {cfg_name}: needs {n_main_effects} "
+                      f"regressors > max_num_regressors={args.max_num_regressors}")
+                continue
+            if skip:
+                print(f"Skipping {model_name} / {cfg_name}: needs max_num_categories="
+                      f"{max_cats} > training {training_max_cats}")
+                continue
+
             print(f"Preparing {model_name} / {cfg_name}")
+            seed_case(args.seed, model_name, cfg_name)
+
             free, fixed, fixed_vals = infer_free_fixed_intrinsics(
                 design_config, intrinsic_params, model_cfg["default_fixed_values"]
             )
@@ -267,15 +251,22 @@ def main():
                 batch_size=args.batch_size,
                 num_obs=args.num_obs,
                 mask_randomizer_kwargs={"free_intrinsics": free, "fixed_intrinsics": fixed,
-                                        "fixed_values": fixed_vals, "global_params": GLOBAL_PARAMS},
+                                        "fixed_values": fixed_vals,
+                                        "global_params": GLOBAL_PARAMS},
+                max_num_regressors=args.max_num_regressors,
+                max_num_categories=max_cats,
+                min_num_categories=min_cats,
+                keep_intercept=args.keep_intercept,
+                add_interaction=args.add_interaction,
                 flatten_param_outputs=True,
                 fixed_config=True,
                 link_fun=link_fn,
-                **model_family_config,
+                pad_to_max_num_categories=training_max_cats,
+                **mix_opts,
             )
-            pm_g, mask_g = model_class.lift_to_global_space(model_name,
-                                                             samples["param_matrices"],
-                                                             samples["param_masks"])
+            pm_g, mask_g = model_class.lift_to_global_space(
+                model_name, samples["param_matrices"], samples["param_masks"]
+            )
             samples["param_matrices"] = pm_g
             samples["param_masks"] = mask_g
             samples["n_params"] = n_global
@@ -289,16 +280,20 @@ def main():
             outdir.mkdir(parents=True, exist_ok=True)
             cases.append({
                 "label": model_name.lower(), "cfg_name": cfg_name,
-                "design_config": design_config,
+                "model_name": model_name, "design_config": design_config,
                 "intrinsic_params": intrinsic_params,
                 "variable_names": model_cfg["variable_names"],
                 "samples": samples, "true_set": true_set, "params_mask": params_mask,
                 "n_rows": n_rows, "global_indices": global_indices, "outdir": outdir,
             })
 
+    print(f"Prepared {len(cases)} cases "
+          f"({len(family_configs)} families x {len(cases)//max(1,len(family_configs))} scenarios)")
+
     # ── Phase 2: ODE integration ───────────────────────────────────────────────
     for case in cases:
         print(f"Sampling: {case['label']} / {case['cfg_name']}")
+        seed_case(args.seed, case["model_name"], case["cfg_name"], salt="ode")
         adapted = adapter.adapt(case["samples"], device=device)
         raw = chunked_sample(
             cogformer, adapted,
@@ -311,7 +306,17 @@ def main():
             args.batch_size, args.num_samples, case["n_rows"], n_global
         )[:, :, :, case["global_indices"]]
 
-    # ── Phase 3: save predictions and figures ─────────────────────────────────
+        # Persist immediately rather than at the top of phase 3. Sampling is the
+        # expensive part and lives only in memory until written, so a failure anywhere
+        # in phase-3 plotting used to discard every case not yet plotted -- one
+        # AttributeError in a posterior plot once cost a full 7-hour run.
+        tag = f"{case['label']}_{case['cfg_name']}_ft"
+        np.savez(pred_dir / f"{tag}_pred.npz",
+                 pred_set=case["pred_set"], true_set=case["true_set"],
+                 params_mask=case["params_mask"])
+        logging.info(f"[saved] {pred_dir / f'{tag}_pred.npz'}")
+
+    # ── Phase 3: figures (predictions are already written in phase 2) ──────────
     for case in cases:
         label         = case["label"]
         cfg_name      = case["cfg_name"]
@@ -323,10 +328,6 @@ def main():
         params_mask   = case["params_mask"]
         outdir        = case["outdir"]
         tag = f"{label}_{cfg_name}_ft"
-
-        np.savez(pred_dir / f"{tag}_pred.npz",
-                 pred_set=pred_set, true_set=true_set, params_mask=params_mask)
-        logging.info(f"[saved] {pred_dir / f'{tag}_pred.npz'}")
 
         for fn, name, kwargs in [
             (adaptive_recovery,      "recovery",  {}),

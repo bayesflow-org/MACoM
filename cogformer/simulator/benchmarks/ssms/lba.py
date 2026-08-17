@@ -15,12 +15,30 @@ def sample_lba_trial(
     s_v: float,
     s_tau: float,
     max_time: int = 10,
+    max_iter: int = 1000,
 ) -> np.ndarray:
+    # A trial is only defined when at least one accumulator draws a positive drift, so
+    # the draw is rejection-sampled. This loop was previously `while True`, which is
+    # unbounded: a non-finite v/s_v makes `drift_rate > 0` false forever, and a
+    # non-finite threshold makes `t_accum < min_t` false forever, so the trial never
+    # resolves. Because this runs under @njit (no GIL, no interrupt point) inside a
+    # prange body, one such trial wedges the whole batch, its worker, and -- via the
+    # DataLoader's round-robin ordering -- the entire training loop, with no traceback
+    # and no exit code. Capping the retries matches the max_steps bound the DDM/RDM/CDM
+    # kernels already use, and reuses their convention of reporting an unresolved trial
+    # as [-1, -1].
+    #
+    # The cap is not a throughput concern: v is strictly positive (shifted_softplus), so
+    # P(accept) = 1 - prod_c Phi(-v_c/s_v) >= 0.75 and exhausting 1000 retries has
+    # probability <= 0.25**1000 for any well-formed parameter set. It fires only on the
+    # degenerate draws that used to hang.
     n_choices = v.shape[0]
     threshold = A + b
 
-    while True:
-        min_t = 1e25
+    min_t = np.inf
+    winner = -1
+    for _ in range(max_iter):
+        min_t = np.inf
         winner = -1
         for c in range(n_choices):
             start_point = np.random.random() * A
@@ -32,6 +50,9 @@ def sample_lba_trial(
                     winner = c
         if winner != -1:
             break
+
+    if winner == -1:
+        return np.array([-1.0, -1.0], dtype=np.float32)
 
     tau_i = tau + np.random.uniform(0.0, s_tau)
     if min_t + tau_i < max_time:
@@ -49,6 +70,7 @@ def simulate_lba(
     s_v: np.ndarray,
     s_tau: np.ndarray,
     max_time: int = 10,
+    max_iter: int = 1000,
 ):
     n = v.shape[0]
     sim_data = np.zeros((n, 2), dtype=np.float32)
@@ -61,6 +83,7 @@ def simulate_lba(
             s_v=s_v[i],
             s_tau=s_tau[i],
             max_time=max_time,
+            max_iter=max_iter,
         )
     return sim_data
 
@@ -82,7 +105,7 @@ class LBA(Model):
     """
 
     def __init__(self, b_offset: float = 0.5, max_time: int = 10,
-                 fixed_A: float | None = None):
+                 fixed_A: float | None = None, max_iter: int = 1000):
         """
         fixed_A : selects what the intrinsic parameter ``a`` means.
 
@@ -99,10 +122,16 @@ class LBA(Model):
             start-point range shrinks to ``a`` rather than the threshold going invalid.
             ``fixed_A=0`` removes start-point variability entirely, leaving a pure
             threshold model directly comparable to RDM.
+
+        max_iter : cap on the drift rejection-sampling retries per trial. A trial that
+            exhausts it is reported as [-1, -1], the same convention the DDM/RDM/CDM
+            kernels use when they hit ``max_steps``. See ``sample_lba_trial``: without a
+            cap, a degenerate parameter set hangs a worker permanently and silently.
         """
         self.b_offset = b_offset
         self.max_time = max_time
         self.fixed_A = fixed_A
+        self.max_iter = max_iter
 
     def prepare_params(
         self,
@@ -171,7 +200,8 @@ class LBA(Model):
     def simulate(self, params: dict[str, np.ndarray], context=None):
         pi = params.get("pi", None)
         lba_params = {k: v for k, v in params.items() if k != "pi"}
-        results = simulate_lba(**lba_params, max_time=self.max_time)
+        results = simulate_lba(**lba_params, max_time=self.max_time,
+                               max_iter=self.max_iter)
         rts = results[:, 0][..., None]
         choices = results[:, 1][..., None]
         num_alternatives = int((context or {}).get("num_alternatives", 2))

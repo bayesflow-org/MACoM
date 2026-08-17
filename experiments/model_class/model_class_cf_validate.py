@@ -30,7 +30,7 @@ from cogformer.utils.plot_utils import cogformer_mc_colors
 
 from ..configs import MODELS as _BASE_MODELS
 from ..utils import (add_global_params, infer_free_fixed_intrinsics, build_encoder_input_dim,
-                     chunked_sample, resolve_val_scenario)
+                     chunked_sample, resolve_val_scenario, seed_case, add_seed_arg)
 
 GLOBAL_PARAMS = ["pi"]
 GLOBAL_VARIABLE_NAMES = [r"$\pi$"]
@@ -159,6 +159,7 @@ def parse_args():
                    help="Must match the flag the checkpoint was trained with. Use "
                         "--no-self_attn_padding_mask for checkpoints trained mask-off.")
 
+    add_seed_arg(p)
     return p.parse_args()
 
 
@@ -170,15 +171,17 @@ def main():
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
     # Rebuild ModelClass to access model_index, n_global_params, and local_to_global maps.
+    # Seeded runs must simulate serially; the worker pool has its own RNG state.
+    _sim_workers = 1 if args.seed is not None else None
     model_families = {
         "DDM": ModelFamily(model=DDM(), name="DDM",
-                           prior=ddm_priors(),
+                           prior=ddm_priors(), num_workers=_sim_workers,
                            intrinsic_params=_MODELS_WITH_PI["ddm"]["intrinsic_params"]),
         "RDM": ModelFamily(model=RDM(), name="RDM",
-                           prior=rdm_priors(),
+                           prior=rdm_priors(), num_workers=_sim_workers,
                            intrinsic_params=_MODELS_WITH_PI["rdm"]["intrinsic_params"]),
         "CDM": ModelFamily(model=CDM(), name="CDM",
-                           prior=cdm_priors(),
+                           prior=cdm_priors(), num_workers=_sim_workers,
                            intrinsic_params=_MODELS_WITH_PI["cdm"]["intrinsic_params"]),
     }
     link_funs = {
@@ -263,6 +266,7 @@ def main():
                       f"> training {training_max_cats}")
                 continue
             print(f"Preparing data: {model_name} / {cfg_name}")
+            seed_case(args.seed, model_name, cfg_name)
             outdir = Path(args.outdir) / model_name.lower() / cfg_name
             outdir.mkdir(parents=True, exist_ok=True)
 
@@ -331,6 +335,7 @@ def main():
     # Phase 2: run all ODE integrations
     for case in cases:
         print(f"Sampling: {case['model_name']} / {case['cfg_name']}")
+        seed_case(args.seed, case["model_name"], case["cfg_name"], salt="ode")
         raw = chunked_sample(
             cogformer, case["adapted"],
             num_samples=args.num_samples,
