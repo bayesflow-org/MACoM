@@ -228,6 +228,7 @@ outputs/figures/*
 !outputs/figures/model_class/
 outputs/figures/model_class/*
 !outputs/figures/model_class/cf
+outputs/figures/model_class/cf/**/*.npz
 
 .claude/
 .claude/settings.local.json
