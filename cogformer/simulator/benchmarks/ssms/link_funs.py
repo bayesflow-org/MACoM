@@ -49,6 +49,19 @@ def lba_link_fun():
         "pi":    lambda x: x,  # identity — pi is sampled directly in [0, 1]
     }
 
+def addm_link_fun():
+    return {
+        "v":      shifted_softplus,
+        "v_diff": lambda x: x,   # signed: item 1 may be worth more or less than item 0
+        "omega":  lambda x: scaled_sigmoid(x, lower_bound=0.0, upper_bound=1.0),
+        "a":      shifted_softplus,
+        "tau":    shifted_softplus,
+        "s_v":    shifted_softplus,
+        "s_tau":  shifted_softplus,
+        "pi":     lambda x: x,
+    }
+
+
 def lca_link_fun():
     return {
         "v":      shifted_softplus,

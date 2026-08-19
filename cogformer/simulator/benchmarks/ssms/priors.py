@@ -58,6 +58,25 @@ def lba_priors():
         "pi":    _pi_sampler,
     }
 
+def addm_priors():
+    """aDDM (Krajbich et al., 2010).
+
+    omega is the attentional discount on the UNattended item and lives on [0, 1]
+    (scaled_sigmoid link), so its prior is on the unconstrained scale. loc=0 puts
+    the prior mass around omega ~ 0.5 — attention matters but does not dominate.
+    """
+    return {
+        "v":      norm(loc=0.6,  scale=0.5),
+        "v_diff": norm(loc=0.0,  scale=0.5),
+        "omega":  norm(loc=0.0,  scale=1.2),
+        "a":      norm(loc=0.25, scale=0.5),
+        "tau":    norm(loc=-1.2, scale=0.5),
+        "s_v":    norm(loc=-1.0, scale=0.6),
+        "s_tau":  norm(loc=-1.5, scale=0.7),
+        "pi":     _pi_sampler,
+    }
+
+
 def lca_priors():
     return {
         "v":      norm(loc=0.6,  scale=0.5),
