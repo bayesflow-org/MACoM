@@ -223,10 +223,17 @@ def collect_ppc(
 
     obs_rts_by_cond = {}    # condition_key → list of observed RT arrays
     ppc_rts_by_cond = {}    # condition_key → list of (n_subjects * n_trials,) arrays, one per sample
+    # Choices are simulated anyway; collecting them costs nothing and is the ONLY way to
+    # see response-dimension misfit. For CDM the response IS an angle, so an RT-only PPC
+    # is blind to the thing most likely to be wrong.
+    obs_ch_by_cond = {}
+    ppc_ch_by_cond = {}
 
     for cond_name, cond_col, label_map in cfg["conditions"]:
         obs_rts_by_cond[cond_name] = {lbl: [] for lbl in label_map.values()}
         ppc_rts_by_cond[cond_name] = {lbl: [[] for _ in sample_indices] for lbl in label_map.values()}
+        obs_ch_by_cond[cond_name] = {lbl: [] for lbl in label_map.values()}
+        ppc_ch_by_cond[cond_name] = {lbl: [[] for _ in sample_indices] for lbl in label_map.values()}
 
     for i, (sid, post_subj) in enumerate(zip(subject_ids, posteriors)):
         d = subject_data[sid]
@@ -248,6 +255,7 @@ def collect_ppc(
                 mask = cond_vals == val
                 if mask.any():
                     obs_rts_by_cond[cond_name][lbl].append(d["rts"][mask])
+                    obs_ch_by_cond[cond_name][lbl].append(d["choices"][mask])
 
         # PPC: simulate for each sampled posterior draw
         for k, s_idx in enumerate(sample_indices):
@@ -263,6 +271,7 @@ def collect_ppc(
                     mask = valid_cond == val
                     if mask.any():
                         ppc_rts_by_cond[cond_name][lbl][k].append(sim["rts"][mask])
+                        ppc_ch_by_cond[cond_name][lbl][k].append(sim["choices"][mask])
 
         if (i + 1) % 10 == 0:
             logging.info(f"  processed {i + 1}/{len(subject_ids)} subjects")
@@ -280,7 +289,19 @@ def collect_ppc(
         for cn, cond in ppc_rts_by_cond.items()
     }
 
-    return obs_pooled, ppc_pooled, cfg["conditions"]
+    obs_ch_pooled = {
+        cn: {lbl: np.concatenate(v) for lbl, v in cond.items() if v}
+        for cn, cond in obs_ch_by_cond.items()
+    }
+    ppc_ch_pooled = {
+        cn: {
+            lbl: [np.concatenate(per_sample) for per_sample in cond[lbl] if any(len(a) > 0 for a in per_sample)]
+            for lbl in cond
+        }
+        for cn, cond in ppc_ch_by_cond.items()
+    }
+
+    return obs_pooled, ppc_pooled, cfg["conditions"], obs_ch_pooled, ppc_ch_pooled
 
 
 def _kde_eval(data, xs):
@@ -349,6 +370,72 @@ def plot_ppc(obs_pooled, ppc_pooled, conditions, model_name, variant, outdir):
         logging.info(f"[saved] {savepath}")
 
 
+def plot_choice_ppc(obs_ch, ppc_ch, conditions, model_name, variant, outdir):
+    """PPC on the RESPONSE dimension.
+
+    CDM's response is a continuous angle, so its misfit is invisible to an RT-only
+    PPC — plot_ppc never touches choices. For CDM this compares the observed angular
+    density against the predicted one; for DDM/RDM it compares choice proportions.
+    """
+    circular = model_name == "cdm"
+    outdir.mkdir(parents=True, exist_ok=True)
+
+    for cond_name, _, label_map in conditions:
+        labels = [l for l in label_map.values() if l in obs_ch[cond_name]
+                  and len(obs_ch[cond_name][l]) and len(ppc_ch[cond_name].get(l, []))]
+        if not labels:
+            continue
+        fig, axes = plt.subplots(1, len(labels), figsize=(4.2 * len(labels), 3.2), squeeze=False)
+
+        for j, lbl in enumerate(labels):
+            ax = axes[0, j]
+            o = np.asarray(obs_ch[cond_name][lbl], dtype=float)
+            P = ppc_ch[cond_name][lbl]
+
+            if circular:
+                xs = np.linspace(-np.pi, np.pi, 400)
+                dens = np.array([_kde_eval(np.asarray(p, dtype=float), xs) for p in P])
+                lo, hi = np.percentile(dens, [2.5, 97.5], axis=0)
+                ax.fill_between(xs, lo, hi, alpha=0.30, color="#c44e52", lw=0, label="PPC 95%")
+                ax.plot(xs, np.median(dens, axis=0), color="#c44e52", lw=1.4, label="PPC median")
+                ax.plot(xs, _kde_eval(o, xs), color="black", lw=1.8, label="observed")
+                for v in (-np.pi / 2, np.pi / 2):
+                    ax.axvline(v, color="steelblue", ls=":", lw=1.2)
+                ax.set_xlim(-np.pi, np.pi)
+                ax.set_xlabel(r"response deviation $\theta$ (rad)", fontsize=9)
+                frac_o = float(np.mean(np.abs(o) > np.pi / 2))
+                frac_p = float(np.median([np.mean(np.abs(np.asarray(p)) > np.pi / 2) for p in P]))
+                ax.set_title(f"{lbl}\n$P(|\\theta|>\\pi/2)$: obs {frac_o:.3f} / ppc {frac_p:.3f}",
+                             fontsize=9)
+            else:
+                levels = np.unique(o)
+                obs_p = np.array([np.mean(o == v) for v in levels])
+                ppc_p = np.array([[np.mean(np.asarray(p) == v) for v in levels] for p in P])
+                lo, hi = np.percentile(ppc_p, [2.5, 97.5], axis=0)
+                med = np.median(ppc_p, axis=0)
+                x = np.arange(len(levels))
+                ax.bar(x, obs_p, width=0.55, color="black", alpha=0.75, label="observed")
+                ax.errorbar(x, med, yerr=[med - lo, hi - med], fmt="o", color="#c44e52",
+                            capsize=4, lw=1.4, label="PPC median + 95%")
+                ax.set_xticks(x); ax.set_xticklabels([f"{int(v)}" for v in levels])
+                ax.set_xlabel("choice", fontsize=9)
+                ax.set_title(lbl, fontsize=9)
+
+            ax.set_ylabel("density" if circular else "proportion", fontsize=9)
+            ax.tick_params(labelsize=7)
+            ax.spines[["top", "right"]].set_visible(False)
+            if j == 0:
+                ax.legend(fontsize=7, frameon=False)
+
+        fig.suptitle(f"{model_name.upper()} {variant} — response-dimension PPC ({cond_name})",
+                     fontsize=10)
+        fig.tight_layout()
+        savepath = outdir / f"{model_name}_{variant}_choice_ppc_{cond_name}.pdf"
+        fig.savefig(savepath, bbox_inches="tight")
+        plt.close(fig)
+        logging.info(f"[saved] {savepath}")
+
+
 def parse_args():
     p = argparse.ArgumentParser()
     p.add_argument("--model", type=str, required=True, choices=["ddm", "rdm", "cdm"])
@@ -374,7 +461,7 @@ def main():
     outdir = Path(args.outdir) if args.outdir else FIG_DIR / args.model
     logging.info(f"Running PPC: model={args.model}, variant={args.variant}, n_ppc_samples={args.n_ppc_samples}")
 
-    obs_pooled, ppc_pooled, conditions = collect_ppc(
+    obs_pooled, ppc_pooled, conditions, obs_ch, ppc_ch = collect_ppc(
         model_name=args.model,
         variant=args.variant,
         n_ppc_samples=args.n_ppc_samples,
@@ -382,6 +469,7 @@ def main():
         no_contamination=args.no_contamination,
     )
     plot_ppc(obs_pooled, ppc_pooled, conditions, args.model, args.variant, outdir)
+    plot_choice_ppc(obs_ch, ppc_ch, conditions, args.model, args.variant, outdir)
     logging.info("Done.")
 
 

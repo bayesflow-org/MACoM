@@ -242,7 +242,16 @@ def load_cdm_data(csv_path: str) -> tuple[dict, list[int]]:
       u_2     : difficulty (3 levels: 1,2,3), dummy coded to (d2, d3)
                 reference category = 1                  (categorical, 2 columns)
       u_1:u_2 : speed_condition × (d2, d3)             (cat×cont → 2 columns)
+
+    RESPONSE SCALE: raw ``resp_deviation`` spans [-pi/2, pi/2], but CDM emits
+    ``arctan2(x1, x0)`` on [-pi, pi] — the column is a HALF-ANGLE. It is doubled
+    here so data and simulator share a support. Evidence (2026-08-19, mc r4c4,
+    500 draws, choice-dimension PPC): KS 0.067->0.026 (Speeded) and 0.099->0.034
+    (Unspeeded); PPC/observed angular sd mismatch +29% -> +3%; quantiles inside
+    the 95% band 1/5 -> 5/5 for Unspeeded. Confirm against Kvam (2019)'s response
+    apparatus before treating as settled.
     """
+    RESP_DEVIATION_SCALE = 2.0
     import pandas as pd
     df = pd.read_csv(csv_path)
 
@@ -262,7 +271,7 @@ def load_cdm_data(csv_path: str) -> tuple[dict, list[int]]:
 
         data[int(sid)] = {
             "rts":     sdf["rt"].values.astype(np.float32),
-            "choices": sdf["resp_deviation"].values.astype(np.float32),
+            "choices": (sdf["resp_deviation"].values * RESP_DEVIATION_SCALE).astype(np.float32),
             "u_1":     speed,
             "u_2":     np.column_stack([d2, d3]),          # (num_obs, 2)
             "u_1:u_2": np.column_stack([inter_d2, inter_d3]),  # (num_obs, 2)
