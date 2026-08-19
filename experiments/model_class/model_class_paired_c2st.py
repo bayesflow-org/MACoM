@@ -24,6 +24,26 @@ sample size: split a single arm's posterior *draws* in half and run C2ST of that
 against itself. Same checkpoint, same datasets, same n — the only thing separating the
 two halves is finite-draw noise. That is the empirical floor.
 
+Empirically that floor lands slightly BELOW 0.5, not above: a fitted MLP is not the
+Bayes classifier, so under the null it fits training-fold noise and generalises a
+little worse than chance. The effect grows with dimension (hidden width scales as
+2**ceil(log2(10*d))): 1-D cell nulls sit at ~0.499, joint nulls at ~0.490. Measuring
+the null is still right, it just corrects a negative bias rather than a positive one.
+
+THREE ARMS, and they answer different questions
+-----------------------------------------------
+1. per-cell   — one parameter at a time, draws pooled across all datasets.
+2. joint      — all active cells at once, draws pooled across all datasets.
+3. per-dataset— all active cells at once, ONE CLASSIFIER PER DATASET, no pooling.
+
+Arms 1 and 2 pool draws from every dataset. If finetuning displaces each dataset's
+posterior in a dataset-specific direction, those displacements cancel in the pool and
+the per-cell C2ST reads ~0.5 even though every posterior moved substantially. Measured
+on the 2026-08-16 paired run: per-dataset posterior means shifted by ~0.8-1.0 posterior
+SD per parameter, yet the pooled per-cell C2ST was 0.51. Arm 3 is the one to read when
+asking "did finetuning change the posterior"; arm 1 answers only "did it change on
+average across datasets", which is a much weaker claim.
+
 The draw split (not a dataset split) is the right null because the real comparison
 holds datasets fixed. Splitting by dataset would fold between-dataset variation into
 the floor and overstate it.
@@ -124,9 +144,30 @@ def _cell_task(args):
     return (r, c), real_full, real_matched, null_orig, null_ft
 
 
+def _dataset_task(args):
+    """One dataset: joint C2ST over active cells, plus both within-arm nulls.
+
+    This is the arm that actually answers "did finetuning change the posterior for
+    this dataset". The pooled arms cannot: a per-dataset displacement whose direction
+    varies across datasets averages to ~0 when draws from all datasets are pooled, so
+    the pooled marginal C2ST reads ~0.5 even when every individual posterior moved by
+    a full posterior SD. Sample size here is small (half draws per side), so the null
+    sits well below 0.5 from classifier overfitting — read ``excess``, never the raw
+    accuracy.
+    """
+    i, orig_ds, ft_ds, half, n_splits, max_iter, seed, hidden = args
+    kw = dict(n_splits=n_splits, hidden_layer_sizes=hidden,
+              max_iter=max_iter, random_state=seed)
+    real = compute_c2st_accuracy(orig_ds[:half], ft_ds[:half], **kw)
+    null_orig = compute_c2st_accuracy(orig_ds[:half], orig_ds[half:], **kw)
+    null_ft = compute_c2st_accuracy(ft_ds[:half], ft_ds[half:], **kw)
+    return i, real, null_orig, null_ft
+
+
 def run_pair(family, scenario, orig_path, ft_path, cfg, outdir,
              max_num_categories, n_splits, max_iter, seed, workers,
-             joint_hidden, skip_joint, strict):
+             joint_hidden, skip_joint, strict,
+             skip_per_dataset=False, per_dataset_max=None, per_dataset_hidden=None):
     orig_pred, orig_true, orig_mask = load_pred(orig_path)
     ft_pred, ft_true, ft_mask = load_pred(ft_path)
 
@@ -217,6 +258,63 @@ def run_pair(family, scenario, orig_path, ft_path, cfg, outdir,
         joint["joint_null_floor"] = max(joint["joint_null_orig"], joint["joint_null_ft"])
         joint["joint_excess"] = joint["joint_real_matched"] - joint["joint_null_floor"]
 
+    # --- per-dataset joint C2ST: one classifier per dataset, no pooling ---
+    per_ds = {}
+    if not skip_per_dataset:
+        act = mask == 1.0
+        n_active = int(act.sum())
+        hidden = tuple(per_dataset_hidden) if per_dataset_hidden else "auto"
+        n_ds = batch if per_dataset_max is None else min(batch, per_dataset_max)
+        logging.info(
+            f"[{family}/{scenario}] per-dataset C2ST over {n_active} dims "
+            f"for {n_ds}/{batch} datasets, hidden={hidden}"
+        )
+        ds_tasks = [
+            (i,
+             orig_pred[i][:, act].reshape(draws, n_active),
+             ft_pred[i][:, act].reshape(draws, n_active),
+             half, n_splits, max_iter, seed, hidden)
+            for i in range(n_ds)
+        ]
+        ds_res = {}
+        if workers > 1:
+            with ProcessPoolExecutor(max_workers=workers) as ex:
+                for fut in as_completed([ex.submit(_dataset_task, t) for t in ds_tasks]):
+                    i, *vals = fut.result()
+                    ds_res[i] = vals
+        else:
+            for t in ds_tasks:
+                i, *vals = _dataset_task(t)
+                ds_res[i] = vals
+
+        ds_rows = []
+        for i in range(n_ds):
+            real, n_o, n_f = ds_res[i]
+            floor = max(n_o, n_f)
+            ds_rows.append({
+                "dataset": i, "c2st_real": real,
+                "null_orig": n_o, "null_ft": n_f, "null_floor": floor,
+                "excess": real - floor,
+            })
+        ds_df = pd.DataFrame(ds_rows)
+        ds_path = outdir / family / f"{family}_{scenario}_per_dataset_c2st.csv"
+        ds_path.parent.mkdir(parents=True, exist_ok=True)
+        ds_df.to_csv(ds_path, index=False)
+        logging.info(f"[saved] {ds_path}")
+
+        ex_v = ds_df["excess"].values
+        per_ds = {
+            "perds_n_datasets": int(n_ds),
+            "perds_mean_real": float(ds_df["c2st_real"].mean()),
+            "perds_mean_null_floor": float(ds_df["null_floor"].mean()),
+            "perds_mean_excess": float(ex_v.mean()),
+            "perds_median_excess": float(np.median(ex_v)),
+            "perds_q10_excess": float(np.percentile(ex_v, 10)),
+            "perds_q90_excess": float(np.percentile(ex_v, 90)),
+            "perds_frac_excess_gt_05": float((ex_v > 0.05).mean()),
+            "perds_frac_excess_gt_10": float((ex_v > 0.10).mean()),
+        }
+
     cell_out = outdir / family
     cell_out.mkdir(parents=True, exist_ok=True)
     csv_path = cell_out / f"{family}_{scenario}_c2st.csv"
@@ -233,6 +331,7 @@ def run_pair(family, scenario, orig_path, ft_path, cfg, outdir,
         "max_excess": float(df["excess"].max()),
         "worst_cell": str(df.iloc[0]["parameter"]),
         **joint,
+        **per_ds,
     }
     return summary
 
@@ -263,6 +362,16 @@ def parse_args():
                    help="Hidden layer sizes for the joint C2ST. Default 'auto' scales as "
                         "2**ceil(log2(10*dims)), which for ~90 dims is (1024, 1024) and is "
                         "slow; e.g. --joint_hidden 128 128 is much cheaper.")
+    p.add_argument("--skip_per_dataset", action="store_true",
+                   help="Skip the per-dataset arm (one classifier per dataset, no pooling). "
+                        "That arm is the one that detects dataset-specific posterior shifts; "
+                        "the pooled arms average them away.")
+    p.add_argument("--per_dataset_max", type=int, default=None,
+                   help="Cap how many datasets the per-dataset arm runs on (default: all).")
+    p.add_argument("--per_dataset_hidden", nargs="+", type=int, default=None,
+                   help="MLP hidden sizes for the per-dataset arm. Default 'auto' scales with "
+                        "dimension, which is heavily overparameterized for the small per-dataset "
+                        "sample; the measured null absorbs this, but a smaller net is faster.")
     p.add_argument("--skip_joint", action="store_true",
                    help="Per-cell C2ST only; skip the expensive joint fit.")
     p.add_argument("--strict", action="store_true",
@@ -295,6 +404,7 @@ def main():
             family, scenario, orig_path, ft_path, cfg, outdir,
             args.max_num_categories, args.n_splits, args.max_iter, args.seed,
             args.workers, args.joint_hidden, args.skip_joint, args.strict,
+            args.skip_per_dataset, args.per_dataset_max, args.per_dataset_hidden,
         ))
 
     for family, scenario, why in skipped:

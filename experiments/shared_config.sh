@@ -39,12 +39,29 @@ MF_BF_EPOCHS=1000
 LCA_FFI_EPOCHS=500
 LBA_FT_EPOCHS=2000
 
-# ── Derived checkpoint paths ───────────────────────────────────────────────────
-DDM_MF_CKPT="./outputs/checkpoints/model_family/cf/ddm/cogformer_ddm_mf_l${DEC_LAYERS}_h${HEADS}_p${PROJ}_s${SEEDS}_d${DIM}_o${OBS}_b${BATCH}_e${EPOCHS}_t${STEPS}.pt"
-CDM_MF_CKPT="./outputs/checkpoints/model_family/cf/cdm/cogformer_cdm_mf_l${DEC_LAYERS}_h${HEADS}_p${PROJ}_s${SEEDS}_d${DIM}_o${OBS}_b${BATCH}_e${EPOCHS}_t${STEPS}.pt"
-RDM_MF_CKPT="./outputs/checkpoints/model_family/cf/rdm/cogformer_rdm_mf_l${DEC_LAYERS}_h${HEADS}_p${PROJ}_s${SEEDS}_d${DIM}_o${OBS}_b${BATCH}_e${EPOCHS}_t${STEPS}.pt"
+# ── Encoder design geometry ────────────────────────────────────────────────────
+# A checkpoint's encoder input_embedding is sized by (max_num_regressors,
+# max_num_categories) via build_encoder_input_dim: r2c2→9, r2c3→14, r4c4→72,
+# r5c5→186. A checkpoint can ONLY be loaded at the geometry it was trained at,
+# so these travel with the paths below and must be passed to every apply script.
+# The real-data designs need: DDM/RDM 2 continuous regressors → r2c2;
+# CDM 2 regressors with a 3-level categorical (difficulty) → r2c3.
+MF_MAX_REG=2; MF_MAX_CAT=2      # ddm, rdm
+CDM_MF_MAX_REG=2; CDM_MF_MAX_CAT=3
+MC_MAX_REG=4; MC_MAX_CAT=4
 
-MC_CKPT="./outputs/checkpoints/model_class/cf/cogformer_model_class_fm_l${DEC_LAYERS}_h${HEADS}_p${PROJ}_s${SEEDS}_d${MC_DIM}_b${MC_BATCH}_e${EPOCHS}_t${STEPS}.pt"
+# ── Derived checkpoint paths ───────────────────────────────────────────────────
+# NOTE: every checkpoint predating commit 77be0b0 (2026-07-09, factorized
+# regressor-category identity embedding) lacks decoder.{regressor,category}_embedding
+# and CANNOT be loaded by current code. That rules out everything under */c2r2/.
+DDM_MF_CKPT="./outputs/checkpoints/model_family/cf/ddm/r2c2/cogformer_ddm_mf_l${DEC_LAYERS}_h${HEADS}_p${PROJ}_s${SEEDS}_d${DIM}_o${OBS}_b128_e2500_t${STEPS}.pt"
+# MISSING — no post-factorization CDM/RDM model-family checkpoint exists yet.
+# Newest are ./outputs/checkpoints/model_family/cf/{cdm,rdm}/c2r2/... (2026-07-08),
+# which are pre-factorization. Both need retraining before real-data apply can run.
+CDM_MF_CKPT="./outputs/checkpoints/model_family/cf/cdm/r2c3/cogformer_cdm_mf_l${DEC_LAYERS}_h${HEADS}_p${PROJ}_s${SEEDS}_d${DIM}_o${OBS}_b128_e2500_t${STEPS}.pt"
+RDM_MF_CKPT="./outputs/checkpoints/model_family/cf/rdm/r2c2/cogformer_rdm_mf_l${DEC_LAYERS}_h${HEADS}_p${PROJ}_s${SEEDS}_d${DIM}_o${OBS}_b128_e2500_t${STEPS}.pt"
+
+MC_CKPT="./outputs/checkpoints/model_class/cf/r4c4_b256_e10000/cogformer_model_class_fm_l${DEC_LAYERS}_h${HEADS}_p${PROJ}_s${SEEDS}_d${MC_DIM}_b256_e${EPOCHS}_t${STEPS}.pt"
 
 ENC_REP_CKPT="./outputs/checkpoints/encoder_rep/cf/cogformer_encoder_rep_fm_l${DEC_LAYERS}_h${HEADS}_p${PROJ}_s${SEEDS}_d${MC_DIM}_b${BATCH}_e${EPOCHS}_t${STEPS}.pt"
 

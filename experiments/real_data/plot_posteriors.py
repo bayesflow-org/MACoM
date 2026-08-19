@@ -41,14 +41,14 @@ PARAM_MATH = {
 #   cols 9-24:  u_1:u_2 block (width 16)
 
 DDM_DESIGN = [
-    (0,  "Intercept",                   ["v", "a", "z", "tau", "s_v", "s_tau", "pi"]),
+    (0,  "Intercept",                   ["v", "a", "z", "tau", "s_v", "s_tau"]),
     (1,  r"Stim type ($u_1$)",          ["v", "a", "z", "tau", "s_tau"]),
     (5,  r"Truth ($u_2$)",              ["v", "a", "z", "tau", "s_tau"]),
     (9,  r"$u_1 \times u_2$",           ["v", "a", "z", "tau", "s_tau"]),
 ]
 
 CDM_DESIGN = [
-    (0,  "Intercept",                      ["v", "v_theta", "a", "tau", "s_v", "s_tau", "pi"]),
+    (0,  "Intercept",                      ["v", "v_theta", "a", "tau", "s_v", "s_tau"]),
     (1,  r"Speed ($u_1$)",                 ["v", "a", "tau"]),
     (5,  r"Difficulty $d_2$ ($u_2$)",      ["v", "a", "tau"]),
     (6,  r"Difficulty $d_3$ ($u_2$)",      ["v", "a", "tau"]),
@@ -222,6 +222,65 @@ def mc_vs_mf_scatter(
     print(f"Saved: {savepath}")
 
 
+def pi_figure(
+    datasets, savepath,
+    mc_param_key="global_param_names", mf_param_key="intrinsic_params",
+):
+    """Dedicated figure for the contamination probability pi.
+
+    pi is intercept-only, so it is kept out of the design-row grid (where it
+    would take a column of N/A cells) and shown on its own here, one panel
+    per dataset.
+    """
+    n = len(datasets)
+    fig, axes = plt.subplots(1, n, figsize=(3.2 * n, 2.9), squeeze=False)
+
+    for j, (label, mc_file, mf_file) in enumerate(datasets):
+        ax = axes[0, j]
+        mc = np.load(mc_file, allow_pickle=True)
+        mf = np.load(mf_file, allow_pickle=True)
+
+        mc_idx = _param_idx(list(mc[mc_param_key]), "pi")
+        mf_idx = _param_idx(list(mf[mf_param_key]), "pi")
+        mc_vals = np.median(mc["posteriors"][:, :, 0, mc_idx], axis=1)
+        mf_vals = np.median(mf["posteriors"][:, :, 0, mf_idx], axis=1)
+
+        _kde_plot(ax, mc_vals, MC_COLOR, "mc")
+        _kde_plot(ax, mf_vals, MF_COLOR, "mf")
+
+        ax.axvline(np.mean(mc_vals), color=MC_COLOR, lw=1.0, ls="--", alpha=0.8)
+        ax.axvline(np.mean(mf_vals), color=MF_COLOR, lw=1.0, ls="--", alpha=0.8)
+        ax.axvline(0, color="gray", lw=0.6, ls="--", alpha=0.4)
+
+        wd = wasserstein_distance(mc_vals, mf_vals)
+        ax.text(0.04, 0.96, f"W={wd:.4f}",
+                transform=ax.transAxes, ha="left", va="top",
+                fontsize=7, color="black")
+
+        ax.set_title(f"{label}  ($n$={len(mc_vals)})", fontsize=9)
+        ax.set_xlabel(PARAM_MATH["pi"], fontsize=10)
+        ax.set_yticks([])
+        ax.spines[["top", "right", "left"]].set_visible(False)
+        ax.tick_params(axis="x", labelsize=7)
+
+    mc_patch = mpatches.Patch(color=MC_COLOR, alpha=0.7, label="ModelClass (mc)")
+    mf_patch = mpatches.Patch(color=MF_COLOR, alpha=0.7, label="ModelFamily (mf)")
+    fig.legend(
+        handles=[mc_patch, mf_patch],
+        fontsize=8, loc="lower center",
+        ncol=2, bbox_to_anchor=(0.5, 0),
+        frameon=False,
+    )
+
+    fig.suptitle(
+        "Contamination probability (per-subject posterior medians)", fontsize=10
+    )
+    fig.tight_layout(rect=[0, 0.08, 1, 1])
+    fig.savefig(savepath, bbox_inches="tight")
+    plt.close(fig)
+    print(f"Saved: {savepath}")
+
+
 def main():
     FIG_DIR.mkdir(parents=True, exist_ok=True)
 
@@ -267,6 +326,17 @@ def main():
         intercept_param_names=["v", "v_theta", "a", "tau", "s_v", "s_tau", "pi"],
         title="CDM Intercept: mc vs mf posterior means per subject",
         savepath=FIG_DIR / "cdm_mc_vs_mf_scatter.pdf",
+    )
+
+    # pi on its own (intercept-only, kept out of the design grid)
+    pi_figure(
+        datasets=[
+            ("DDM", DATA_DIR / "ddm/mc/ddm_mc_posteriors.npz",
+                    DATA_DIR / "ddm/mf/ddm_mf_posteriors.npz"),
+            ("CDM", DATA_DIR / "cdm/mc/cdm_mc_posteriors.npz",
+                    DATA_DIR / "cdm/mf/cdm_mf_posteriors.npz"),
+        ],
+        savepath=FIG_DIR / "pi_posteriors.pdf",
     )
 
 

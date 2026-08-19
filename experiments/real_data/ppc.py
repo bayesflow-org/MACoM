@@ -32,8 +32,12 @@ from .data_utils import (
 DATA_DIR = Path("./outputs/data/real_data")
 FIG_DIR = Path("./outputs/figures/real_data/ppc")
 
-MAX_NUM_REGRESSORS = 5
-MAX_NUM_CATEGORIES = 5
+# Encoder design geometry. MUST match the checkpoint that produced the posteriors
+# (r5c5 for the 2026-06-02 npz, r4c4 for the model_class r4c4 checkpoint). A mismatch
+# silently reshapes the posterior into the wrong row layout, so collect_ppc asserts
+# the implied row count against the stored posteriors.
+MAX_NUM_REGRESSORS = 4
+MAX_NUM_CATEGORIES = 4
 KEEP_INTERCEPT = True
 
 # DDM conditions: group trials by stim_type and truth
@@ -126,14 +130,23 @@ def _condition_labels(subject_data, condition_col, label_map):
 
 
 def _simulate_subject(model, link_funs, intrinsic_params, design_matrix, posterior_sample,
-                      no_contamination=False):
+                      no_contamination=False, param_mask_2d=None):
     """
     Forward-simulate one set of trials from one posterior sample.
 
     posterior_sample : (n_rows, n_params) — unconstrained regression coefficients
     design_matrix    : (num_obs, n_rows)
+    param_mask_2d    : (n_rows, n_params) 0/1 — which (row, param) cells the
+                       decoder was actually trained on. REQUIRED for correctness:
+                       inactive cells hold unconstrained flow output that never
+                       received gradient, and the matmul below would otherwise sum
+                       them into params that are intercept-only in the design
+                       (pi, s_v, and for CDM v_theta/s_tau). Leaving it unapplied
+                       inflated the effective contamination rate from ~0.4% to ~27%.
     Returns dict with "rts" (num_obs,) and "choices" (num_obs,).
     """
+    if param_mask_2d is not None:
+        posterior_sample = posterior_sample * param_mask_2d
     predictor = design_matrix @ posterior_sample  # (num_obs, n_params)
     params = {}
     for j, pname in enumerate(intrinsic_params):
@@ -152,7 +165,7 @@ def _simulate_subject(model, link_funs, intrinsic_params, design_matrix, posteri
 
 
 def collect_ppc(
-    model_name, variant, n_ppc_samples, seed=0, no_contamination=False,
+    model_name, variant, n_ppc_samples=None, seed=0, no_contamination=False,
 ):
     rng = np.random.default_rng(seed)
     cfg = MODEL_REGISTRY[model_name]
@@ -178,7 +191,12 @@ def collect_ppc(
 
     n_params = len(intrinsic_params)
 
-    sample_indices = rng.choice(n_samples_available, size=min(n_ppc_samples, n_samples_available), replace=False)
+    # Default to EVERY stored draw. A thin sample makes the 95% PPC band the extreme
+    # order statistics of the draws (at S=30 the endpoints are the 1st and 30th), which
+    # is unstable and understates the true predictive spread. Subsample only deliberately.
+    n_use = n_samples_available if n_ppc_samples is None else min(n_ppc_samples, n_samples_available)
+    sample_indices = rng.choice(n_samples_available, size=n_use, replace=False)
+    logging.info(f"Using {n_use} of {n_samples_available} stored posterior draws")
 
     # Build model and link functions
     model = cfg["model_cls"]()
@@ -194,6 +212,14 @@ def collect_ppc(
         keep_intercept=KEEP_INTERCEPT,
     )
     n_rows = len(param_mask) // n_params
+    if n_rows != posteriors.shape[2]:
+        raise ValueError(
+            f"design geometry mismatch: r{MAX_NUM_REGRESSORS}c{MAX_NUM_CATEGORIES} implies "
+            f"{n_rows} rows but {post_file.name} stores {posteriors.shape[2]}. Set "
+            f"--max_num_regressors/--max_num_categories to the values the checkpoint was "
+            f"trained at."
+        )
+    param_mask_2d = np.asarray(param_mask, dtype=np.float32).reshape(n_rows, n_params)
 
     obs_rts_by_cond = {}    # condition_key → list of observed RT arrays
     ppc_rts_by_cond = {}    # condition_key → list of (n_subjects * n_trials,) arrays, one per sample
@@ -227,7 +253,8 @@ def collect_ppc(
         for k, s_idx in enumerate(sample_indices):
             post_sample = post_subj[s_idx].reshape(n_rows, n_params)
             sim = _simulate_subject(model, link_funs, intrinsic_params, dm, post_sample,
-                                    no_contamination=no_contamination)
+                                    no_contamination=no_contamination,
+                                    param_mask_2d=param_mask_2d)
 
             for cond_name, cond_col, label_map in cfg["conditions"]:
                 cond_vals = _condition_labels(d, cond_col, label_map)
@@ -326,10 +353,14 @@ def parse_args():
     p = argparse.ArgumentParser()
     p.add_argument("--model", type=str, required=True, choices=["ddm", "rdm", "cdm"])
     p.add_argument("--variant", type=str, default="mf", choices=["mf", "mc"])
-    p.add_argument("--n_ppc_samples", type=int, default=50,
-                   help="Number of posterior samples to simulate from (subset for speed).")
+    p.add_argument("--n_ppc_samples", type=int, default=None,
+                   help="Posterior draws to simulate from. Default: all draws stored in "
+                        "the npz. Pass a smaller number only for a deliberate quick look — "
+                        "a thin sample gives an unstable, too-narrow 95%% band.")
     p.add_argument("--seed", type=int, default=0)
     p.add_argument("--outdir", type=str, default=None)
+    p.add_argument("--max_num_regressors", type=int, default=MAX_NUM_REGRESSORS)
+    p.add_argument("--max_num_categories", type=int, default=MAX_NUM_CATEGORIES)
     p.add_argument("--no_contamination", action="store_true",
                    help="Set pi=0 during simulation to isolate distributional fit from lapse contamination.")
     return p.parse_args()
@@ -337,6 +368,9 @@ def parse_args():
 
 def main():
     args = parse_args()
+    global MAX_NUM_REGRESSORS, MAX_NUM_CATEGORIES
+    MAX_NUM_REGRESSORS = args.max_num_regressors
+    MAX_NUM_CATEGORIES = args.max_num_categories
     outdir = Path(args.outdir) if args.outdir else FIG_DIR / args.model
     logging.info(f"Running PPC: model={args.model}, variant={args.variant}, n_ppc_samples={args.n_ppc_samples}")
 
