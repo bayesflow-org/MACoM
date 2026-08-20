@@ -225,6 +225,7 @@ outputs/logs/
 # parent must be unignored first and its other children re-ignored.
 outputs/figures/*
 !outputs/figures/real_data
+!outputs/figures/encoder_rep
 !outputs/figures/model_class/
 outputs/figures/model_class/*
 !outputs/figures/model_class/cf
@@ -238,3 +239,6 @@ wandb/
 # Datasets
 datasets/
 *.npz
+# encoder_rep results are small and are the experiment's record — keep them.
+# Must come AFTER the global *.npz rule: last matching pattern wins.
+!outputs/figures/encoder_rep/**/*.npz
