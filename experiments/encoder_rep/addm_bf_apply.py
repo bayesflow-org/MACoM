@@ -71,6 +71,9 @@ MASK_RANDOMIZER_KWARGS = {
 # MUST match the geometry the checkpoint was trained at: build_encoder_input_dim
 # gives r2c2->9, r2c3->14, r4c4->72, r5c5->186, and load_state_dict fails on any
 # mismatch at encoder.input_embedding. The model-class checkpoints are r4c4.
+# Frozen-encoder arm colour; kept in step with addm_diagnostics.FROZEN_COLOR.
+FROZEN_COLOR = "#6969ff"
+
 MAX_NUM_REGRESSORS = 4
 MAX_NUM_CATEGORIES = 4
 MAX_ALTERNATIVES   = 4
@@ -262,7 +265,8 @@ def _plot_recovery(true, pred, names, path):
         # pred is (n_datasets, n_draws, n_params): average over DRAWS (axis 1) to get
         # one posterior mean per dataset. axis=0 averages over datasets and yields
         # n_draws points, which cannot be plotted against n_datasets truths.
-        ax.scatter(true[:, j], pred[:, :, j].mean(axis=1), alpha=0.4, s=10)
+        ax.scatter(true[:, j], pred[:, :, j].mean(axis=1), alpha=0.4, s=10,
+                   color=FROZEN_COLOR)
         lo = min(true[:, j].min(), pred[:, :, j].min())
         hi = max(true[:, j].max(), pred[:, :, j].max())
         ax.plot([lo, hi], [lo, hi], "k--", lw=1)

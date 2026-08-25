@@ -25,14 +25,28 @@ INTRINSIC_PARAMS = ["v", "v_diff", "omega", "a", "tau", "s_v", "s_tau"]
 VARIABLE_NAMES = [r"$v$", r"$v_\mathrm{diff}$", r"$\omega$",
                   r"$a$", r"$\tau$", r"$s_v$", r"$s_\tau$"]
 
+# Colour for the frozen-encoder arm. The BayesFlow baseline arm keeps the
+# library default (#132a70), so the two arms stay visually separable when their
+# diagnostics are read side by side.
+FROZEN_COLOR = "#6969ff"
+
 # The four diagnostics for this probe. recovery draws credible-interval error
 # bars by default (uncertainty_agg=credible_interval), so uncertainty is shown
 # per point rather than as a bare scatter.
+#
+# BayesFlow spells the data colour differently per plotter, hence the per-plot
+# kwargs. calibration_ecdf's fill_color is deliberately left at grey: that band
+# is the theoretical reference envelope, not this arm's data, and recolouring it
+# would imply it belongs to the frozen arm.
 PLOTS = {
-    "recovery": bf.diagnostics.plots.recovery,
-    "calibration_ecdf": bf.diagnostics.plots.calibration_ecdf,
-    "coverage": bf.diagnostics.plots.coverage,
-    "z_score_contraction": bf.diagnostics.plots.z_score_contraction,
+    "recovery": (bf.diagnostics.plots.recovery,
+                 {"color": FROZEN_COLOR}),
+    "calibration_ecdf": (bf.diagnostics.plots.calibration_ecdf,
+                         {"rank_ecdf_color": FROZEN_COLOR}),
+    "coverage": (bf.diagnostics.plots.coverage,
+                 {"color": FROZEN_COLOR}),
+    "z_score_contraction": (bf.diagnostics.plots.z_score_contraction,
+                            {"color": FROZEN_COLOR}),
 }
 
 
@@ -61,12 +75,12 @@ def main():
     names = VARIABLE_NAMES[:n_params]
     logging.info(f"{targets.shape[0]} datasets x {estimates.shape[1]} draws x {n_params} params")
 
-    for name, fn in PLOTS.items():
+    for name, (fn, color_kwargs) in PLOTS.items():
         # Some BayesFlow plotters size their axis grid independently of the
         # variable count and then iterate every axis, which for 7 params builds
         # 2x4=8 panels and indexes past the end. Pin the layout to one row.
         fig = fn(estimates=estimates, targets=targets, variable_names=names,
-                 num_row=1, num_col=n_params)
+                 num_row=1, num_col=n_params, **color_kwargs)
         path = outdir / f"addm_{args.case}_{name}.pdf"
         fig.savefig(path, bbox_inches="tight")
         plt.close(fig)

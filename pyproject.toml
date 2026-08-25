@@ -11,7 +11,7 @@ authors = [
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
-    "bayesflow>=2.0.8",
+    "bayesflow",
     "jupyter>=1.1.1",
     "keras>=3.14.0",
     "matplotlib>=3.10.9",
@@ -22,6 +22,12 @@ dependencies = [
     "seaborn>=0.13.2",
     "torch>=2.10.0",
 ]
+
+# BayesFlow is taken from the best-defaults branch, not PyPI: the encoder-rep
+# aDDM arms are run at that branch's retuned network defaults. Pinned to a
+# commit rather than the branch name so `uv sync` cannot silently move it.
+[tool.uv.sources]
+bayesflow = { git = "https://github.com/bayesflow-org/bayesflow.git", rev = "6842dcee3c0afaa319a0b578617bf5740061bc35" }
 
 #[project.optional-dependencies]
 #dev = [
