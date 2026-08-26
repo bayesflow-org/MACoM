@@ -34,6 +34,7 @@ fi
 if [[ -z "${SKIP_ZERO_SHOT:-}" ]]; then
     echo "=== ModelClass: LBA validate (zero-shot) ==="
     python -m experiments.generalization.model_class_lba_cf_validate \
+        --lba_fixed_A "$LBA_FIXED_A" \
         "${MASK_ARGS[@]}" \
         --checkpoint "$MC_CKPT" \
         --encoder_num_layers "$ENC_LAYERS" \
@@ -52,6 +53,7 @@ fi
 if [[ -z "${SKIP_FINETUNE:-}" ]]; then
     echo "=== ModelClass: LBA fine-tune (scheme ${FT_SCHEME}) ==="
     python -m experiments.model_class.model_class_cf_finetune_lba \
+        --lba_fixed_A "$LBA_FIXED_A" \
         "${MASK_ARGS[@]}" \
         --pretrained_checkpoint "$MC_CKPT" \
         --encoder_num_layers "$ENC_LAYERS" \
@@ -75,6 +77,7 @@ fi
 if [[ -z "${SKIP_FT_VALIDATE:-}" ]]; then
     echo "=== ModelClass: LBA fine-tune validate ==="
     python -m experiments.model_class.model_class_lba_finetune_validate \
+        --lba_fixed_A "$LBA_FIXED_A" \
         "${MASK_ARGS[@]}" \
         --checkpoint "$LBA_FT_CKPT" \
         --encoder_num_layers "$ENC_LAYERS" \
@@ -90,9 +93,13 @@ if [[ -z "${SKIP_FT_VALIDATE:-}" ]]; then
 fi
 
 # ── LBA comparison ──────────────────────────────────────────────────────────────
+# Guarded: it consumes BOTH the zero-shot and the finetuned predictions, so a run
+# with SKIP_FINETUNE/SKIP_FT_VALIDATE set would reach it with only half its inputs.
+if [[ -z "${SKIP_COMPARE:-}" ]]; then
 echo "=== ModelClass: LBA comparison ==="
 python -m experiments.model_class.model_class_lba_compare \
     --zero_shot_lba_pred_dir "./outputs/data/generalization/model_class_lba/cf/" \
     --base_mc_pred_dir       "./outputs/data/model_class/" \
     --finetuned_pred_dir     "./outputs/data/model_class/cf/lba_finetune/" \
     --outdir                 "./outputs/figures/model_class/cf/lba_comparison/"
+fi

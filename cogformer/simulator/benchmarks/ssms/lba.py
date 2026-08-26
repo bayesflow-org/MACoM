@@ -95,13 +95,20 @@ class LBA(Model):
     Uses the same response-coding convention as RDM:
       - v:      base drift rate
       - v_diff: drift advantage for the favored accumulator
-      - a:      start-point upper bound (A in classical LBA notation)
+      - a:      MEAN DISTANCE TRAVELLED to the boundary (see ``fixed_A``)
       - tau:    non-decision time
       - s_v:    drift SD (sigma in classical notation)
       - s_tau:  non-decision time variability (uniform half-width)
 
-    The response threshold is a + b_offset where b_offset is a fixed
-    class-level hyperparameter (default 0.5).
+    With ``fixed_A`` set, ``a`` is defined as the mean distance an accumulator
+    travels, E[threshold - start], which is the quantity RDM's ``a`` already
+    measures (its accumulators start at 0 and travel exactly ``a``). Defining it
+    as the absolute threshold instead would leave the two families differing by
+    A/2, so their values would not be comparable on an absolute scale.
+
+    With ``fixed_A=None`` the legacy parameterization applies and the response
+    threshold is a + b_offset, where b_offset is a fixed class-level
+    hyperparameter (default 0.5).
     """
 
     def __init__(self, b_offset: float = 0.5, max_time: int = 10,
@@ -116,10 +123,19 @@ class LBA(Model):
             with RT variability. That is why ``a`` recovers poorly and why it does not
             transfer to model families where ``a`` is a threshold.
 
-            A float -- ``A`` is pinned at this value and ``a`` IS the response
-            threshold: ``b = a - min(fixed_A, a)``, so ``A + b == a`` exactly. The min
-            keeps ``b >= 0`` for the ~3% of draws with ``a < 0.5``; in those cases the
-            start-point range shrinks to ``a`` rather than the threshold going invalid.
+            A float -- ``A`` is pinned at this value and ``a`` is the MEAN DISTANCE
+            TRAVELLED. The start point is uniform on [0, A] with mean A/2, so the
+            threshold is set to ``a + A/2``: ``b = a - A/2``, giving
+            ``E[threshold - start] == a`` exactly. This is what makes ``a``
+            numerically comparable to RDM's threshold, whose accumulators start at 0
+            and therefore also travel ``a`` on average.
+
+            ``A`` is capped at ``2a`` so ``b >= 0``. The cap preserves the definition
+            exactly rather than breaking it: at ``A = 2a`` we get ``b = 0`` and the
+            mean distance is still ``2a - a == a``. It binds on only 0.02% of prior
+            draws, against 3% for the previous threshold parameterization, because
+            the binding condition moved from ``a < fixed_A`` to ``a < fixed_A/2``.
+
             ``fixed_A=0`` removes start-point variability entirely, leaving a pure
             threshold model directly comparable to RDM.
 
@@ -176,15 +192,27 @@ class LBA(Model):
             A = a
             b = np.full(num_obs, self.b_offset, dtype=np.float64)
         else:
-            A = np.minimum(float(self.fixed_A), a)
-            b = a - A          # threshold = A + b = a
+            # `a` is the mean distance travelled: start ~ U(0, A) has mean A/2, so
+            # a threshold of a + A/2 gives E[threshold - start] == a. See the
+            # fixed_A docstring for why this, and not the absolute threshold, is
+            # the definition that makes `a` comparable with RDM's.
+            A = np.minimum(float(self.fixed_A), 2.0 * a)
+            b = a - A / 2.0    # threshold = A + b = a + A/2  ->  E[distance] = a
 
         return {"v": v, "A": A, "b": b, "tau": tau, "s_v": s_v, "s_tau": s_tau, "pi": pi}
 
     @staticmethod
     def build_context(num_obs: int, num_alternatives: int = 2) -> dict[str, np.ndarray]:
         context = {"num_alternatives": num_alternatives}
-        if num_alternatives > 2:
+        if num_alternatives == 2:
+            # For 2-alt the simulation always boosts accumulator 1, so record that
+            # explicitly so the encoder can see it as a per-trial feature. This
+            # mirrors RDM.build_context; without it LBA leaves the favored_idx
+            # channel empty where RDM populates it, so the two families present
+            # different inputs for the same underlying design and LBA is penalised
+            # on transfer for a bookkeeping difference rather than a real one.
+            context["favored_idx"] = np.ones(num_obs, dtype=np.int32)
+        else:
             context["favored_idx"] = np.random.randint(0, num_alternatives, size=num_obs)
         return context
 

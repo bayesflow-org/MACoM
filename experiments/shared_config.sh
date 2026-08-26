@@ -65,4 +65,12 @@ MC_CKPT="./outputs/checkpoints/model_class/cf/r4c4_b256_e10000/cogformer_model_c
 
 ENC_REP_CKPT="./outputs/checkpoints/encoder_rep/cf/cogformer_encoder_rep_fm_l${DEC_LAYERS}_h${HEADS}_p${PROJ}_s${SEEDS}_d${MC_DIM}_b${BATCH}_e${EPOCHS}_t${STEPS}.pt"
 
-LBA_FT_CKPT="./outputs/checkpoints/model_class/cf/lba_finetune/cogformer_lba_finetune_s2_l${DEC_LAYERS}_h${HEADS}_p${PROJ}_s${SEEDS}_d${MC_DIM}_b${MC_BATCH}_e${LBA_FT_EPOCHS}_t${STEPS}.pt"
+# LBA_FIXED_A is the value every LBA arm must use -- finetune, zero-shot and
+# validation alike. It is in the checkpoint filename because fixed_A changes what
+# the intrinsic `a` MEANS (threshold vs start-point range), so runs at different
+# values are not comparable. The batch size is literal 256, not MC_BATCH: the
+# finetune ran at 256 while MC_BATCH is 64, and the previous interpolation
+# produced a path that did not exist on disk.
+LBA_FIXED_A=0.5
+LBA_FT_BATCH=256
+LBA_FT_CKPT="./outputs/checkpoints/model_class/cf/lba_finetune/cogformer_lba_finetune_s2_A${LBA_FIXED_A}_l${DEC_LAYERS}_h${HEADS}_p${PROJ}_s${SEEDS}_d${MC_DIM}_b${LBA_FT_BATCH}_e${LBA_FT_EPOCHS}_t${STEPS}.pt"

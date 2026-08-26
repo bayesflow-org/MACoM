@@ -108,10 +108,14 @@ def parse_args():
                    help="Evaluate LBA under each of the 3 known model IDs.")
 
     # Benchmark cases
-    p.add_argument("--lba_fixed_A", type=float, default=None,
-                   help="Pin LBA's start-point range A and make the intrinsic `a` the real "
-                        "response threshold (A + b == a). Default None keeps the original "
-                        "parameterization where `a` IS A and the threshold is a + b_offset.")
+    p.add_argument("--lba_fixed_A", type=float, default=0.5,
+                   help="Pin LBA's start-point range A so the intrinsic `a` is the real "
+                        "response threshold (A + b == a). MUST match the value the "
+                        "checkpoint was finetuned at (0.5) -- fixed_A changes what `a` "
+                        "MEANS, so a mismatch compares two different quantities under one "
+                        "name. Pass None only to reproduce the old parameterization where "
+                        "`a` IS A; zero-shot transfer collapses there (0.86 -> 0.24) "
+                        "because the pretrained families all treat `a` as a threshold.")
     p.add_argument("--scenarios", type=str, default=None,
                    help="Comma-separated val_scenario tags to run (default: all six).")
     p.add_argument("--include_full", action="store_true", default=False,
@@ -273,7 +277,15 @@ def main():
     )
     id_to_name = {v: k for k, v in model_class.model_index.items()}
 
-    pred_dir = Path(args.pred_dir) if args.pred_dir else Path(args.outdir) / "predictions"
+    # fixed_A changes what `a` means, so runs at different values are not
+    # interchangeable and must not share an output directory -- the same reason
+    # model_class_cf_finetune_lba.py puts it in the checkpoint filename. Without
+    # this, an A-sweep silently overwrites its own earlier figures.
+    outdir_root = Path(args.outdir) / (
+        f"A{'none' if args.lba_fixed_A is None else format(args.lba_fixed_A, 'g')}")
+    logging.info(f"lba_fixed_A={args.lba_fixed_A} -> outputs under {outdir_root}")
+
+    pred_dir = Path(args.pred_dir) if args.pred_dir else outdir_root / "predictions"
     pred_dir.mkdir(parents=True, exist_ok=True)
     logging.info(f"Predictions -> {pred_dir}")
 
@@ -361,7 +373,7 @@ def main():
             pred_set = raw.reshape(
                 args.batch_size, args.num_samples, cd["n_rows"], N_GLOBAL_PARAMS
             )[:, :, :, LBA_TO_GLOBAL]
-            outdir = Path(args.outdir) / cd["cfg_name"] / f"mid_{id_label.lower()}"
+            outdir = outdir_root / cd["cfg_name"] / f"mid_{id_label.lower()}"
             outdir.mkdir(parents=True, exist_ok=True)
             cases.append({
                 "cfg_name": cd["cfg_name"], "design_config": cd["design_config"],

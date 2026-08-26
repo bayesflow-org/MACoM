@@ -154,11 +154,42 @@ class ADDMBaselineSimulator(bf.simulators.Simulator):
             [design_matrices, rts, choices_norm, alt_col, zeros, zeros], axis=-1
         )
 
+        param_masks = samples["param_masks"].astype(np.float32)
+        # Infer ONLY the active cells. The full grid is 67 design rows x 7
+        # parameters = 469, of which intercept_only activates 7 (1.49%); the rest
+        # are structurally zero in every dataset. Handing all 469 to the flow
+        # spends ~98.5% of the flow-matching MSE learning to annihilate base
+        # noise on constant dimensions, drives 462 of them through the
+        # standardizer's degenerate std==0 path, and makes the training loss
+        # useless as a comparison statistic. The full grid exists because
+        # CogFormer's DECODER emits one coefficient per design cell -- but
+        # neither arm of this probe uses that decoder, so nothing requires it.
+        active = param_masks[0].astype(bool)   # constant within a case (fixed_config=True)
         return {
             "data": data.astype(np.float32),
-            "params": samples["param_matrices"].astype(np.float32),
-            "masks": samples["param_masks"].astype(np.float32),
+            "params": samples["param_matrices"].astype(np.float32)[:, active],
+            "masks": param_masks,
         }
+
+
+def active_labels(mask_row):
+    """Names for the active cells of a flattened 67x7 design grid.
+
+    The flat index is ``row * n_params + param``. The previous code indexed a
+    469-long mask with range(7), which is correct only when the active cells are
+    exactly the intercept row -- true for intercept_only, wrong for intercept_v,
+    where u_1 activates a cell in a later row.
+    """
+    n = len(INTRINSIC_PARAMS)
+    idx = np.where(np.asarray(mask_row).astype(bool))[0]
+    plain, pretty = [], []
+    for i in idx:
+        row, par = divmod(int(i), n)
+        suffix = "" if row == 0 else f"@r{row}"
+        plain.append(INTRINSIC_PARAMS[par] + suffix)
+        pretty.append(VARIABLE_NAMES[par] if row == 0
+                      else VARIABLE_NAMES[par][:-1] + r"^{(" + str(row) + r")}$")
+    return plain, pretty
 
 
 def build_adapter():
@@ -173,14 +204,48 @@ def build_adapter():
     )
 
 
+def build_inference_network(subnet_dropout=None, time_power_law_alpha=None):
+    """FlowMatching at library defaults, with optional single-setting overrides.
+
+    subnet_kwargs is merged into the library's TIME_MLP defaults rather than
+    replacing them, so overriding dropout leaves widths, fourier_scale,
+    activation and the rest untouched. Both knobs exist because main and the
+    best-defaults branch disagree on exactly these values, and a comparison
+    between the two is only interpretable if they can be held equal.
+
+    time_power_law_alpha sets the training-time distribution of the flow-matching
+    interpolation time: ``t = u ** (1 + alpha)`` for ``u ~ U(0,1)``, so
+    ``E[t] = 1 / (2 + alpha)``. Since ``x = t*x1 + (1-t)*x0`` with x1 the target
+    and x0 noise, t=1 is the data end -- where the velocity field learns to
+    CONTRACT onto the posterior. alpha=0.5 (branch default) pushes sampling
+    toward t=0 and starves that region; alpha=0.0 (main default) is uniform.
+    This is the leading suspect for the branch's over-dispersed posteriors:
+    means that track the truth at r~0.98 with sd(z)~0.2 instead of 1.0.
+    """
+    kwargs = dict(INFERENCE_NET_KWARGS)
+    if subnet_dropout is not None:
+        kwargs["subnet_kwargs"] = {**kwargs.get("subnet_kwargs", {}),
+                                   "dropout": subnet_dropout}
+    if time_power_law_alpha is not None:
+        kwargs["time_power_law_alpha"] = time_power_law_alpha
+    return bf.networks.FlowMatching(**kwargs)
+
+
 def build_summary_network():
     return bf.networks.SetTransformer(**SUMMARY_NET_KWARGS)
 
 
-def ckpt_path(case: str, first_fixation: str) -> str:
+def ckpt_path(case: str, first_fixation: str, tag: str = "") -> str:
     # first_fixation is in the path: the probe script keys only on case, so a
     # second run with a different gaze rule silently overwrites the first.
-    return str(CKPT_DIR / case / first_fixation / "addm_baseline_fm")
+    # tag serves the same purpose for anything the CLI cannot express -- notably
+    # which BayesFlow defaults the run used, since that is a property of the
+    # installed library rather than of any argument.
+    return str(CKPT_DIR / case / (first_fixation + _suffix(tag)) / "addm_baseline_fm")
+
+
+def _suffix(tag: str) -> str:
+    return f"_{tag}" if tag else ""
 
 
 def train(args):
@@ -191,9 +256,10 @@ def train(args):
     workflow = bf.BasicWorkflow(
         simulator=simulator,
         adapter=build_adapter(),
-        inference_network=bf.networks.FlowMatching(**INFERENCE_NET_KWARGS),
+        inference_network=build_inference_network(args.subnet_dropout,
+                                                  args.time_power_law_alpha),
         summary_network=summary_net,
-        checkpoint_filepath=ckpt_path(args.case, args.first_fixation),
+        checkpoint_filepath=ckpt_path(args.case, args.first_fixation, args.tag),
     )
 
     logging.info(
@@ -218,21 +284,21 @@ def validate(args):
     simulator = ADDMBaselineSimulator(case=args.case, num_obs=args.num_obs,
                                       first_fixation=args.first_fixation)
     approximator = keras.saving.load_model(
-        ckpt_path(args.case, args.first_fixation) + "/model.keras"
+        ckpt_path(args.case, args.first_fixation, args.tag) + "/model.keras"
     )
 
     val_sims = simulator.sample(args.val_batch_size)
     masks = val_sims["masks"]
-    active_idx = masks[0].astype(bool)
 
     post_draws = approximator.sample(
         conditions={"data": val_sims["data"]},
         num_samples=args.num_samples,
     )
-    true_active = val_sims["params"][:, active_idx]
-    pred_active = post_draws["params"][:, :, active_idx]
+    # The simulator now emits only the active cells, so no masking here.
+    true_active = val_sims["params"]
+    pred_active = post_draws["params"]
 
-    outdir = FIGURES_DIR / args.case / args.first_fixation
+    outdir = FIGURES_DIR / args.case / (args.first_fixation + _suffix(args.tag))
     outdir.mkdir(parents=True, exist_ok=True)
     np.savez(
         outdir / "addm_baseline_data.npz",
@@ -242,7 +308,7 @@ def validate(args):
     )
     logging.info(f"[aDDM-baseline/{args.case}] Saved data to {outdir}")
 
-    names = [VARIABLE_NAMES[i] for i in range(len(INTRINSIC_PARAMS)) if active_idx[i]]
+    active_names, names = active_labels(masks[0])
     n_params = len(names)
     plots = {
         "recovery": bf.diagnostics.plots.recovery,
@@ -268,7 +334,7 @@ def validate(args):
         estimates=pred_active, targets=true_active)["values"]).ravel()
 
     import pandas as pd
-    active_names = [p for i, p in enumerate(INTRINSIC_PARAMS) if active_idx[i]]
+
     df = pd.DataFrame({"param": active_names, "contraction": contraction,
                        "z_score": zscore, "nrmse": rmse})
     df.to_csv(outdir / f"addm_baseline_{args.case}_bf_metrics.csv",
@@ -286,6 +352,19 @@ def parse_args():
     p.add_argument("--first_fixation", type=str, default="item0",
                    choices=["random", "item0", "item1"],
                    help="Must match the frozen-encoder arm for the comparison to hold.")
+    p.add_argument("--subnet_dropout", type=float, default=None,
+                   help="Override the inference subnet's dropout. Default None keeps the "
+                        "installed library's value, which differs between BayesFlow main "
+                        "(0.05) and the best-defaults branch (0.0).")
+    p.add_argument("--time_power_law_alpha", type=float, default=None,
+                   help="Override the flow-matching interpolation-time exponent. Default None "
+                        "keeps the installed library's value: 0.5 on the best-defaults branch "
+                        "(biased toward the noise end), 0.0 on main (uniform). Pass 0 to test "
+                        "whether that default explains the branch's over-dispersed posteriors.")
+    p.add_argument("--tag", type=str, default="",
+                   help="Suffix for the checkpoint and figure directories. Use it to keep "
+                        "runs that differ only in the installed BayesFlow apart, e.g. "
+                        "--tag best_defaults vs --tag main_defaults.")
     p.add_argument("--epochs", type=int, default=500)        # == addm_bf_apply.py
     p.add_argument("--steps_per_epoch", type=int, default=100)
     p.add_argument("--batch_size", type=int, default=64)     # == addm_bf_apply.py

@@ -73,6 +73,7 @@ python -m experiments.model_class.model_class_cf_validate \
 # ── LBA validate (zero-shot) ────────────────────────────────────────────────────
 echo "=== ModelClass: LBA validate (zero-shot) ==="
 python -m experiments.generalization.model_class_lba_cf_validate \
+    --lba_fixed_A "$LBA_FIXED_A" \
     "${MASK_ARGS[@]}" \
     --checkpoint "$MC_CKPT" \
     --encoder_num_layers "$ENC_LAYERS" \
@@ -90,6 +91,7 @@ python -m experiments.generalization.model_class_lba_cf_validate \
 echo "=== ModelClass: LBA fine-tune ==="
 FT_SCHEME="${FINETUNE_SCHEME:-2}"
 python -m experiments.model_class.model_class_cf_finetune_lba \
+    --lba_fixed_A "$LBA_FIXED_A" \
     "${MASK_ARGS[@]}" \
     --pretrained_checkpoint "$MC_CKPT" \
     --encoder_num_layers "$ENC_LAYERS" \
@@ -111,6 +113,7 @@ python -m experiments.model_class.model_class_cf_finetune_lba \
 # ── LBA fine-tune validate ─────────────────────────────────────────────────────
 echo "=== ModelClass: LBA fine-tune validate ==="
 python -m experiments.model_class.model_class_lba_finetune_validate \
+    --lba_fixed_A "$LBA_FIXED_A" \
     "${MASK_ARGS[@]}" \
     --checkpoint "$LBA_FT_CKPT" \
     --encoder_num_layers "$ENC_LAYERS" \
