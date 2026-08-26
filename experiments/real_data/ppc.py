@@ -440,7 +440,7 @@ def _quantile_stats(obs, ppc_samples, quantiles):
 
 
 def plot_rt_quantiles(obs_pooled, ppc_pooled, conditions, model_name, variant, outdir,
-                      quantiles=DEFAULT_RT_QUANTILES):
+                      quantiles=DEFAULT_RT_QUANTILES, ppc_color=PPC_COLOR):
     """RT quantiles by level: observed points against the PPC quantile interval.
 
     Complements the density PPC. A KDE can look acceptable while specific
@@ -465,9 +465,9 @@ def plot_rt_quantiles(obs_pooled, ppc_pooled, conditions, model_name, variant, o
             obs_q, med, lo, hi = _quantile_stats(obs, ppc_samples, quantiles)
 
             if med is not None:
-                ax.fill_between(xs, lo, hi, color=PPC_COLOR, alpha=0.25,
+                ax.fill_between(xs, lo, hi, color=ppc_color, alpha=0.25,
                                 label="PPC 95% CI", zorder=1)
-                ax.plot(xs, med, "o-", color=PPC_COLOR, lw=1.4, ms=4,
+                ax.plot(xs, med, "o-", color=ppc_color, lw=1.4, ms=4,
                         label="PPC median", zorder=2)
             ax.plot(xs, obs_q, "s--", color=OBS_COLOR, lw=1.6, ms=4,
                     label="Observed", zorder=3)
@@ -492,7 +492,7 @@ def plot_rt_quantiles(obs_pooled, ppc_pooled, conditions, model_name, variant, o
 
 
 def plot_rt_qq(obs_pooled, ppc_pooled, conditions, model_name, variant, outdir,
-               quantiles=DEFAULT_RT_QUANTILES):
+               quantiles=DEFAULT_RT_QUANTILES, ppc_color=PPC_COLOR):
     """Q-Q: observed RT quantile against the predicted one, with a 45-degree reference.
 
     Reads differently from plot_rt_quantiles: deviation from the diagonal is the
@@ -523,7 +523,7 @@ def plot_rt_qq(obs_pooled, ppc_pooled, conditions, model_name, variant, outdir,
             ends = [span.min() - pad, span.max() + pad]
             ax.plot(ends, ends, "k--", lw=1, zorder=1)
             ax.errorbar(obs_q, med, yerr=[med - lo, hi - med], fmt="o",
-                        color=PPC_COLOR, ms=4, lw=1.2, capsize=3,
+                        color=ppc_color, ms=4, lw=1.2, capsize=3,
                         label="PPC median + 95% CI", zorder=2)
             for x, y, q in zip(obs_q, med, quantiles):
                 ax.annotate(f"{q:g}", (x, y), textcoords="offset points",
