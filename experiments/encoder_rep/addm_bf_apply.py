@@ -163,11 +163,41 @@ class ADDMSimulator(bf.simulators.Simulator):
             choices=samples["sim_data"]["choices"],
         )
 
+        param_masks = samples["param_masks"].astype(np.float32)
+        # Infer ONLY the active cells. The adapter DROPS "masks", so the mask
+        # never reaches the network -- it is used post hoc in validate() to slice
+        # the metrics, which made this easy to miss. Handing FlowMatching all 469
+        # cells means ~98.5% of its MSE is spent annihilating base noise on
+        # dimensions that are structurally zero in every dataset. The full grid
+        # exists for CogFormer's DECODER, which consumes param_mask in its loss;
+        # this arm uses only CogFormer's encoder, so nothing here requires it.
+        active = param_masks[0].astype(bool)   # constant within a case (fixed_config=True)
         return {
             "summaries": summaries.astype(np.float32),
-            "params":    samples["param_matrices"].astype(np.float32),
-            "masks":     samples["param_masks"].astype(np.float32),
+            "params":    samples["param_matrices"].astype(np.float32)[:, active],
+            "masks":     param_masks,
         }
+
+
+def active_labels(mask_row):
+    """Names for the active cells of a flattened 67x7 design grid.
+
+    Flat index is ``row * n_params + param``. Kept in step with the identical
+    helper in addm_bf_baseline.py -- duplicated rather than imported so the two
+    arms stay independently runnable. Replaces an older expression that indexed a
+    469-long mask with range(7), correct only when the active cells are exactly
+    the intercept row (true for intercept_only, wrong for intercept_v).
+    """
+    n = len(INTRINSIC_PARAMS)
+    idx = np.where(np.asarray(mask_row).astype(bool))[0]
+    plain, pretty = [], []
+    for i in idx:
+        row, par = divmod(int(i), n)
+        suffix = "" if row == 0 else f"@r{row}"
+        plain.append(INTRINSIC_PARAMS[par] + suffix)
+        pretty.append(VARIABLE_NAMES[par] if row == 0
+                      else VARIABLE_NAMES[par][:-1] + r"^{(" + str(row) + r")}$")
+    return plain, pretty
 
 
 def build_adapter():
@@ -223,18 +253,15 @@ def validate(args):
 
     val_sims = simulator.sample(args.val_batch_size)
     summaries = val_sims["summaries"]
-    true_params = val_sims["params"]
     masks = val_sims["masks"]
-    active_idx = masks[0].astype(bool)
 
     post_draws = approximator.sample(
         conditions={"summaries": summaries},
         num_samples=args.num_samples,
     )
-    pred_params = post_draws["params"]
-
-    true_active = true_params[:, active_idx]
-    pred_active = pred_params[:, :, active_idx]
+    # The simulator now emits only the active cells, so no masking here.
+    true_active = val_sims["params"]
+    pred_active = post_draws["params"]
 
     out_dir = DATA_DIR / args.case
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -250,7 +277,7 @@ def validate(args):
     fig_dir = FIGURES_DIR / args.case
     fig_dir.mkdir(parents=True, exist_ok=True)
 
-    active_names = [VARIABLE_NAMES[i] for i in range(len(INTRINSIC_PARAMS)) if active_idx[i]]
+    _, active_names = active_labels(masks[0])
 
     _plot_recovery(true_active, pred_active, active_names, fig_dir / "addm_recovery.pdf")
     logging.info(f"[aDDM/{args.case}] Saved figures to {fig_dir}")

@@ -52,8 +52,12 @@ PLOTS = {
 
 def parse_args():
     p = argparse.ArgumentParser()
+    # addm_bf_apply.py writes to DATA_DIR (outputs/data/...), NOT to FIGURES_DIR.
+    # This default used to point at the figures directory, where an old copy of
+    # the npz happened to sit, so a rerun silently produced diagnostics for
+    # stale data with no error.
     p.add_argument("--data", type=str,
-                   default="./outputs/figures/encoder_rep/addm/intercept_only/"
+                   default="./outputs/data/encoder_rep/addm/intercept_only/"
                            "addm_encoder_rep_data.npz")
     p.add_argument("--outdir", type=str, default=None,
                    help="Defaults to the directory holding --data.")

@@ -188,8 +188,7 @@ stage_encoder_rep() {
         run encoder_rep "aDDM frozen-encoder arm — ${mode}" -- \
             python -m experiments.encoder_rep.addm_bf_apply \
                 --mode "$mode" --case intercept_only --first_fixation item0 \
-                --num_models 3 --cogformer_checkpoint "$MC_CKPT" \
-                "${MASK_ARGS[@]}" || return 1
+                --num_models 3 --cogformer_checkpoint "$MC_CKPT" || return 1
     done
     run encoder_rep "aDDM frozen-encoder diagnostics" -- \
         python -m experiments.encoder_rep.addm_diagnostics || return 1
