@@ -51,40 +51,11 @@ DDM_BENCHMARK_CONFIGS = {
         "u_2": ["v", "a", "z", "tau"],
         "u_1:u_2": ["v", "a", "z"],
     },
-    "three_reg_interaction": {
-        "1": ["v", "a", "z", "tau", "s_v", "s_tau"],
-        "u_1": ["v", "a", "z", "tau", "s_v", "s_tau"],
-        "u_2": ["v", "a", "z", "tau", "s_v"],
-        "u_3": ["v", "a", "z", "tau"],
-        "u_1:u_2": ["v", "a", "z"],
-        "u_1:u_3": ["v", "a"],
-        "u_2:u_3": ["v"],
-    },
     "full": {
         "1": ["v", "a", "z", "tau", "s_v", "s_tau"],
         "u_1": ["v", "a", "z", "tau", "s_v", "s_tau"],
         "u_2": ["v", "a", "z", "tau", "s_v", "s_tau"],
         "u_1:u_2": ["v", "a", "z", "tau", "s_v", "s_tau"],
-    },
-    # ── Holdout configs (excluded from model_family training) ─────────────────
-    "two_factor": {  # same structure as "full"; held out with max_num_categories=3
-        "1": ["v", "a", "z", "tau", "s_v", "s_tau"],
-        "u_1": ["v", "a", "z", "tau", "s_v", "s_tau"],
-        "u_2": ["v", "a", "z", "tau", "s_v", "s_tau"],
-        "u_1:u_2": ["v", "a", "z", "tau", "s_v", "s_tau"],
-    },
-    "asymmetric": {  # drift cluster vs. threshold cluster, no interaction
-        "1": ["v", "a", "z", "tau", "s_v", "s_tau"],
-        "u_1": ["v", "z", "s_v"],
-        "u_2": ["a", "tau", "s_tau"],
-    },
-    "multi_factor": {  # 5 regressors, hierarchical parameter shedding, no interaction
-        "1": ["v", "a", "z", "tau", "s_v", "s_tau"],
-        "u_1": ["v", "a", "z", "tau", "s_v", "s_tau"],
-        "u_2": ["v", "a", "z", "tau", "s_v"],
-        "u_3": ["v", "a", "z", "tau"],
-        "u_4": ["v", "a", "z"],
-        "u_5": ["v", "a"],
     },
 }
 
@@ -116,12 +87,6 @@ DDM_CONFIG = {
         ("mixed_predictor", DDM_BENCHMARK_CONFIGS["interaction"],
          {"exact_num_categories": True, "categorical_regressors": ["u_1"]}),
     ],
-    "holdout_configs": [
-        {"design_config": DDM_BENCHMARK_CONFIGS["three_reg_interaction"], "max_num_categories": 3},
-        {"design_config": DDM_BENCHMARK_CONFIGS["two_factor"], "max_num_categories": 3},
-        {"design_config": DDM_BENCHMARK_CONFIGS["asymmetric"], "max_num_categories": 2},
-        {"design_config": DDM_BENCHMARK_CONFIGS["multi_factor"], "max_num_categories": 2},
-    ],
 }
 
 
@@ -150,40 +115,11 @@ CDM_BENCHMARK_CONFIGS = {
         "u_2": ["v", "v_theta", "a", "tau"],
         "u_1:u_2": ["v", "v_theta", "a"],
     },
-    "three_reg_interaction": {
-        "1": ["v", "v_theta", "a", "tau", "s_v", "s_tau"],
-        "u_1": ["v", "v_theta", "a", "tau", "s_v", "s_tau"],
-        "u_2": ["v", "v_theta", "a", "tau", "s_v"],
-        "u_3": ["v", "v_theta", "a", "tau"],
-        "u_1:u_2": ["v", "v_theta", "a"],
-        "u_1:u_3": ["v", "v_theta"],
-        "u_2:u_3": ["v"],
-    },
     "full": {
         "1": ["v", "v_theta", "a", "tau", "s_v", "s_tau"],
         "u_1": ["v", "v_theta", "a", "tau", "s_v", "s_tau"],
         "u_2": ["v", "v_theta", "a", "tau", "s_v", "s_tau"],
         "u_1:u_2": ["v", "v_theta", "a", "tau", "s_v", "s_tau"],
-    },
-    # ── Holdout configs (excluded from model_family training) ─────────────────
-    "two_factor": {
-        "1": ["v", "v_theta", "a", "tau", "s_v", "s_tau"],
-        "u_1": ["v", "v_theta", "a", "tau", "s_v", "s_tau"],
-        "u_2": ["v", "v_theta", "a", "tau", "s_v", "s_tau"],
-        "u_1:u_2": ["v", "v_theta", "a", "tau", "s_v", "s_tau"],
-    },
-    "asymmetric": {
-        "1": ["v", "v_theta", "a", "tau", "s_v", "s_tau"],
-        "u_1": ["v", "v_theta", "s_v"],
-        "u_2": ["a", "tau", "s_tau"],
-    },
-    "multi_factor": {
-        "1": ["v", "v_theta", "a", "tau", "s_v", "s_tau"],
-        "u_1": ["v", "v_theta", "a", "tau", "s_v", "s_tau"],
-        "u_2": ["v", "v_theta", "a", "tau", "s_v"],
-        "u_3": ["v", "v_theta", "a", "tau"],
-        "u_4": ["v", "v_theta", "a"],
-        "u_5": ["v", "v_theta"],
     },
 }
 
@@ -208,12 +144,6 @@ CDM_CONFIG = {
         ("interaction",     CDM_BENCHMARK_CONFIGS["interaction"],     {"max_num_categories": 2, "categorical_regressors": []}),
         ("mixed_predictor", CDM_BENCHMARK_CONFIGS["interaction"],
          {"exact_num_categories": True, "categorical_regressors": ["u_1"]}),
-    ],
-    "holdout_configs": [
-        {"design_config": CDM_BENCHMARK_CONFIGS["three_reg_interaction"], "max_num_categories": 3},
-        {"design_config": CDM_BENCHMARK_CONFIGS["two_factor"], "max_num_categories": 3},
-        {"design_config": CDM_BENCHMARK_CONFIGS["asymmetric"], "max_num_categories": 2},
-        {"design_config": CDM_BENCHMARK_CONFIGS["multi_factor"], "max_num_categories": 2},
     ],
 }
 
@@ -243,40 +173,11 @@ RDM_BENCHMARK_CONFIGS = {
         "u_2": ["v", "v_diff", "a", "tau"],
         "u_1:u_2": ["v", "v_diff", "a"],
     },
-    "three_reg_interaction": {
-        "1": ["v", "v_diff", "a", "tau", "s_v", "s_tau"],
-        "u_1": ["v", "v_diff", "a", "tau", "s_v", "s_tau"],
-        "u_2": ["v", "v_diff", "a", "tau", "s_v"],
-        "u_3": ["v", "v_diff", "a", "tau"],
-        "u_1:u_2": ["v", "v_diff", "a"],
-        "u_1:u_3": ["v", "v_diff"],
-        "u_2:u_3": ["v"],
-    },
     "full": {
         "1": ["v", "v_diff", "a", "tau", "s_v", "s_tau"],
         "u_1": ["v", "v_diff", "a", "tau", "s_v", "s_tau"],
         "u_2": ["v", "v_diff", "a", "tau", "s_v", "s_tau"],
         "u_1:u_2": ["v", "v_diff", "a", "tau", "s_v", "s_tau"],
-    },
-    # ── Holdout configs (excluded from model_family training) ─────────────────
-    "two_factor": {
-        "1": ["v", "v_diff", "a", "tau", "s_v", "s_tau"],
-        "u_1": ["v", "v_diff", "a", "tau", "s_v", "s_tau"],
-        "u_2": ["v", "v_diff", "a", "tau", "s_v", "s_tau"],
-        "u_1:u_2": ["v", "v_diff", "a", "tau", "s_v", "s_tau"],
-    },
-    "asymmetric": {
-        "1": ["v", "v_diff", "a", "tau", "s_v", "s_tau"],
-        "u_1": ["v", "v_diff", "s_v"],
-        "u_2": ["a", "tau", "s_tau"],
-    },
-    "multi_factor": {
-        "1": ["v", "v_diff", "a", "tau", "s_v", "s_tau"],
-        "u_1": ["v", "v_diff", "a", "tau", "s_v", "s_tau"],
-        "u_2": ["v", "v_diff", "a", "tau", "s_v"],
-        "u_3": ["v", "v_diff", "a", "tau"],
-        "u_4": ["v", "v_diff", "a"],
-        "u_5": ["v", "v_diff"],
     },
 }
 
@@ -301,12 +202,6 @@ RDM_CONFIG = {
         ("interaction",     RDM_BENCHMARK_CONFIGS["interaction"],     {"max_num_categories": 2, "categorical_regressors": []}),
         ("mixed_predictor", RDM_BENCHMARK_CONFIGS["interaction"],
          {"exact_num_categories": True, "categorical_regressors": ["u_1"]}),
-    ],
-    "holdout_configs": [
-        {"design_config": RDM_BENCHMARK_CONFIGS["three_reg_interaction"], "max_num_categories": 3},
-        {"design_config": RDM_BENCHMARK_CONFIGS["two_factor"], "max_num_categories": 3},
-        {"design_config": RDM_BENCHMARK_CONFIGS["asymmetric"], "max_num_categories": 2},
-        {"design_config": RDM_BENCHMARK_CONFIGS["multi_factor"], "max_num_categories": 2},
     ],
     "train_context": RDM.build_random_context,
 }
@@ -337,40 +232,11 @@ LBA_BENCHMARK_CONFIGS = {
         "u_2": ["v", "v_diff", "a", "tau"],
         "u_1:u_2": ["v", "v_diff", "a"],
     },
-    "three_reg_interaction": {
-        "1": ["v", "v_diff", "a", "tau", "s_v", "s_tau"],
-        "u_1": ["v", "v_diff", "a", "tau", "s_v", "s_tau"],
-        "u_2": ["v", "v_diff", "a", "tau", "s_v"],
-        "u_3": ["v", "v_diff", "a", "tau"],
-        "u_1:u_2": ["v", "v_diff", "a"],
-        "u_1:u_3": ["v", "v_diff"],
-        "u_2:u_3": ["v"],
-    },
     "full": {
         "1": ["v", "v_diff", "a", "tau", "s_v", "s_tau"],
         "u_1": ["v", "v_diff", "a", "tau", "s_v", "s_tau"],
         "u_2": ["v", "v_diff", "a", "tau", "s_v", "s_tau"],
         "u_1:u_2": ["v", "v_diff", "a", "tau", "s_v", "s_tau"],
-    },
-    # ── Holdout configs (excluded from model_family training) ─────────────────
-    "two_factor": {
-        "1": ["v", "v_diff", "a", "tau", "s_v", "s_tau"],
-        "u_1": ["v", "v_diff", "a", "tau", "s_v", "s_tau"],
-        "u_2": ["v", "v_diff", "a", "tau", "s_v", "s_tau"],
-        "u_1:u_2": ["v", "v_diff", "a", "tau", "s_v", "s_tau"],
-    },
-    "asymmetric": {
-        "1": ["v", "v_diff", "a", "tau", "s_v", "s_tau"],
-        "u_1": ["v", "v_diff", "s_v"],
-        "u_2": ["a", "tau", "s_tau"],
-    },
-    "multi_factor": {
-        "1": ["v", "v_diff", "a", "tau", "s_v", "s_tau"],
-        "u_1": ["v", "v_diff", "a", "tau", "s_v", "s_tau"],
-        "u_2": ["v", "v_diff", "a", "tau", "s_v"],
-        "u_3": ["v", "v_diff", "a", "tau"],
-        "u_4": ["v", "v_diff", "a"],
-        "u_5": ["v", "v_diff"],
     },
 }
 
@@ -395,12 +261,6 @@ LBA_CONFIG = {
         ("interaction",     LBA_BENCHMARK_CONFIGS["interaction"],     {"max_num_categories": 2, "categorical_regressors": []}),
         ("mixed_predictor", LBA_BENCHMARK_CONFIGS["interaction"],
          {"exact_num_categories": True, "categorical_regressors": ["u_1"]}),
-    ],
-    "holdout_configs": [
-        {"design_config": LBA_BENCHMARK_CONFIGS["three_reg_interaction"], "max_num_categories": 3},
-        {"design_config": LBA_BENCHMARK_CONFIGS["two_factor"], "max_num_categories": 3},
-        {"design_config": LBA_BENCHMARK_CONFIGS["asymmetric"], "max_num_categories": 2},
-        {"design_config": LBA_BENCHMARK_CONFIGS["multi_factor"], "max_num_categories": 2},
     ],
     "train_context": LBA.build_random_context,
 }
@@ -680,6 +540,30 @@ RDM_BF_CASE_CONFIGS = {
     },
 }
 
-DDM_CONFIG["bf_case_configs"] = DDM_BF_CASE_CONFIGS
-CDM_CONFIG["bf_case_configs"] = CDM_BF_CASE_CONFIGS
-RDM_CONFIG["bf_case_configs"] = RDM_BF_CASE_CONFIGS
+def _bf_cases_with_globals(case_configs: dict, global_params=GLOBAL_PARAMS) -> dict:
+    """Give the BayesFlow baselines the same generative model as the CogFormer tiers.
+
+    Both CogFormer trainers call ``add_global_params``, so their simulated data carries
+    contamination (pi drawn from its prior). The BF case configs listed pi in NEITHER
+    free_intrinsics nor fixed_intrinsics, so ModelFamily fell through to
+    ``fixed_values.get("pi", 0.0)`` and the baseline trained on UNCONTAMINATED data --
+    measured mean pi = 0.000000 over 64 simulation calls, while
+    ``ModelFamily.intrinsic_params`` still *reported* pi because it defaults to
+    ``prior.keys()``. The parameter list therefore looked compatible while the data was
+    not, which would have confounded any CogFormer-vs-BayesFlow amortization gap with a
+    generative-model difference.
+    """
+    out = {}
+    for case, cfg in case_configs.items():
+        c = dict(cfg)
+        free = list(c["free_intrinsics"])
+        fixed = set(c.get("fixed_intrinsics") or ())
+        c["free_intrinsics"] = free + [g for g in global_params
+                                       if g not in free and g not in fixed]
+        out[case] = c
+    return out
+
+
+DDM_CONFIG["bf_case_configs"] = _bf_cases_with_globals(DDM_BF_CASE_CONFIGS)
+CDM_CONFIG["bf_case_configs"] = _bf_cases_with_globals(CDM_BF_CASE_CONFIGS)
+RDM_CONFIG["bf_case_configs"] = _bf_cases_with_globals(RDM_BF_CASE_CONFIGS)

@@ -69,9 +69,15 @@ These three dirs were consolidated here on 2026-08-17 from:
 - `outputs/figures/model_class/cf/lba_finetune/paired_ft` → `finetuned/`
 - `outputs/figures/model_class/cf/paired_orig` → `original/`
 
-Symlinks remain at all three old paths. The older LBA generalization scenarios that
-shared the `generalization/model_class_lba/cf/` tree moved to
-`outputs/figures/model_class/cf/lba_generalization/` (also symlinked back).
+Symlinks remain at all three old paths.
+
+The older LBA generalization scenarios that shared the `generalization/model_class_lba/cf/`
+tree were moved to `outputs/figures/model_class/cf/lba_generalization/` and then
+DELETED on 2026-09-02: dated 2026-06-01, they predate the 2026-07-09 factorisation
+commit and were produced with checkpoints current code cannot load. Four of their nine
+scenarios (`asymmetric`, `multi_factor`, `three_reg_interaction`, `two_factor`) were
+also removed from `experiments/configs.py` the same day. The nine symlinks that pointed
+into that tree were removed with it; `paired_zeroshot` remains and still resolves.
 
 No driver script for this run was saved to the repo; the log above is the only record
 of how it was invoked.

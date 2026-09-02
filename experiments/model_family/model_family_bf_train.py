@@ -19,8 +19,15 @@ from ..timing import RunTimer
 
 _BF_CKPT_PREFIXES = {"ddm": "ddm_families_bf", "cdm": "cdm_families_bf", "rdm": "rdm_families_bf"}
 
+# Only the families that actually define BF case configs. LBA has none -- it is
+# reached zero-shot / by finetuning from the model-class checkpoint, not by training a
+# per-family BayesFlow baseline -- so the unguarded `_cfg["bf_case_configs"]` here
+# raised KeyError on import for every invocation, whatever --model was passed. That is
+# why this repo has no BF baseline checkpoints at all.
 MODELS = {}
 for _key, _base in _BASE_MODELS.items():
+    if "bf_case_configs" not in _base or _key not in _BF_CKPT_PREFIXES:
+        continue
     _cfg = dict(_base)
     _cfg["case_configs"] = _cfg["bf_case_configs"]
     _cfg["ckpt_prefix"] = _BF_CKPT_PREFIXES[_key]
@@ -30,7 +37,7 @@ for _key, _base in _BASE_MODELS.items():
 class ModelFamilyBF(bf.simulators.Simulator):
     """Generic BayesFlow simulator wrapping ModelFamily for any benchmark model."""
 
-    def __init__(self, model_key: str, case: str):
+    def __init__(self, model_key: str, case: str, sim_workers: int | None = None):
         model_cfg = MODELS[model_key]
         case_configs = model_cfg["case_configs"]
         if case not in case_configs:
@@ -40,9 +47,14 @@ class ModelFamilyBF(bf.simulators.Simulator):
         self.config = case_configs[case]
         self.link_fn = model_cfg["link_fn"]
 
+        # Online training simulates every batch on the fly, so the numba simulator is
+        # a real throughput term alongside the GPU step. ModelFamily defaults to
+        # max(1, cpu_count()//6) workers (4 of 24 cores here); sim_workers lets the
+        # caller use the box.
         self.model_family = ModelFamily(
             model=model_cfg["model_cls"](),
             prior=model_cfg["prior_fn"](),
+            num_workers=sim_workers,
             regressed_params=self.config["regressed_params"],
             mask_randomizer_kwargs=dict(
                 free_intrinsics=self.config["free_intrinsics"],
@@ -135,9 +147,10 @@ def test(model_key: str, case: str):
             print(f"  {k}: {v.shape}")
 
 
-def main(model_key: str, case: str, epochs: int = 1000, steps_per_epoch: int = 100, batch_size: int = 64):
+def main(model_key: str, case: str, epochs: int = 1000, steps_per_epoch: int = 100,
+         batch_size: int = 64, sim_workers: int | None = None):
     model_cfg = MODELS[model_key]
-    simulator = ModelFamilyBF(model_key=model_key, case=case)
+    simulator = ModelFamilyBF(model_key=model_key, case=case, sim_workers=sim_workers)
 
     adapter = (
         bf.Adapter()
@@ -166,9 +179,14 @@ def main(model_key: str, case: str, epochs: int = 1000, steps_per_epoch: int = 1
         checkpoint_filepath=checkpoint_path,
     )
 
+    # NB: the parameter is num_batches_per_epoch, NOT steps_per_epoch. The latter is
+    # not a fit_online argument -- it falls through **kwargs into keras' fit() while
+    # the dataset keeps its own default of 100 batches per epoch, so --steps_per_epoch
+    # silently did nothing except when left at its default of 100. Same bug that was
+    # fixed in experiments/encoder_rep/addm_bf_baseline.py.
     history = workflow.fit_online(
         epochs=epochs,
-        steps_per_epoch=steps_per_epoch,
+        num_batches_per_epoch=steps_per_epoch,
         batch_size=batch_size,
     )
     return history
@@ -184,6 +202,10 @@ if __name__ == "__main__":
     parser.add_argument("--epochs", type=int, default=1000)
     parser.add_argument("--steps_per_epoch", type=int, default=100)
     parser.add_argument("--batch_size", type=int, default=64)
+    parser.add_argument("--sim_workers", type=int, default=None,
+                        help="Threads for the numba simulator. Default is ModelFamily's "
+                             "max(1, cpu_count()//6). Online training simulates every "
+                             "batch, so this is a throughput term, not just a nicety.")
     parser.add_argument("--dry_run_epochs", type=int, default=None,
                         help="If set, train for this many epochs only and record extrapolated time.")
     parser.add_argument("--use_wandb", action="store_true")
@@ -215,6 +237,7 @@ if __name__ == "__main__":
                 epochs=run_epochs,
                 steps_per_epoch=args.steps_per_epoch,
                 batch_size=args.batch_size,
+                sim_workers=args.sim_workers,
             )
         if args.use_wandb:
             wandb.finish()

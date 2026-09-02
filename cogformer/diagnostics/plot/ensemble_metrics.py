@@ -242,6 +242,21 @@ def ensemble_metrics(
     ]
 
     cell_size = 1.0
+
+    def fit_fontsize(strings, cap, cell_in=cell_size, frac=0.92):
+        """Largest fontsize at which the widest annotation still fits its cell.
+
+        Bold digits in matplotlib's default face run ~0.667 pt of advance width per pt
+        of font size, calibrated by measuring rendered extents: "±10.234" (7 chars) at
+        16 pt bold measures 1.04 in, and 7 * 16 * 0.667 / 72 = 1.037. Without this the
+        font was pinned at 16 regardless of content, so the three [0,1]-bounded panels
+        sat at 89% of cell width while Log Gamma -- the only unbounded metric -- spilled
+        past the cell as soon as its values reached two integer digits.
+        """
+        longest = max((len(line) for t in strings for line in str(t).split("\n")),
+                      default=1)
+        return max(6.0, min(cap, frac * cell_in * 72.0 / (longest * 0.667)))
+
     if figsize is None:
         figsize = (4 * num_cols * cell_size + 2.0, num_rows * cell_size + 2.5)
 
@@ -263,6 +278,14 @@ def ensemble_metrics(
         masked = np.ma.masked_where(~active_any, mean_grid)
         ax.imshow(masked, cmap=cmap, norm=norm, aspect="equal")
 
+        # Size the annotation to this panel's own widest string: the bounded metrics
+        # keep the full size, Log Gamma shrinks only as much as its values demand.
+        panel_strings = [
+            f"{mean_grid[r, c]:{fmt}}\n±{std_grid[r, c]:{fmt}}"
+            for r in range(num_rows) for c in range(num_cols) if count_grid[r, c] > 0
+        ]
+        annot_fs = fit_fontsize(panel_strings, annot_fontsize)
+
         # Annotate active cells: mean / ±std / n=k
         for r in range(num_rows):
             for c in range(num_cols):
@@ -277,7 +300,7 @@ def ensemble_metrics(
                     c, r - 0.12,
                     f"{mean_grid[r, c]:{fmt}}\n±{std_grid[r, c]:{fmt}}",
                     ha="center", va="center",
-                    fontsize=annot_fontsize,
+                    fontsize=annot_fs,
                     fontweight="bold",
                     color=text_color,
                     linespacing=1.3,
@@ -291,7 +314,7 @@ def ensemble_metrics(
                 ax.text(
                     c, r + 0.28, f"(n={n})",
                     ha="center", va="center",
-                    fontsize=annot_fontsize - 2,
+                    fontsize=annot_fs - 2,
                     color=text_color,
                 )
 
@@ -309,7 +332,7 @@ def ensemble_metrics(
                     ax.text(
                         c, r, "N/A",
                         ha="center", va="center",
-                        fontsize=annot_fontsize + 1,
+                        fontsize=annot_fs + 1,
                         fontweight="bold",
                         color=tint, alpha=0.7, zorder=3,
                     )

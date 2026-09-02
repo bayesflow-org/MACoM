@@ -50,6 +50,25 @@ PLOTS = {
 }
 
 
+def active_labels(mask_row):
+    """Names for the active cells of a flattened 67x7 design grid.
+
+    Flat index is ``row * n_params + param``. Kept in step with the identical
+    helper in addm_bf_apply.py / addm_bf_baseline.py -- duplicated rather than
+    imported so each script stays independently runnable.
+    """
+    n = len(INTRINSIC_PARAMS)
+    idx = np.where(np.asarray(mask_row).astype(bool))[0]
+    plain, pretty = [], []
+    for i in idx:
+        row, par = divmod(int(i), n)
+        suffix = "" if row == 0 else f"@r{row}"
+        plain.append(INTRINSIC_PARAMS[par] + suffix)
+        pretty.append(VARIABLE_NAMES[par] if row == 0
+                      else VARIABLE_NAMES[par][:-1] + r"^{(" + str(row) + r")}$")
+    return plain, pretty
+
+
 def parse_args():
     p = argparse.ArgumentParser()
     # addm_bf_apply.py writes to DATA_DIR (outputs/data/...), NOT to FIGURES_DIR.
@@ -76,7 +95,17 @@ def main():
     targets = d["true_params"]                 # (n_datasets, n_params)
     estimates = d["pred_params"]               # (n_datasets, n_draws, n_params)
     n_params = targets.shape[1]
-    names = VARIABLE_NAMES[:n_params]
+    # Names must be read off the saved mask, NOT by slicing the full list: the
+    # active cells are not in general a prefix of INTRINSIC_PARAMS. The v-fixed
+    # variant drops v, so its 6 active cells are v_diff..s_tau, which
+    # VARIABLE_NAMES[:6] would label v..s_v -- every panel shifted by one, with
+    # no error raised.
+    plain_names, names = active_labels(d["param_masks"][0])
+    if len(names) != n_params:
+        raise ValueError(
+            f"param_masks has {len(names)} active cells but true_params has "
+            f"{n_params} columns: {data_path} was written by a different config."
+        )
     logging.info(f"{targets.shape[0]} datasets x {estimates.shape[1]} draws x {n_params} params")
 
     for name, (fn, color_kwargs) in PLOTS.items():
@@ -103,7 +132,7 @@ def main():
 
     rows = []
     logging.info(f"\n{'param':10} {'contraction':>12} {'z_score':>9} {'nrmse':>8}")
-    for j, n in enumerate(INTRINSIC_PARAMS[:n_params]):
+    for j, n in enumerate(plain_names):
         logging.info(f"{n:10} {contraction[j]:12.3f} {zscore[j]:9.3f} {rmse[j]:8.3f}")
         rows.append({"param": n, "contraction": contraction[j],
                      "z_score": zscore[j], "nrmse": rmse[j]})

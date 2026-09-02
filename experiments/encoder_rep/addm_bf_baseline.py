@@ -85,6 +85,32 @@ DESIGN_CONFIGS = {
         "1": INTRINSIC_PARAMS,
         "u_1": ["v"],
     },
+    # Trial-varying item values -- the design real aDDM experiments actually use,
+    # where each trial shows a different pair of items whose values are KNOWN
+    # (from a pre-experiment bidding task) and therefore enter as regressors.
+    #   v_diff_t = b_d0 + b_d1 * u_1t   (the value DIFFERENCE channel)
+    #   v_t      = b_v0 + b_v1 * u_2t   (the common-value / SUM channel)
+    # This is what removes the flat direction WITHOUT pinning v. Under
+    # intercept_only the data see only mu = (1+w)/2*v_diff and
+    # Delta = (1-w)(2v + v_diff), two functionals for three parameters. Here
+    # v_diff enters BOTH channels with the same b_d1, and the ratio of its
+    # Delta-effect to its mu-effect is 2(1-w)/(1+w) -- free of b_d1, so omega is
+    # structurally identified. Whether that is PRACTICALLY strong at 500 trials
+    # is the empirical question this case exists to answer; the Delta channel is
+    # still second-order, which is what defeated the v-fixed variant.
+    "varying_values": {
+        "1": INTRINSIC_PARAMS,
+        "u_1": ["v_diff"],
+        "u_2": ["v"],
+    },
+}
+
+# Extra batch_sample kwargs per case. Item values are CONTINUOUS quantities, but
+# build_discrete_mask assigns each regressor continuous/categorical at random
+# (discrete_prob=0.5) unless told otherwise -- an empty categorical_regressors
+# list pins both value regressors continuous.
+CASE_SAMPLE_KWARGS = {
+    "varying_values": {"categorical_regressors": []},
 }
 
 MASK_RANDOMIZER_KWARGS = {
@@ -92,6 +118,65 @@ MASK_RANDOMIZER_KWARGS = {
     "fixed_intrinsics": ["s_v", "s_tau"],
     "fixed_values": {},
 }
+
+
+# ── v-fixed variant ───────────────────────────────────────────────────────────
+# With gaze unobserved and item values constant across trials, the data depend on
+# (v, v_diff, omega) only through two functionals -- the effective drift
+#     mu    = (1 + omega)/2 * v_diff
+# and the attentional swing
+#     Delta = (1 - omega) * (2v + v_diff),
+# which drives both the first-fixation choice bias and the extra within-trial
+# drift variance. Three parameters, two functionals: exactly one flat direction,
+# and v is the coordinate that spans it -- it never enters mu at all. Measured at
+# 200k trials, a=1, tau=0.3, s_v=s_tau=0, first_fixation=item0:
+#     v=1.00 v_diff=0.500 omega=0.25 -> P(c=1)=0.5713, RT q10/50/90 .554/1.007/2.173
+#     v=1.67 v_diff=0.417 omega=0.50 -> P(c=1)=0.5719,               .554/1.006/2.167
+#     v=3.57 v_diff=0.357 omega=0.75 -> P(c=1)=0.5727,               .553/1.006/2.172
+# Pinning v makes (v_diff, omega) <-> (mu, Delta) a bijection; omega then moves
+# P(c=1) by 0.17-0.28 across [0, 1]. This is also the scientifically correct move:
+# in Krajbich's design item values come from a pre-experiment bidding task, i.e.
+# they are known covariates, not free parameters.
+#
+# V_FIXED is the PRIOR MEDIAN of v on the natural scale -- shifted_softplus(0.6),
+# 0.6 being the prior location -- so the marginal data distribution stays as close
+# as possible to the v-free variant. Fixed-value injection in ModelFamily.sample()
+# BYPASSES the link function, so this is a post-link value, not an unconstrained one.
+V_FIXED = 1.0375
+
+
+def resolve_case(case: str, fix_v: bool):
+    """Design config + mask-randomizer kwargs for a case, with v optionally pinned.
+
+    Dropping "v" from the design config leaves its column of the parameter mask
+    empty, which is exactly the condition under which ModelFamily.sample() injects
+    fixed_values["v"] instead of running the link function. The inference target
+    goes from 7 active cells to 6 (v_diff, omega, a, tau, s_v, s_tau).
+
+    Train and validate MUST call this with the same fix_v, or their simulated data
+    distributions diverge -- the same failure mode as the empty-fixed_values bug.
+    """
+    if not fix_v:
+        return DESIGN_CONFIGS[case], MASK_RANDOMIZER_KWARGS
+    if case != "intercept_only":
+        raise ValueError(
+            f"--fix_v is only defined for intercept_only, got {case!r}: intercept_v "
+            "regresses v on u_1, and pinning v would leave that term empty."
+        )
+    return (
+        {"1": [p for p in INTRINSIC_PARAMS if p != "v"]},
+        {
+            "free_intrinsics": [p for p in MASK_RANDOMIZER_KWARGS["free_intrinsics"]
+                                if p != "v"],
+            "fixed_intrinsics": MASK_RANDOMIZER_KWARGS["fixed_intrinsics"] + ["v"],
+            "fixed_values": {"v": V_FIXED},
+        },
+    )
+
+
+def _variant(p: Path, fix_v: bool) -> Path:
+    """Route the v-fixed run to its own output tree, leaving 7-dim results in place."""
+    return p.with_name(p.name + "_vfixed") if fix_v else p
 
 # Must match addm_bf_apply.py so both arms see identical inputs.
 MAX_NUM_REGRESSORS = 4
@@ -111,14 +196,16 @@ INFERENCE_NET_KWARGS: dict = {}
 class ADDMBaselineSimulator(bf.simulators.Simulator):
     """Emits raw per-trial data for the SetTransformer to summarise itself."""
 
-    def __init__(self, case: str, num_obs: int = 500, first_fixation: str = "item0"):
-        self.design_config = DESIGN_CONFIGS[case]
+    def __init__(self, case: str, num_obs: int = 500, first_fixation: str = "item0",
+                 fix_v: bool = False):
+        self.design_config, mask_kwargs = resolve_case(case, fix_v)
         self.num_obs = num_obs
+        self.extra_sample_kwargs = CASE_SAMPLE_KWARGS.get(case, {})
         self.model_family = ModelFamily(
             model=ADDM(first_fixation=first_fixation),
             prior=addm_priors(),
             intrinsic_params=INTRINSIC_PARAMS,
-            mask_randomizer_kwargs=MASK_RANDOMIZER_KWARGS,
+            mask_randomizer_kwargs=mask_kwargs,
         )
         self._choices_denom = max(NUM_ALTERNATIVES - 1, 1)
         self._alt_val = (NUM_ALTERNATIVES - 1) / max(MAX_ALTERNATIVES - 1, 1)
@@ -137,6 +224,7 @@ class ADDMBaselineSimulator(bf.simulators.Simulator):
             fixed_config=True,
             flatten_param_outputs=True,
             link_fun={k: f for k, f in addm_link_fun().items() if k in INTRINSIC_PARAMS},
+            **self.extra_sample_kwargs,
         )
 
         design_matrices = samples["design_matrices"]
@@ -235,13 +323,32 @@ def build_summary_network():
     return bf.networks.SetTransformer(**SUMMARY_NET_KWARGS)
 
 
-def ckpt_path(case: str, first_fixation: str, tag: str = "") -> str:
+def _sample_chunked(approximator, key: str, conditions, num_samples: int, chunk: int):
+    """Posterior draws in dataset-sized chunks, concatenated.
+
+    ``approximator.sample`` flattens (n_datasets, num_samples) into ONE batch, so
+    500 datasets x 500 draws builds a 250,000 x 256 activation inside
+    FlowMatching's FiLM layer and OOMs a 31.4 GiB card at ~29 GiB. Chunking over
+    datasets keeps peak memory linear in ``chunk`` and leaves the draws per
+    dataset -- and therefore every downstream metric -- byte-identical.
+    """
+    outs = []
+    for i in range(0, len(conditions), chunk):
+        draws = approximator.sample(
+            conditions={key: conditions[i:i + chunk]}, num_samples=num_samples
+        )
+        outs.append(np.asarray(draws["params"]))
+    return np.concatenate(outs, axis=0)
+
+
+def ckpt_path(case: str, first_fixation: str, tag: str = "", fix_v: bool = False) -> str:
     # first_fixation is in the path: the probe script keys only on case, so a
     # second run with a different gaze rule silently overwrites the first.
     # tag serves the same purpose for anything the CLI cannot express -- notably
     # which BayesFlow defaults the run used, since that is a property of the
     # installed library rather than of any argument.
-    return str(CKPT_DIR / case / (first_fixation + _suffix(tag)) / "addm_baseline_fm")
+    return str(_variant(CKPT_DIR, fix_v) / case / (first_fixation + _suffix(tag))
+               / "addm_baseline_fm")
 
 
 def _suffix(tag: str) -> str:
@@ -250,7 +357,8 @@ def _suffix(tag: str) -> str:
 
 def train(args):
     simulator = ADDMBaselineSimulator(case=args.case, num_obs=args.num_obs,
-                                      first_fixation=args.first_fixation)
+                                      first_fixation=args.first_fixation,
+                                      fix_v=args.fix_v)
     summary_net = build_summary_network()
 
     workflow = bf.BasicWorkflow(
@@ -259,7 +367,8 @@ def train(args):
         inference_network=build_inference_network(args.subnet_dropout,
                                                   args.time_power_law_alpha),
         summary_network=summary_net,
-        checkpoint_filepath=ckpt_path(args.case, args.first_fixation, args.tag),
+        checkpoint_filepath=ckpt_path(args.case, args.first_fixation, args.tag,
+                                      args.fix_v),
     )
 
     logging.info(
@@ -282,23 +391,22 @@ def train(args):
 
 def validate(args):
     simulator = ADDMBaselineSimulator(case=args.case, num_obs=args.num_obs,
-                                      first_fixation=args.first_fixation)
+                                      first_fixation=args.first_fixation,
+                                      fix_v=args.fix_v)
     approximator = keras.saving.load_model(
-        ckpt_path(args.case, args.first_fixation, args.tag) + "/model.keras"
+        ckpt_path(args.case, args.first_fixation, args.tag, args.fix_v) + "/model.keras"
     )
 
     val_sims = simulator.sample(args.val_batch_size)
     masks = val_sims["masks"]
 
-    post_draws = approximator.sample(
-        conditions={"data": val_sims["data"]},
-        num_samples=args.num_samples,
-    )
+    pred_active = _sample_chunked(approximator, "data", val_sims["data"],
+                                  args.num_samples, args.sample_chunk_size)
     # The simulator now emits only the active cells, so no masking here.
     true_active = val_sims["params"]
-    pred_active = post_draws["params"]
 
-    outdir = FIGURES_DIR / args.case / (args.first_fixation + _suffix(args.tag))
+    outdir = (_variant(FIGURES_DIR, args.fix_v) / args.case
+              / (args.first_fixation + _suffix(args.tag)))
     outdir.mkdir(parents=True, exist_ok=True)
     np.savez(
         outdir / "addm_baseline_data.npz",
@@ -352,6 +460,11 @@ def parse_args():
     p.add_argument("--first_fixation", type=str, default="item0",
                    choices=["random", "item0", "item1"],
                    help="Must match the frozen-encoder arm for the comparison to hold.")
+    p.add_argument("--fix_v", action="store_true",
+                   help="Pin the common value v to V_FIXED instead of inferring it, "
+                        "removing the (v, v_diff, omega) flat direction. Drops the "
+                        "target from 7 active cells to 6 and routes all outputs to a "
+                        "*_vfixed tree. intercept_only only.")
     p.add_argument("--subnet_dropout", type=float, default=None,
                    help="Override the inference subnet's dropout. Default None keeps the "
                         "installed library's value, which differs between BayesFlow main "
@@ -369,6 +482,10 @@ def parse_args():
     p.add_argument("--steps_per_epoch", type=int, default=100)
     p.add_argument("--batch_size", type=int, default=64)     # == addm_bf_apply.py
     p.add_argument("--num_obs", type=int, default=500)
+    p.add_argument("--sample_chunk_size", type=int, default=50,
+                   help="Datasets per approximator.sample call at validation. The call "
+                        "flattens datasets x draws into one batch, so 500x500 OOMs a "
+                        "31 GiB card; chunking changes peak memory only, not results.")
     p.add_argument("--val_batch_size", type=int, default=500)
     p.add_argument("--num_samples", type=int, default=100)
     return p.parse_args()

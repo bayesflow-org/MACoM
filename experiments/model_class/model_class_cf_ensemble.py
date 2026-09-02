@@ -1,8 +1,10 @@
 import argparse
+import json
 import logging
 from pathlib import Path
 
 import numpy as np
+import pandas as pd
 import torch
 import matplotlib.pyplot as plt
 import seaborn as sns
@@ -13,7 +15,8 @@ from cogformer.simulator.benchmarks.ssms.rdm import RDM
 from cogformer.simulator.benchmarks.ssms.cdm import CDM
 from cogformer.simulator.benchmarks.ssms.priors import ddm_priors, rdm_priors, cdm_priors
 from cogformer.simulator.benchmarks.ssms.link_funs import ddm_link_fun, rdm_link_fun, cdm_link_fun
-from cogformer.simulator.design_utils import build_parameter_mask, build_design_matrix, build_random_design_config
+from cogformer.simulator.design_utils import (build_parameter_mask, build_design_matrix,
+                                              sample_covering_design_configs)
 from cogformer.adapter import Adapter
 from cogformer.networks.transformers.cogformer import CogFormer
 from cogformer.diagnostics.plot.ensemble_recovery import ensemble_recovery, global_ensemble_recovery
@@ -40,46 +43,6 @@ _MODELS_WITH_PI = {
 DEFAULT_FIXED_VALUES = {
     m.upper(): cfg["default_fixed_values"] for m, cfg in _BASE_MODELS.items()
 }
-
-
-def build_gap_filling_design_config(
-    prev_configs: list[dict],
-    intrinsic_params: list[str],
-    num_regressors: int,
-    keep_intercept: bool,
-    add_interaction: bool,
-    global_params: list[str] | None = None,
-) -> dict:
-    """Design config that covers every (block, parameter) cell the previous configs missed.
-
-    The ensemble grid keeps a row if ANY config activates it, so a cell goes N/A whenever
-    one config opens a row that no other config covers. Sampling configs independently
-    cannot guarantee coverage; this closes the union deterministically.
-
-    Every legal cell is filled, not just the gaps ("and then some"): the intercept carries
-    all parameters -- which is also what makes any slope legal, since
-    ``build_random_design_config`` only permits slopes for parameters present in the
-    intercept -- and each slope block carries every non-global parameter. Global params
-    (e.g. pi) stay intercept-only, matching the sampler.
-
-    prev_configs is accepted so the intent stays legible and so this can be tightened to a
-    true complement later; the saturated config is a superset of any complement.
-    """
-    global_set = set(global_params or ())
-    config: dict[str, list[str]] = {}
-    if keep_intercept:
-        config["1"] = list(intrinsic_params)
-
-    main_keys = [f"u_{r + 1}" for r in range(num_regressors)]
-    slope_params = [p for p in intrinsic_params if p not in global_set]
-    for key in main_keys:
-        config[key] = list(slope_params)
-
-    if add_interaction:
-        for i in range(len(main_keys)):
-            for j in range(i + 1, len(main_keys)):
-                config[f"{main_keys[i]}:{main_keys[j]}"] = list(slope_params)
-    return config
 
 
 def parse_args():
@@ -111,10 +74,13 @@ def parse_args():
                    help="Comma-separated families to include, in plot order. A single "
                         "family drops the parameter columns that family does not have "
                         "and lays the mask thumbnails out in one row instead of stacked.")
-    p.add_argument("--saturate_last", action=argparse.BooleanOptionalAction, default=True,
-                   help="Make the last config of each family cover every (block, parameter) "
-                        "cell the earlier ones missed, so the combined grid has no N/A cells. "
-                        "Pass --no-saturate_last to sample all configs randomly.")
+    p.add_argument("--max_coverage_attempts", type=int, default=20000,
+                   help="Rejection budget for drawing a covering set of design configs. "
+                        "Every config is a genuine random draw; the SET is redrawn until "
+                        "its union covers every estimable cell, so the ensemble grid has no "
+                        "N/A cells without any deterministic config. Config construction is "
+                        "pure combinatorics (~0.1 ms), so rejection is nearly free -- only "
+                        "the accepted set is ever simulated. Measured ~7 draws per family.")
     p.add_argument("--metrics", action="store_true", default=False)
     # Architecture (must match checkpoint)
     p.add_argument("--encoder_num_layers", type=int, default=8)
@@ -207,13 +173,36 @@ def main():
     for name in model_names_ordered:
         sampled_model_names.extend([name] * per_family[name])
 
+    # One covering SET per family, drawn before any simulation. Rejection sampling
+    # replaces the old --saturate_last, which made the last config of each family a
+    # deterministic saturated config and left the ensemble a mixture of random and
+    # constructed designs. Raising free_prob instead does not work: coverage caps near
+    # 71% however high it goes, because slopes are drawn from the intercept set, so
+    # intercept_prob becomes the binding constraint.
+    covering_configs = {}
+    for name in model_names_ordered:
+        local = model_class.model_families[name].intrinsic_params
+        default_fixed = DEFAULT_FIXED_VALUES[name]
+        covering_configs[name] = sample_covering_design_configs(
+            n_configs=per_family[name],
+            intrinsic_params=local,
+            num_regressors=args.num_regressors,
+            free_intrinsics=[p for p in local if p not in default_fixed],
+            fixed_intrinsics=list(default_fixed.keys()),
+            keep_intercept=args.keep_intercept,
+            add_interaction=args.add_interaction,
+            free_prob=args.free_prob,
+            global_params=GLOBAL_PARAMS,
+            max_attempts=args.max_coverage_attempts,
+        )
+        logging.info(f"{name}: drew {per_family[name]} covering design configs")
+
     true_list, pred_list, masks = [], [], []
     design_configs_out, labels, categorical_regressors_list = [], [], []
     colors = sns.husl_palette(args.n_configs, h=0.05, l=0.82)
 
     # Per-model counter for label numbering: "DDM | 1", "RDM | 1", "DDM | 2", ...
     model_counters = {name: 0 for name in model_names_ordered}
-    configs_by_family = {name: [] for name in model_names_ordered}
 
     for i, model_name in enumerate(sampled_model_names):
         model_counters[model_name] += 1
@@ -226,28 +215,7 @@ def main():
         link_fun = link_funs[model_name]
         default_fixed = DEFAULT_FIXED_VALUES[model_name]
 
-        is_last_of_family = model_counters[model_name] == per_family[model_name]
-        if args.saturate_last and is_last_of_family:
-            dc = build_gap_filling_design_config(
-                prev_configs=configs_by_family[model_name],
-                intrinsic_params=intrinsic_params_local,
-                num_regressors=args.num_regressors,
-                keep_intercept=args.keep_intercept,
-                add_interaction=args.add_interaction,
-                global_params=GLOBAL_PARAMS,
-            )
-        else:
-            dc = build_random_design_config(
-                intrinsic_params=intrinsic_params_local,
-                num_regressors=args.num_regressors,
-                free_intrinsics=[p for p in intrinsic_params_local if p not in default_fixed],
-                fixed_intrinsics=list(default_fixed.keys()),
-                keep_intercept=args.keep_intercept,
-                add_interaction=args.add_interaction,
-                free_prob=args.free_prob,
-                global_params=GLOBAL_PARAMS,
-            )
-        configs_by_family[model_name].append(dc)
+        dc = covering_configs[model_name][model_counters[model_name] - 1]
 
         free_intr, fixed_intr, fixed_vals = infer_free_fixed_intrinsics(
             dc, intrinsic_params_local, default_fixed
@@ -307,13 +275,54 @@ def main():
         # Element 0's realized continuous/categorical assignment (plots use mask[0]).
         # Dummy coding drops the base category c_0, so even a K=2 categorical carries
         # a c_1 contrast — labels must come from the discrete mask, not slot counts.
+        # Restrict to regressors this design actually declares. The discrete mask is
+        # sized to max_num_regressors (the padded encoder budget), so slicing to it
+        # reports a continuous/categorical verdict for padding regressors the design
+        # never used -- harmless for labels, since those rows are dead, but wrong in
+        # the saved manifest, where it reads as "u_3 was categorical" for a two-
+        # regressor design.
+        design_main_keys = {k for k in dc if k != "1" and ":" not in k}
         disc = np.asarray(samples["discrete_masks"][0][:args.max_num_regressors])
         categorical_regressors_list.append(
-            [f"u_{i + 1}" for i, v in enumerate(disc) if v == 1.0]
+            [f"u_{i + 1}" for i, v in enumerate(disc)
+             if v == 1.0 and f"u_{i + 1}" in design_main_keys]
         )
 
     outdir = Path(args.outdir)
     outdir.mkdir(parents=True, exist_ok=True)
+
+    # Persist BEFORE plotting. Sampling is the expensive half and previously lived only
+    # in the rendered PDFs, so the design configs an ensemble actually used were not
+    # recoverable afterwards and the run could not be reproduced or re-plotted.
+    # Per-config keys rather than stacked arrays: row counts differ between configs.
+    arrays = {}
+    for i, (t, q, m) in enumerate(zip(true_list, pred_list, masks)):
+        arrays[f"true_{i}"] = t
+        arrays[f"pred_{i}"] = q
+        arrays[f"mask_{i}"] = m
+    np.savez_compressed(
+        outdir / "model_class_ensemble_data.npz",
+        n_configs=len(true_list),
+        labels=np.array(labels, dtype=object),
+        families=np.array(sampled_model_names, dtype=object),
+        design_configs=json.dumps(design_configs_out),
+        categorical_regressors=json.dumps(categorical_regressors_list),
+        **arrays,
+    )
+    manifest = pd.DataFrame([
+        {
+            "index": i,
+            "family": fam,
+            "label": lab,
+            "categorical_regressors": ";".join(cats) if cats else "",
+            **{f"cells[{k}]": ",".join(v) for k, v in dc.items() if v},
+        }
+        for i, (fam, lab, dc, cats) in enumerate(
+            zip(sampled_model_names, labels, design_configs_out, categorical_regressors_list))
+    ])
+    manifest.to_csv(outdir / "model_class_ensemble_configs.csv", index=False)
+    logging.info(f"[saved] {outdir / 'model_class_ensemble_data.npz'}")
+    logging.info(f"[saved] {outdir / 'model_class_ensemble_configs.csv'}")
 
     # The global param space is the ordered union across families, which places pi
     # BEFORE the family-specific params (v_diff, v_theta) — build labels by name

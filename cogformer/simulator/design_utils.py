@@ -128,7 +128,9 @@ def build_random_design_config(
     -----
     - The intercept row (key "1") is randomized when `keep_intercept=True`.
     - Slopes are only allowed for intrinsic parameters which have an intercept entry.
-    - Fixed intrinsics are always included in the intercept and never appear in slope terms.
+    - Fixed intrinsics enter the intercept with probability `intercept_prob`, and once
+      there they are slope-eligible like any other non-global parameter (slopes are
+      drawn from the intercept set minus globals).
     - Global params are always included in the intercept and never appear in slope terms.
       Unlike fixed intrinsics, their intercept values are sampled from their prior.
     - When `free_prob` or `intercept_prob` is None, each is sampled independently
@@ -315,6 +317,112 @@ def build_position_codes(
         )
 
     return np.asarray(rows, dtype=np.int64).reshape(-1, 4)
+
+
+def sample_covering_design_configs(
+    n_configs: int,
+    intrinsic_params: list[str],
+    num_regressors: int,
+    free_intrinsics: list[str] | None = None,
+    fixed_intrinsics: list[str] | None = None,
+    keep_intercept: bool = True,
+    add_interaction: bool = False,
+    free_prob: float | None = None,
+    intercept_prob: float | None = None,
+    global_params: list[str] | set[str] | None = None,
+    max_attempts: int = 20000,
+    rng_seed: int | None = None,
+) -> list[dict[str, list[str]]]:
+    """``n_configs`` random design configs whose UNION covers every estimable cell.
+
+    The ensemble grid keeps a row if ANY config activates it, so a cell renders N/A
+    whenever one config opens a row no other config covers. The previous fix made the
+    last config of each family a deterministic saturated config, which left the
+    ensemble a mixture of random and constructed designs -- awkward to describe and
+    not a random sample of anything.
+
+    This draws the whole SET and rejects it unless the union covers, so every config
+    stays a genuine random draw and the set is exactly "a uniform sample from the
+    covering sets". Rejection is nearly free: config construction is pure
+    combinatorics (~0.1 ms) and only the accepted set is ever simulated.
+
+    Measured at the ensemble's settings (4 configs/family, 2 regressors, interactions
+    on, K=2), acceptance is ~1.2% per family, i.e. ~80 draws, a few milliseconds.
+
+    Raising ``free_prob`` instead does NOT work: coverage caps near 71% however high
+    it goes, because a slope is only legal for a parameter that has an intercept
+    entry, so ``intercept_prob`` becomes the binding constraint. Raising both to 1.0
+    reaches 100% only by making every config the saturated one.
+
+    ESTIMABLE CELLS
+    ---------------
+    The intercept row can carry any parameter. Slope rows can carry only free,
+    non-global parameters: ``build_random_design_config`` never places a fixed
+    intrinsic or a global (e.g. ``pi``) in a slope term, so those slope cells are
+    structurally unreachable and are excluded from the coverage requirement.
+    Demanding them would make coverage impossible at any setting.
+
+    Coverage is evaluated per ``(design-config key, parameter)`` rather than per mask
+    row. A config's parameter set is identical across every contrast slot of a block,
+    so for the K=2 case the ensemble runs these are equivalent.
+
+    Raises
+    ------
+    RuntimeError
+        If no covering set is found within ``max_attempts``. Silently returning a
+        non-covering set would reintroduce N/A cells with no signal that it happened.
+    """
+    global_set = set(global_params or ())
+
+    # Slope-legal is every NON-GLOBAL parameter, fixed intrinsics included. The
+    # docstring of build_random_design_config claims fixed intrinsics never take
+    # slopes, but the code computes
+    #     allowed_slope_params = set(intercept_names) - global_set
+    # so a fixed intrinsic that lands in the intercept (probability intercept_prob)
+    # IS slope-eligible. Excluding them here would under-demand coverage and leave
+    # exactly the N/A cells this function exists to prevent.
+    slope_legal = [p for p in intrinsic_params if p not in global_set]
+    intercept_legal = list(intrinsic_params)
+
+    if rng_seed is not None:
+        np.random.seed(rng_seed)
+
+    def covers(configs: list[dict]) -> bool:
+        keys = set()
+        for c in configs:
+            keys.update(c.keys())
+        for key in keys:
+            legal = intercept_legal if key == "1" else slope_legal
+            union = set()
+            for c in configs:
+                union.update(c.get(key, []))
+            if any(p not in union for p in legal):
+                return False
+        return True
+
+    for attempt in range(1, max_attempts + 1):
+        configs = [
+            build_random_design_config(
+                intrinsic_params=intrinsic_params,
+                num_regressors=num_regressors,
+                free_intrinsics=free_intrinsics,
+                fixed_intrinsics=fixed_intrinsics,
+                keep_intercept=keep_intercept,
+                add_interaction=add_interaction,
+                free_prob=free_prob,
+                intercept_prob=intercept_prob,
+                global_params=global_params,
+            )
+            for _ in range(n_configs)
+        ]
+        if covers(configs):
+            return configs
+
+    raise RuntimeError(
+        f"No covering set of {n_configs} design configs found in {max_attempts} "
+        f"attempts (free_prob={free_prob}, intercept_prob={intercept_prob}). Either "
+        "raise max_attempts, raise n_configs, or loosen the coverage requirement."
+    )
 
 
 def build_row_labels(

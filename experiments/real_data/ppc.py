@@ -550,6 +550,60 @@ def plot_rt_qq(obs_pooled, ppc_pooled, conditions, model_name, variant, outdir,
         logging.info(f"[saved] {savepath}")
 
 
+def plot_choice_quantiles(obs_ch, ppc_ch, conditions, model_name, variant, outdir,
+                          quantiles=DEFAULT_RT_QUANTILES, ppc_color=PPC_COLOR):
+    """Quantile plot on the RESPONSE dimension. CDM only.
+
+    CDM's response is a continuous angle, so quantiles of theta are meaningful in
+    the same way RT quantiles are. DDM and RDM respond with a binary choice,
+    where quantiles carry no information -- for those the response-dimension
+    check is the proportion comparison in plot_choice_ppc, not this.
+    """
+    if model_name != "cdm":
+        logging.info(f"[choice quantiles] skipped for {model_name}: response is discrete")
+        return
+
+    quantiles = np.asarray(quantiles, dtype=float)
+    tag = _quantile_tag(quantiles)
+    xs = np.arange(len(quantiles))
+    outdir.mkdir(parents=True, exist_ok=True)
+
+    for cond_name, _, label_map in conditions:
+        labels = [l for l in label_map.values()
+                  if len(obs_ch.get(cond_name, {}).get(l, []))
+                  and len(ppc_ch.get(cond_name, {}).get(l, []))]
+        if not labels:
+            continue
+        fig, axes = plt.subplots(1, len(labels), figsize=(3.2 * len(labels), 3.2),
+                                 squeeze=False)
+        for ax, lbl in zip(axes[0], labels):
+            o = np.asarray(obs_ch[cond_name][lbl], dtype=float)
+            draws = [np.asarray(p, dtype=float) for p in ppc_ch[cond_name][lbl]]
+            obs_q, med, lo, hi = _quantile_stats(o, draws, quantiles)
+            if med is not None:
+                ax.fill_between(xs, lo, hi, color=ppc_color, alpha=0.25,
+                                label="PPC 95% CI", zorder=1)
+                ax.plot(xs, med, "o-", color=ppc_color, lw=1.4, ms=4,
+                        label="PPC median", zorder=2)
+            ax.plot(xs, obs_q, "s--", color=OBS_COLOR, lw=1.6, ms=4,
+                    label="Observed", zorder=3)
+            ax.axhline(0.0, color="grey", ls=":", lw=0.8, zorder=0)
+            ax.set_xticks(xs); ax.set_xticklabels([f"{q:g}" for q in quantiles])
+            ax.set_title(lbl, fontsize=9)
+            ax.set_xlabel("quantile", fontsize=8)
+            ax.set_ylabel(r"response deviation $\theta$ (rad)", fontsize=8)
+            ax.tick_params(labelsize=7)
+            ax.spines[["top", "right"]].set_visible(False)
+        axes[0, 0].legend(fontsize=7, frameon=False)
+        fig.suptitle(f"{model_name.upper()} ({variant}) — response-angle quantiles "
+                     f"by {cond_name}", fontsize=10)
+        fig.tight_layout()
+        savepath = outdir / f"{model_name}_{variant}_choice_quantiles_{cond_name}{tag}.pdf"
+        fig.savefig(savepath, bbox_inches="tight")
+        plt.close(fig)
+        logging.info(f"[saved] {savepath}")
+
+
 def plot_choice_ppc(obs_ch, ppc_ch, conditions, model_name, variant, outdir,
                     draw_lines=True, max_lines=100, line_alpha=0.15, line_width=0.5):
     """PPC on the RESPONSE dimension.
@@ -692,6 +746,8 @@ def main():
                       outdir, quantiles=args.rt_quantiles)
     plot_rt_qq(obs_pooled, ppc_pooled, conditions, args.model, args.variant,
                outdir, quantiles=args.rt_quantiles)
+    plot_choice_quantiles(obs_ch, ppc_ch, conditions, args.model, args.variant,
+                          outdir, quantiles=args.rt_quantiles)
     plot_choice_ppc(obs_ch, ppc_ch, conditions, args.model, args.variant, outdir,
                     draw_lines=not args.no_ppc_lines, max_lines=args.ppc_max_lines,
                     line_alpha=args.ppc_line_alpha, line_width=args.ppc_line_width)
