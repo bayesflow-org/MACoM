@@ -1,5 +1,15 @@
 import os
 os.environ["KERAS_BACKEND"] = "jax"
+# ONE numba thread. Measured on this 24-core box, batch 256, num_obs 500:
+#     ModelFamily threads=4  -> 285 ms/batch
+#     ModelFamily threads=12 -> 257 ms/batch
+#     ModelFamily threads=23 -> 1788 ms/batch   (7x WORSE)
+# Multi-threaded numba pays a fork-join sync on every simulate() call -- once per
+# batch element -- so it degrades superlinearly. experiments/utils.recommend_sim_workers
+# records the same effect measured the other way: 6 workers x 4 threads = 3.3 batches/s
+# against 20 workers x 1 thread = 7.8 batches/s. Parallelism belongs at the DATASET
+# level (worker processes), not inside numba.
+os.environ.setdefault("NUMBA_NUM_THREADS", "1")
 
 import argparse
 import numpy as np
@@ -14,6 +24,7 @@ from pathlib import Path
 from cogformer.simulator.model_family import ModelFamily
 
 from ..configs import MODELS as _BASE_MODELS
+from ..utils import recommend_sim_workers
 from ..timing import RunTimer
 
 
@@ -37,7 +48,7 @@ for _key, _base in _BASE_MODELS.items():
 class ModelFamilyBF(bf.simulators.Simulator):
     """Generic BayesFlow simulator wrapping ModelFamily for any benchmark model."""
 
-    def __init__(self, model_key: str, case: str, sim_workers: int | None = None):
+    def __init__(self, model_key: str, case: str):
         model_cfg = MODELS[model_key]
         case_configs = model_cfg["case_configs"]
         if case not in case_configs:
@@ -51,10 +62,13 @@ class ModelFamilyBF(bf.simulators.Simulator):
         # a real throughput term alongside the GPU step. ModelFamily defaults to
         # max(1, cpu_count()//6) workers (4 of 24 cores here); sim_workers lets the
         # caller use the box.
+        # num_workers=1: this family runs inside ONE dataset worker process, which
+        # supplies the parallelism. Threading here as well only re-creates the
+        # fork-join penalty measured above.
         self.model_family = ModelFamily(
             model=model_cfg["model_cls"](),
             prior=model_cfg["prior_fn"](),
-            num_workers=sim_workers,
+            num_workers=1,
             regressed_params=self.config["regressed_params"],
             mask_randomizer_kwargs=dict(
                 free_intrinsics=self.config["free_intrinsics"],
@@ -150,7 +164,7 @@ def test(model_key: str, case: str):
 def main(model_key: str, case: str, epochs: int = 1000, steps_per_epoch: int = 100,
          batch_size: int = 64, sim_workers: int | None = None):
     model_cfg = MODELS[model_key]
-    simulator = ModelFamilyBF(model_key=model_key, case=case, sim_workers=sim_workers)
+    simulator = ModelFamilyBF(model_key=model_key, case=case)
 
     adapter = (
         bf.Adapter()
@@ -179,15 +193,39 @@ def main(model_key: str, case: str, epochs: int = 1000, steps_per_epoch: int = 1
         checkpoint_filepath=checkpoint_path,
     )
 
-    # NB: the parameter is num_batches_per_epoch, NOT steps_per_epoch. The latter is
-    # not a fit_online argument -- it falls through **kwargs into keras' fit() while
-    # the dataset keeps its own default of 100 batches per epoch, so --steps_per_epoch
-    # silently did nothing except when left at its default of 100. Same bug that was
-    # fixed in experiments/encoder_rep/addm_bf_baseline.py.
-    history = workflow.fit_online(
-        epochs=epochs,
-        num_batches_per_epoch=steps_per_epoch,
+    # Build the dataset explicitly instead of calling fit_online, so that keras'
+    # PyDataset parallelism is reachable. OnlineDataset IS a keras PyDataset and
+    # forwards **kwargs to it, but fit_online routes its own **kwargs to fit()
+    # rather than to the dataset -- so workers/max_queue_size can only be set here.
+    #
+    # This buys two things at once, matching what the CogFormer trainer already does
+    # via ModelFamilyDataset/make_sim_loader:
+    #   * PROCESS parallelism over simulation, each worker single-threaded in numba
+    #   * PREFETCH -- batch n+1 is simulated while the GPU trains on batch n, which
+    #     the synchronous fit_online path cannot overlap at all.
+    #
+    # NB on the batch count: the parameter is num_batches, and fit_online's equivalent
+    # is num_batches_per_epoch -- NOT steps_per_epoch, which is not a fit_online
+    # argument and silently fell through **kwargs into keras' fit() while the dataset
+    # kept its own default of 100. Same bug fixed in encoder_rep/addm_bf_baseline.py.
+    workers = sim_workers if sim_workers is not None else recommend_sim_workers()
+    dataset = bf.datasets.OnlineDataset(
+        simulator=simulator,
         batch_size=batch_size,
+        num_batches=steps_per_epoch,
+        adapter=adapter,
+        workers=workers,
+        use_multiprocessing=workers > 1,
+        max_queue_size=max(2 * workers, 4),
+    )
+    print(f"[sim] {workers} dataset worker processes x 1 numba thread, "
+          f"prefetch queue {max(2 * workers, 4)}")
+    # _fit, not fit: BasicWorkflow.fit is an abstract stub that always raises
+    # NotImplementedError, and fit_online is just OnlineDataset(...) + _fit(...). Calling
+    # _fit directly is the only way to supply a dataset we constructed ourselves, and
+    # these are exactly the arguments fit_online passes.
+    history = workflow._fit(
+        dataset, epochs, strategy="online", keep_optimizer=False, validation_data=None
     )
     return history
 
@@ -203,9 +241,11 @@ if __name__ == "__main__":
     parser.add_argument("--steps_per_epoch", type=int, default=100)
     parser.add_argument("--batch_size", type=int, default=64)
     parser.add_argument("--sim_workers", type=int, default=None,
-                        help="Threads for the numba simulator. Default is ModelFamily's "
-                             "max(1, cpu_count()//6). Online training simulates every "
-                             "batch, so this is a throughput term, not just a nicety.")
+                        help="Dataset worker PROCESSES for simulation (each single-threaded "
+                             "in numba). Default recommend_sim_workers() = cpu_count()-4. "
+                             "This is not a numba thread count -- raising numba threads "
+                             "makes things dramatically worse (23 threads measured 7x "
+                             "slower than 4), which is why parallelism lives here.")
     parser.add_argument("--dry_run_epochs", type=int, default=None,
                         help="If set, train for this many epochs only and record extrapolated time.")
     parser.add_argument("--use_wandb", action="store_true")
