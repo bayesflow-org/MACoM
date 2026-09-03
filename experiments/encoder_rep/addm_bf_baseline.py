@@ -210,6 +210,26 @@ class ADDMBaselineSimulator(bf.simulators.Simulator):
         self._choices_denom = max(NUM_ALTERNATIVES - 1, 1)
         self._alt_val = (NUM_ALTERNATIVES - 1) / max(MAX_ALTERNATIVES - 1, 1)
 
+    def assemble(self, design_matrices, rts, choices):
+        """Build the per-trial input tensor both arms consume.
+
+        Factored out of sample() so the representational analysis encodes through the
+        SAME code path rather than a re-implementation -- a channel-order divergence
+        between the two would show up as a representational difference and be
+        indistinguishable from a real one.
+
+        Identical channel layout to Adapter.adapt / CogFormerEncoderSummary.summarize:
+        favored_idx is RDM-only and theta is CDM-only, so both are zero for aDDM, but
+        they must be present or the input width does not match.
+        """
+        b, t = design_matrices.shape[:2]
+        choices_norm = choices / self._choices_denom
+        alt_col = np.full((b, t, 1), self._alt_val, dtype=np.float32)
+        zeros = np.zeros((b, t, 1), dtype=np.float32)
+        return np.concatenate(
+            [design_matrices, rts, choices_norm, alt_col, zeros, zeros], axis=-1
+        ).astype(np.float32)
+
     def sample(self, batch_size, **kwargs):
         if isinstance(batch_size, tuple):
             batch_size = batch_size[0]
@@ -232,15 +252,7 @@ class ADDMBaselineSimulator(bf.simulators.Simulator):
         choices = samples["sim_data"]["choices"]
         b, t = design_matrices.shape[:2]
 
-        # Identical channel layout to Adapter.adapt / CogFormerEncoderSummary.summarize:
-        # favored_idx is RDM-only and theta is CDM-only, so both are zero for aDDM,
-        # but they must be present for the input width to match the other arm.
-        choices_norm = choices / self._choices_denom
-        alt_col = np.full((b, t, 1), self._alt_val, dtype=np.float32)
-        zeros = np.zeros((b, t, 1), dtype=np.float32)
-        data = np.concatenate(
-            [design_matrices, rts, choices_norm, alt_col, zeros, zeros], axis=-1
-        )
+        data = self.assemble(design_matrices, rts, choices)
 
         param_masks = samples["param_masks"].astype(np.float32)
         # Infer ONLY the active cells. The full grid is 67 design rows x 7
