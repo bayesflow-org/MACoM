@@ -21,7 +21,7 @@ from cogformer.diagnostics.metric.adaptive_metrics import adaptive_metrics as co
 from cogformer.utils.plot_utils import bf_colors
 
 from ..configs import MODELS as _BASE_MODELS
-from ..utils import reshape_bf_to_cf
+from ..utils import add_global_params, reshape_bf_to_cf
 
 
 _BF_DIRS = {
@@ -31,8 +31,16 @@ _BF_DIRS = {
     "lba": ("lba_families_bf", "./outputs/figures/model_family/bf/lba"),
 }
 
+# The BF baselines estimate the contamination parameter (_bf_cases_with_globals puts it
+# in every case), so intrinsic_params, variable_names and benchmark_configs must all
+# carry it here too. Without this, intrinsic_params is one short and reshape_bf_to_cf
+# maps 6 of the 7 active params and trips its own assertion.
+GLOBAL_PARAMS = ["pi"]
+GLOBAL_VARIABLE_NAMES = [r"$\pi$"]
+
 MODELS = {}
-for _key, _base in {k: v for k, v in _BASE_MODELS.items() if k in _BF_DIRS}.items():
+for _key, _raw in {k: v for k, v in _BASE_MODELS.items() if k in _BF_DIRS}.items():
+    _base = add_global_params(_raw, GLOBAL_PARAMS, GLOBAL_VARIABLE_NAMES)
     _cfg = dict(_base)
     _cfg["case_configs"] = _cfg["bf_case_configs"]
     _cfg["ckpt_prefix"], _cfg["figures_dir"] = _BF_DIRS[_key]
@@ -206,30 +214,34 @@ def main(model_key: str, case: str, batch_size: int = 200, num_samples: int = 20
     pred_grid = reshape_bf_to_cf(pred_params, design_config, intrinsic_params)
     params_mask = reshape_bf_to_cf(np.ones((1, true_params.shape[-1])), design_config, intrinsic_params)[0]
 
+    # Split the grid description from the palette: the plotting helpers take the colors,
+    # compute_adaptive_metrics does not and raises TypeError on intercept_color.
     common = dict(
         design_config=design_config,
         intrinsic_params=intrinsic_params,
         max_num_categories=2,
         parameter_mask=params_mask,
         variable_names=variable_names,
+    )
+    plot_colors = dict(
         intercept_color=adaptive_colors["intercept"],
         main_effect_color=adaptive_colors["main_effect"],
         interaction_color=adaptive_colors["interaction"],
     )
 
-    recovery_fig = adaptive_recovery(true=true_grid, pred=pred_grid, **common)
+    recovery_fig = adaptive_recovery(true=true_grid, pred=pred_grid, **common, **plot_colors)
     recovery_fig.savefig(figures_dir / f"{model_name}_family_{case}_bf_recovery.pdf", bbox_inches="tight")
     plt.close(recovery_fig)
 
-    coverage_fig = adaptive_coverage(true=true_grid, pred=pred_grid, **common)
+    coverage_fig = adaptive_coverage(true=true_grid, pred=pred_grid, **common, **plot_colors)
     coverage_fig.savefig(figures_dir / f"{model_name}_family_{case}_bf_coverage.pdf", bbox_inches="tight")
     plt.close(coverage_fig)
 
-    ecdf_fig = adaptive_ecdf(true=true_grid, pred=pred_grid, difference=True, **common)
+    ecdf_fig = adaptive_ecdf(true=true_grid, pred=pred_grid, difference=True, **common, **plot_colors)
     ecdf_fig.savefig(figures_dir / f"{model_name}_family_{case}_bf_ecdf.pdf", bbox_inches="tight")
     plt.close(ecdf_fig)
 
-    metrics_fig = plot_adaptive_metrics(true=true_grid, pred=pred_grid, skip_log_gamma=skip_log_gamma, **common)
+    metrics_fig = plot_adaptive_metrics(true=true_grid, pred=pred_grid, skip_log_gamma=skip_log_gamma, **common, **plot_colors)
     metrics_fig.savefig(figures_dir / f"{model_name}_family_{case}_bf_metrics.pdf", bbox_inches="tight")
     plt.close(metrics_fig)
 
@@ -254,7 +266,11 @@ def main(model_key: str, case: str, batch_size: int = 200, num_samples: int = 20
 
 
 if __name__ == "__main__":
-    all_cases = list(DDM_CASE_CONFIGS.keys())
+    # DDM_CASE_CONFIGS was never defined or imported here, so this raised NameError on
+    # every invocation -- model_family_bf_validate has never actually run, which is why
+    # outputs/data/model_family did not exist. Mirror model_family_bf_train, which reads
+    # the case list off the already-built registry.
+    all_cases = list(MODELS["ddm"]["case_configs"].keys())
 
     parser = argparse.ArgumentParser(description="Model Family BayesFlow Validation")
     parser.add_argument("--model", type=str, required=True, choices=list(MODELS.keys()))

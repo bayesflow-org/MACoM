@@ -28,6 +28,7 @@ from cogformer.simulator.benchmarks.ssms.cdm import CDM
 from cogformer.simulator.benchmarks.ssms.lba import LBA
 from cogformer.simulator.benchmarks.ssms.priors import ddm_priors, rdm_priors, cdm_priors, lba_priors
 from cogformer.simulator.benchmarks.ssms.link_funs import ddm_link_fun, rdm_link_fun, cdm_link_fun, lba_link_fun
+from .model_class_cf_validate import load_bf_validation_data
 from cogformer.adapter import Adapter
 from cogformer.networks.transformers.cogformer import CogFormer
 from cogformer.diagnostics.plot.adaptive_recovery import adaptive_recovery, global_recovery
@@ -72,6 +73,10 @@ def parse_args():
                              "variability entirely; None restores the original parameterization.")
     p.add_argument("--checkpoint", type=str, required=True)
     p.add_argument("--outdir", type=str, default="./outputs/figures/model_class/cf/lba_finetune/")
+    p.add_argument("--data_dir", type=str, default=None,
+                   help="Directory with BayesFlow validation data. When set, every arm "
+                        "scores the SAME simulated datasets the BF baseline was scored "
+                        "on, which is what makes the C2ST comparisons paired.")
     p.add_argument("--pred_dir", type=str, default=None,
                    help="Where prediction .npz files go. Defaults to <outdir>/predictions so a single "
                         "--outdir keeps figures and predictions together; pass explicitly to "
@@ -246,24 +251,70 @@ def main():
             free, fixed, fixed_vals = infer_free_fixed_intrinsics(
                 design_config, intrinsic_params, model_cfg["default_fixed_values"]
             )
-            samples = mf.batch_sample(
-                design_config=design_config,
-                batch_size=args.batch_size,
-                num_obs=args.num_obs,
-                mask_randomizer_kwargs={"free_intrinsics": free, "fixed_intrinsics": fixed,
-                                        "fixed_values": fixed_vals,
-                                        "global_params": GLOBAL_PARAMS},
-                max_num_regressors=args.max_num_regressors,
-                max_num_categories=max_cats,
-                min_num_categories=min_cats,
-                keep_intercept=args.keep_intercept,
-                add_interaction=args.add_interaction,
-                flatten_param_outputs=True,
-                fixed_config=True,
-                link_fun=link_fn,
-                pad_to_max_num_categories=training_max_cats,
-                **mix_opts,
-            )
+            if args.data_dir is not None:
+                # Paired mode: score the exact datasets model_family_bf_validate wrote,
+                # so BF / original / finetuned all see identical simulations. Mirrors
+                # model_class_cf_validate's branch -- crucially the lift to global space
+                # below stays OUTSIDE this if/else, because load_bf_validation_data
+                # returns param_matrices in LOCAL space just as batch_sample does.
+                data_path = Path(args.data_dir) / f"{model_name.lower()}_{cfg_name}_data.npz"
+                if not data_path.exists():
+                    print(f"Skipping {model_name} / {cfg_name}: paired mode needs "
+                          f"{data_path}, which does not exist (val_scenarios covers "
+                          f"cases the BF baselines do not, e.g. mixed_predictor).")
+                    continue
+                # Must equal build_encoder_input_dim's design_cols, or the encoder gets
+                # the wrong width (the old formula multiplied interaction blocks by
+                # block_width instead of block_width**2: 31 cols instead of 67, and the
+                # forward pass died with "mat1 and mat2 shapes cannot be multiplied
+                # (2000x36 and 72x64)"). Derive it from the same function so the two
+                # cannot drift; the -5 drops the rt/choice/alt/favored/theta channels.
+                max_dm_cols = build_encoder_input_dim(
+                    max_num_regressors=args.max_num_regressors,
+                    max_num_categories=args.max_num_categories,
+                    keep_intercept=args.keep_intercept,
+                ) - 5
+                samples = load_bf_validation_data(
+                    data_path=data_path,
+                    design_config=design_config,
+                    intrinsic_params=intrinsic_params,
+                    model_id=model_id,
+                    batch_size=args.batch_size,
+                    max_dm_cols=max_dm_cols,
+                )
+                samples["max_num_regressors"] = args.max_num_regressors
+                # The scenario's resolved max_cats, NOT args.max_num_categories: the BF
+                # parameter grid has len(design_config) rows, and build_position_codes
+                # expands by block_width = max_num_categories - 1. These benchmark
+                # scenarios pin max_cats=2 (block_width 1), giving the 4 rows the BF grid
+                # actually has; passing the training max of 4 yields 16 and fails to
+                # broadcast. It also keeps the grid equal to the BF side, which is what
+                # model_family_c2st's guard requires.
+                samples["max_num_categories"] = max_cats
+                # batch_sample emits per-element position_codes; the BF loader cannot,
+                # so hand the adapter the design config and let it rebuild them via its
+                # documented fallback. Without this the paired branch dies in
+                # Adapter._resolve_position_codes.
+                samples["design_configs"] = [design_config] * args.batch_size
+            else:
+                samples = mf.batch_sample(
+                    design_config=design_config,
+                    batch_size=args.batch_size,
+                    num_obs=args.num_obs,
+                    mask_randomizer_kwargs={"free_intrinsics": free, "fixed_intrinsics": fixed,
+                                            "fixed_values": fixed_vals,
+                                            "global_params": GLOBAL_PARAMS},
+                    max_num_regressors=args.max_num_regressors,
+                    max_num_categories=max_cats,
+                    min_num_categories=min_cats,
+                    keep_intercept=args.keep_intercept,
+                    add_interaction=args.add_interaction,
+                    flatten_param_outputs=True,
+                    fixed_config=True,
+                    link_fun=link_fn,
+                    pad_to_max_num_categories=training_max_cats,
+                    **mix_opts,
+                )
             pm_g, mask_g = model_class.lift_to_global_space(
                 model_name, samples["param_matrices"], samples["param_masks"]
             )

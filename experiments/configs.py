@@ -587,7 +587,8 @@ LBA_BF_CASE_CONFIGS = _lba_cases_from_rdm(RDM_BF_CASE_CONFIGS)
 # match the config: rdm (pi absent in every case) and interaction (pi absent in all
 # three models), plus fixed/fixed_regressed, where the fixed_intrinsics s_v and s_tau
 # are still sampled instead of being pinned to fixed_values.
-def _bf_cases_with_globals(case_configs: dict, global_params=GLOBAL_PARAMS) -> dict:
+def _bf_cases_with_globals(case_configs: dict, global_params=GLOBAL_PARAMS,
+                           global_variable_names=GLOBAL_VARIABLE_NAMES) -> dict:
     """Give the BayesFlow baselines the same generative model as the CogFormer tiers.
 
     Both CogFormer trainers call ``add_global_params``, so their simulated data carries
@@ -623,6 +624,30 @@ def _bf_cases_with_globals(case_configs: dict, global_params=GLOBAL_PARAMS) -> d
                     if k == "1" else list(v))
                 for k, v in dc.items()
             }
+
+        # param_names needs the globals too, and NOT appended: the flattened parameter
+        # vector runs row by row, so pi sits at the end of the INTERCEPT row, not at the
+        # end of the list (for `regressed` that is index 6 of 13, not 12). Getting this
+        # wrong hands bayesflow's metrics 6 names for 7 variables and it raises.
+        names = list(c.get("param_names") or ())
+        if names:
+            intercept = list(dc["1"]) if dc is not None else list(cfg["free_intrinsics"])
+            n_intercept = len([p for p in intercept if p not in fixed])
+            added = [n for g, n in zip(global_params, global_variable_names)
+                     if g not in intercept and g not in fixed]
+            c["param_names"] = names[:n_intercept] + added + names[n_intercept:]
+
+            # The two fields describe the same vector, so they must agree. This is the
+            # invariant that would have caught both the stale expected_num_active counts
+            # and the missing pi label, instead of surfacing them as an assertion in
+            # --test and a ValueError deep inside a metrics call.
+            expected = c.get("expected_num_active")
+            if expected is not None and len(c["param_names"]) != expected:
+                raise ValueError(
+                    f"BF case '{case}': param_names has {len(c['param_names'])} entries "
+                    f"but expected_num_active is {expected}; they describe the same "
+                    f"flattened parameter vector and must match."
+                )
         out[case] = c
     return out
 

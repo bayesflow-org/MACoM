@@ -277,8 +277,22 @@ def main():
             )
             if args.data_dir is not None:
                 data_path = Path(args.data_dir) / f"{model_name.lower()}_{cfg_name}_data.npz"
-                max_total_regressors = args.max_num_regressors * (args.max_num_regressors + 1) // 2
-                max_dm_cols = max_total_regressors * (args.max_num_categories - 1) + (1 if args.keep_intercept else 0)
+                if not data_path.exists():
+                    print(f"Skipping {model_name} / {cfg_name}: paired mode needs "
+                          f"{data_path}, which does not exist (val_scenarios covers "
+                          f"cases the BF baselines do not, e.g. mixed_predictor).")
+                    continue
+                # Must equal build_encoder_input_dim's design_cols, or the encoder gets
+                # the wrong width (the old formula multiplied interaction blocks by
+                # block_width instead of block_width**2: 31 cols instead of 67, and the
+                # forward pass died with "mat1 and mat2 shapes cannot be multiplied
+                # (2000x36 and 72x64)"). Derive it from the same function so the two
+                # cannot drift; the -5 drops the rt/choice/alt/favored/theta channels.
+                max_dm_cols = build_encoder_input_dim(
+                    max_num_regressors=args.max_num_regressors,
+                    max_num_categories=args.max_num_categories,
+                    keep_intercept=args.keep_intercept,
+                ) - 5
                 test_samples = load_bf_validation_data(
                     data_path=data_path,
                     design_config=design_config,
@@ -288,7 +302,19 @@ def main():
                     max_dm_cols=max_dm_cols,
                 )
                 test_samples["max_num_regressors"] = args.max_num_regressors
-                test_samples["max_num_categories"] = args.max_num_categories
+                # The scenario's resolved max_cats, NOT args.max_num_categories: the BF
+                # parameter grid has len(design_config) rows, and build_position_codes
+                # expands by block_width = max_num_categories - 1. These benchmark
+                # scenarios pin max_cats=2 (block_width 1), giving the 4 rows the BF grid
+                # actually has; passing the training max of 4 yields 16 and fails to
+                # broadcast. It also keeps the grid equal to the BF side, which is what
+                # model_family_c2st's guard requires.
+                test_samples["max_num_categories"] = max_cats
+                # batch_sample emits per-element position_codes; the BF loader cannot,
+                # so hand the adapter the design config and let it rebuild them via its
+                # documented fallback. Without this the paired branch dies in
+                # Adapter._resolve_position_codes.
+                test_samples["design_configs"] = [design_config] * args.batch_size
             else:
                 test_samples = mf.batch_sample(
                     design_config=design_config,
@@ -316,7 +342,9 @@ def main():
                 )
             test_samples["n_params"] = n_global_params
 
-            adapted = adapter.adapt(test_samples)
+            # Adapter.adapt defaults to torch.device('cuda'); pass the resolved device
+            # so this runs on a CPU-only host too (the finetune validator already does).
+            adapted = adapter.adapt(test_samples, device=device)
             true_flat = adapted["param_matrices"].detach().cpu().numpy()
             n_rows = true_flat.shape[1] // n_global_params
             true_set = true_flat.reshape(args.batch_size, n_rows, n_global_params)[:, :, global_indices]
