@@ -272,16 +272,30 @@ class ModelFamily:
 
         # Rebuild the mask with actual category counts so that rows corresponding to
         # unused category levels (zero-padded design matrix columns) are excluded.
-        # No fixed_params override: the design config is authoritative. Params listed in
-        # fixed_intrinsics are probabilistically included via build_random_design_config
-        # (intercept_prob ~ Beta(2,2)) and are estimation targets when they appear.
-        parameter_mask = build_parameter_mask(
+        # No fixed_params override here: for a randomized design the config is
+        # authoritative, since fixed_intrinsics are probabilistically included via
+        # build_random_design_config (intercept_prob ~ Beta(2,2)) and are estimation
+        # targets when they appear.
+        rebuilt_mask = build_parameter_mask(
             design_config=design_config,
             intrinsic_params=self.intrinsic_params,
             max_num_categories=max_num_categories,
             keep_intercept="1" in design_config,
             category_counts=actual_col_counts,
         )
+
+        # ...but the rebuild must only ever REMOVE entries, never resurrect one that
+        # _resolve_design deliberately excluded. On the deterministic build_design_config
+        # path the intercept row carries every intrinsic, and fixed_params was the only
+        # thing holding fixed_intrinsics out; dropping it silently made "fixed" params
+        # estimation targets again (s_v/s_tau in the ddm/cdm fixed* cases). Intersecting
+        # keeps the category-count refinement while preserving that exclusion.
+        if rebuilt_mask.shape != parameter_mask.shape:
+            raise ValueError(
+                f"mask shape changed during category-count rebuild: "
+                f"{parameter_mask.shape} -> {rebuilt_mask.shape}"
+            )
+        parameter_mask = rebuilt_mask * parameter_mask
 
         # Refine by realized support: a category level (or interaction cell) that
         # received zero observations leaves its design column all-zero, so the data

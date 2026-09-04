@@ -28,13 +28,15 @@ from ..utils import recommend_sim_workers
 from ..timing import RunTimer
 
 
-_BF_CKPT_PREFIXES = {"ddm": "ddm_families_bf", "cdm": "cdm_families_bf", "rdm": "rdm_families_bf"}
+_BF_CKPT_PREFIXES = {"ddm": "ddm_families_bf", "cdm": "cdm_families_bf",
+                     "rdm": "rdm_families_bf", "lba": "lba_families_bf"}
 
-# Only the families that actually define BF case configs. LBA has none -- it is
-# reached zero-shot / by finetuning from the model-class checkpoint, not by training a
-# per-family BayesFlow baseline -- so the unguarded `_cfg["bf_case_configs"]` here
-# raised KeyError on import for every invocation, whatever --model was passed. That is
-# why this repo has no BF baseline checkpoints at all.
+# Only the families that actually define BF case configs. The guard stays because the
+# unguarded `_cfg["bf_case_configs"]` here raised KeyError on import for every
+# invocation, whatever --model was passed. LBA originally had no entry -- it was reached
+# zero-shot or by finetuning from the model-class checkpoint rather than by a per-family
+# BayesFlow baseline -- but the amortization-gap matrix needs "LBA: BF vs Finetuned",
+# so LBA_BF_CASE_CONFIGS now exists (derived from RDM's; see experiments/configs.py).
 MODELS = {}
 for _key, _base in _BASE_MODELS.items():
     if "bf_case_configs" not in _base or _key not in _BF_CKPT_PREFIXES:

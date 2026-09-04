@@ -28,6 +28,7 @@ _BF_DIRS = {
     "ddm": ("ddm_families_bf", "./outputs/figures/model_family/bf/ddm"),
     "cdm": ("cdm_families_bf", "./outputs/figures/model_family/bf/cdm"),
     "rdm": ("rdm_families_bf", "./outputs/figures/model_family/bf/rdm"),
+    "lba": ("lba_families_bf", "./outputs/figures/model_family/bf/lba"),
 }
 
 MODELS = {}

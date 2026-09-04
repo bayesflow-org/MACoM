@@ -296,7 +296,7 @@ DDM_BF_CASE_CONFIGS = {
         "fixed_config": False, "design_config": None,
         "flatten_param_outputs": True, "squeeze_outputs": False,
         "param_names": [r"$v$", r"$a$", r"$z$", r"$\tau$", r"$s_v$", r"$s_\tau$"],
-        "expected_num_active": None,
+        "expected_num_active": 7,
     },
     "fixed": {
         "free_intrinsics": ["v", "a", "z", "tau"],
@@ -306,7 +306,7 @@ DDM_BF_CASE_CONFIGS = {
         "fixed_config": True, "design_config": None,
         "flatten_param_outputs": False, "squeeze_outputs": True,
         "param_names": [r"$v$", r"$a$", r"$z$", r"$\tau$"],
-        "expected_num_active": 4,
+        "expected_num_active": 5,
     },
     "regressed": {
         "free_intrinsics": ["v", "a", "z", "tau", "s_v", "s_tau"],
@@ -320,7 +320,7 @@ DDM_BF_CASE_CONFIGS = {
             r"$u_{1, v}$", r"$u_{1, a}$", r"$u_{1, z}$",
             r"$u_{2, v}$", r"$u_{2, a}$", r"$u_{2, z}$",
         ],
-        "expected_num_active": 12,
+        "expected_num_active": 13,
     },
     "fixed_regressed": {
         "free_intrinsics": ["v", "a", "z", "tau"],
@@ -334,7 +334,7 @@ DDM_BF_CASE_CONFIGS = {
             r"$u_{1, v}$", r"$u_{1, a}$", r"$u_{1, z}$",
             r"$u_{2, v}$", r"$u_{2, a}$", r"$u_{2, z}$",
         ],
-        "expected_num_active": 10,
+        "expected_num_active": 11,
     },
     "interaction": {
         "free_intrinsics": ["v", "a", "z", "tau", "s_v", "s_tau"],
@@ -350,7 +350,7 @@ DDM_BF_CASE_CONFIGS = {
             r"$u_{2, v}$", r"$u_{2, a}$", r"$u_{2, z}$", r"$u_{2, \tau}$",
             r"$u_1:u_{2, v}$", r"$u_1:u_{2, a}$", r"$u_1:u_{2, z}$",
         ],
-        "expected_num_active": 18,
+        "expected_num_active": 19,
     },
     "full": {
         "free_intrinsics": ["v", "a", "z", "tau", "s_v", "s_tau"],
@@ -366,7 +366,7 @@ DDM_BF_CASE_CONFIGS = {
             r"$u_{2, v}$", r"$u_{2, a}$", r"$u_{2, z}$", r"$u_{2, \tau}$", r"$u_{2, s_v}$", r"$u_{2, s_\tau}$",
             r"$u_1:u_{2, v}$", r"$u_1:u_{2, a}$", r"$u_1:u_{2, z}$", r"$u_1:u_{2, \tau}$", r"$u_1:u_{2, s_v}$", r"$u_1:u_{2, s_\tau}$",
         ],
-        "expected_num_active": 24,
+        "expected_num_active": 25,
     },
 }
 
@@ -379,7 +379,7 @@ CDM_BF_CASE_CONFIGS = {
         "fixed_config": False, "design_config": None,
         "flatten_param_outputs": True, "squeeze_outputs": False,
         "param_names": [r"$v$", r"$v_\theta$", r"$a$", r"$\tau$", r"$s_v$", r"$s_\tau$"],
-        "expected_num_active": None,
+        "expected_num_active": 7,
     },
     "fixed": {
         "free_intrinsics": ["v", "v_theta", "a", "tau"],
@@ -389,7 +389,7 @@ CDM_BF_CASE_CONFIGS = {
         "fixed_config": True, "design_config": None,
         "flatten_param_outputs": False, "squeeze_outputs": True,
         "param_names": [r"$v$", r"$v_\theta$", r"$a$", r"$\tau$"],
-        "expected_num_active": 4,
+        "expected_num_active": 5,
     },
     "regressed": {
         "free_intrinsics": ["v", "v_theta", "a", "tau", "s_v", "s_tau"],
@@ -403,7 +403,7 @@ CDM_BF_CASE_CONFIGS = {
             r"$u_{1, v}$", r"$u_{1, a}$",
             r"$u_{2, v}$", r"$u_{2, a}$",
         ],
-        "expected_num_active": 10,
+        "expected_num_active": 11,
     },
     "fixed_regressed": {
         "free_intrinsics": ["v", "v_theta", "a", "tau"],
@@ -417,7 +417,7 @@ CDM_BF_CASE_CONFIGS = {
             r"$u_{1, v}$", r"$u_{1, a}$",
             r"$u_{2, v}$", r"$u_{2, a}$",
         ],
-        "expected_num_active": 8,
+        "expected_num_active": 9,
     },
     "interaction": {
         "free_intrinsics": ["v", "v_theta", "a", "tau", "s_v", "s_tau"],
@@ -433,7 +433,7 @@ CDM_BF_CASE_CONFIGS = {
             r"$u_{2, v}$", r"$u_{2, v_\theta}$", r"$u_{2, a}$", r"$u_{2, \tau}$",
             r"$u_1:u_{2, v}$", r"$u_1:u_{2, v_\theta}$", r"$u_1:u_{2, a}$",
         ],
-        "expected_num_active": 18,
+        "expected_num_active": 19,
     },
     "full": {
         "free_intrinsics": ["v", "v_theta", "a", "tau", "s_v", "s_tau"],
@@ -449,7 +449,7 @@ CDM_BF_CASE_CONFIGS = {
             r"$u_{2, v}$", r"$u_{2, v_\theta}$", r"$u_{2, a}$", r"$u_{2, \tau}$", r"$u_{2, s_v}$", r"$u_{2, s_\tau}$",
             r"$u_1:u_{2, v}$", r"$u_1:u_{2, v_\theta}$", r"$u_1:u_{2, a}$", r"$u_1:u_{2, \tau}$", r"$u_1:u_{2, s_v}$", r"$u_1:u_{2, s_\tau}$",
         ],
-        "expected_num_active": 24,
+        "expected_num_active": 25,
     },
 }
 
@@ -463,7 +463,7 @@ RDM_BF_CASE_CONFIGS = {
         "design_config": {"1": ["v", "v_diff", "a", "tau", "s_v", "s_tau"]},
         "flatten_param_outputs": True, "squeeze_outputs": False,
         "param_names": [r"$v$", r"$v_{\mathrm{diff}}$", r"$a$", r"$\tau$", r"$s_v$", r"$s_\tau$"],
-        "expected_num_active": 6,
+        "expected_num_active": 7,
     },
     "fixed": {
         "free_intrinsics": ["v", "v_diff", "a", "tau"],
@@ -474,7 +474,7 @@ RDM_BF_CASE_CONFIGS = {
         "design_config": {"1": ["v", "v_diff", "a", "tau"]},
         "flatten_param_outputs": False, "squeeze_outputs": True,
         "param_names": [r"$v$", r"$v_{\mathrm{diff}}$", r"$a$", r"$\tau$"],
-        "expected_num_active": 4,
+        "expected_num_active": 5,
     },
     "regressed": {
         "free_intrinsics": ["v", "v_diff", "a", "tau", "s_v", "s_tau"],
@@ -489,7 +489,7 @@ RDM_BF_CASE_CONFIGS = {
             r"$u_{1, v_{\mathrm{diff}}}$", r"$u_{1, a}$",
             r"$u_{2, v_{\mathrm{diff}}}$", r"$u_{2, a}$",
         ],
-        "expected_num_active": 10,
+        "expected_num_active": 11,
     },
     "fixed_regressed": {
         "free_intrinsics": ["v", "v_diff", "a", "tau"],
@@ -504,7 +504,7 @@ RDM_BF_CASE_CONFIGS = {
             r"$u_{1, v_{\mathrm{diff}}}$", r"$u_{1, a}$",
             r"$u_{2, v_{\mathrm{diff}}}$", r"$u_{2, a}$",
         ],
-        "expected_num_active": 8,
+        "expected_num_active": 9,
     },
     "interaction": {
         "free_intrinsics": ["v", "v_diff", "a", "tau", "s_v", "s_tau"],
@@ -520,7 +520,7 @@ RDM_BF_CASE_CONFIGS = {
             r"$u_{2, v}$", r"$u_{2, v_{\mathrm{diff}}}$", r"$u_{2, a}$", r"$u_{2, \tau}$",
             r"$u_1:u_{2, v}$", r"$u_1:u_{2, v_{\mathrm{diff}}}$", r"$u_1:u_{2, a}$",
         ],
-        "expected_num_active": 18,
+        "expected_num_active": 19,
     },
     "full": {
         "free_intrinsics": ["v", "v_diff", "a", "tau", "s_v", "s_tau"],
@@ -536,10 +536,57 @@ RDM_BF_CASE_CONFIGS = {
             r"$u_{2, v}$", r"$u_{2, v_{\mathrm{diff}}}$", r"$u_{2, a}$", r"$u_{2, \tau}$", r"$u_{2, s_v}$", r"$u_{2, s_\tau}$",
             r"$u_1:u_{2, v}$", r"$u_1:u_{2, v_{\mathrm{diff}}}$", r"$u_1:u_{2, a}$", r"$u_1:u_{2, \tau}$", r"$u_1:u_{2, s_v}$", r"$u_1:u_{2, s_\tau}$",
         ],
-        "expected_num_active": 24,
+        "expected_num_active": 25,
     },
 }
 
+# ── LBA BF case configs ───────────────────────────────────────────────────────
+# model_family_bf_train deliberately had no LBA entry: LBA was reached zero-shot or by
+# finetuning from the model-class checkpoint, never by a per-family BayesFlow baseline.
+# The amortization-gap matrix needs "LBA: BF vs Finetuned", so a baseline is required.
+#
+# These are NOT hand-authored. LBA_BENCHMARK_CONFIGS is identical to
+# RDM_BENCHMARK_CONFIGS (asserted below), and the two families share intrinsic_params
+# (v, v_diff, a, tau, s_v, s_tau), free_params and fixed_params, so every field of the
+# RDM BF case configs applies unchanged. Deriving them keeps the two from drifting --
+# the field that broke this session (expected_num_active) cannot go stale in one table
+# and not the other. Only design_config is repointed at LBA's own table so the configs
+# read correctly, and the priors/link/model come from LBA_CONFIG at use sites.
+assert LBA_BENCHMARK_CONFIGS == RDM_BENCHMARK_CONFIGS, (
+    "LBA BF case configs are derived from RDM's on the assumption that the two "
+    "benchmark tables are identical; they have diverged, so LBA needs its own configs."
+)
+
+def _lba_cases_from_rdm(rdm_cases: dict) -> dict:
+    out = {}
+    for case, cfg in rdm_cases.items():
+        c = dict(cfg)
+        dc = c.get("design_config")
+        if dc is not None:
+            # Repoint ONLY the entries that reference RDM_BENCHMARK_CONFIGS (interaction,
+            # full), matched by identity. The other cases carry inline literals that are
+            # deliberately narrower than the benchmark table -- intercept_only is
+            # {"1": [...]} with no u_* keys at all, whereas the benchmark entry has empty
+            # u_1/u_2/u_1:u_2. Substituting the table version adds phantom design-matrix
+            # columns and collate fails broadcasting (500,2) into (500,1). Copy those.
+            if any(dc is v for v in RDM_BENCHMARK_CONFIGS.values()):
+                c["design_config"] = LBA_BENCHMARK_CONFIGS[case]
+            else:
+                c["design_config"] = {k: list(v) for k, v in dc.items()}
+        out[case] = c
+    return out
+
+LBA_BF_CASE_CONFIGS = _lba_cases_from_rdm(RDM_BF_CASE_CONFIGS)
+
+
+# NOTE: every "expected_num_active" in the three *_BF_CASE_CONFIGS dicts counts the
+# global contamination parameter that _bf_cases_with_globals appends below. The values
+# predated that function and were all short by exactly one, so `--test` asserted on
+# cases that were simulating correctly. Counting pi makes the assertion meaningful
+# again -- and it now fails, correctly, on the cases where the simulator does not
+# match the config: rdm (pi absent in every case) and interaction (pi absent in all
+# three models), plus fixed/fixed_regressed, where the fixed_intrinsics s_v and s_tau
+# are still sampled instead of being pinned to fixed_values.
 def _bf_cases_with_globals(case_configs: dict, global_params=GLOBAL_PARAMS) -> dict:
     """Give the BayesFlow baselines the same generative model as the CogFormer tiers.
 
@@ -560,6 +607,22 @@ def _bf_cases_with_globals(case_configs: dict, global_params=GLOBAL_PARAMS) -> d
         fixed = set(c.get("fixed_intrinsics") or ())
         c["free_intrinsics"] = free + [g for g in global_params
                                        if g not in free and g not in fixed]
+
+        # free_intrinsics alone is not enough. A case carrying an explicit
+        # design_config takes the branch in ModelFamily._resolve_design that builds the
+        # mask straight from that config and never consults free_intrinsics, so pi never
+        # entered the parameter grid -- the contaminated-data fix silently missed
+        # interaction (all three models) and every rdm case, which are exactly the
+        # design_config cases. Add the globals to the intercept row too, the way
+        # add_global_params does for the CogFormer configs. Copy rather than mutate:
+        # these dicts are shared with the *_BENCHMARK_CONFIGS tables.
+        dc = c.get("design_config")
+        if dc is not None:
+            c["design_config"] = {
+                k: (list(v) + [g for g in global_params if g not in v and g not in fixed]
+                    if k == "1" else list(v))
+                for k, v in dc.items()
+            }
         out[case] = c
     return out
 
@@ -567,3 +630,4 @@ def _bf_cases_with_globals(case_configs: dict, global_params=GLOBAL_PARAMS) -> d
 DDM_CONFIG["bf_case_configs"] = _bf_cases_with_globals(DDM_BF_CASE_CONFIGS)
 CDM_CONFIG["bf_case_configs"] = _bf_cases_with_globals(CDM_BF_CASE_CONFIGS)
 RDM_CONFIG["bf_case_configs"] = _bf_cases_with_globals(RDM_BF_CASE_CONFIGS)
+LBA_CONFIG["bf_case_configs"] = _bf_cases_with_globals(LBA_BF_CASE_CONFIGS)
