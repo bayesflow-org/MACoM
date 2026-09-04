@@ -10,17 +10,22 @@ Usage:
     python -m experiments.real_data.ppc --model rdm --variant mf
 """
 import argparse
+import hashlib
+import json
 import logging
+import pickle
 from pathlib import Path
 
 import numpy as np
 import matplotlib.pyplot as plt
+from matplotlib.lines import Line2D
 from scipy.stats import gaussian_kde
 
 from cogformer.simulator.benchmarks.ssms.ddm import DDM
 from cogformer.simulator.benchmarks.ssms.rdm import RDM
 from cogformer.simulator.benchmarks.ssms.cdm import CDM
 from cogformer.simulator.benchmarks.ssms.link_funs import ddm_link_fun, rdm_link_fun, cdm_link_fun
+from cogformer.utils.plot_utils import family_colors, OBSERVED_COLOR, GUIDE_COLOR
 
 from ..configs import MODELS as _BASE_MODELS, GLOBAL_PARAMS, GLOBAL_VARIABLE_NAMES
 from ..utils import add_global_params
@@ -31,6 +36,7 @@ from .data_utils import (
 
 DATA_DIR = Path("./outputs/data/real_data")
 FIG_DIR = Path("./outputs/figures/real_data/ppc")
+CACHE_DIR = Path("./outputs/data/real_data/ppc_cache")
 
 # Encoder design geometry. MUST match the checkpoint that produced the posteriors
 # (r5c5 for the 2026-06-02 npz, r4c4 for the model_class r4c4 checkpoint). A mismatch
@@ -304,6 +310,49 @@ def collect_ppc(
     return obs_pooled, ppc_pooled, cfg["conditions"], obs_ch_pooled, ppc_ch_pooled
 
 
+def _cache_key(**kw):
+    """Hash of everything that changes the SIMULATION, and nothing that doesn't.
+
+    Colours, labels and figure sizes are deliberately absent: restyling must reuse
+    the cache, which is the whole point of having one. Anything that moves a
+    simulated number -- family, variant, draw count, seed, contamination, design
+    geometry -- is in the key.
+    """
+    blob = json.dumps(kw, sort_keys=True, default=str).encode()
+    return hashlib.sha256(blob).hexdigest()[:16]
+
+
+def collect_ppc_cached(model_name, variant, n_ppc_samples, seed, no_contamination,
+                       cache_dir=CACHE_DIR, refresh=False):
+    """collect_ppc with an on-disk cache of its simulated draws.
+
+    Simulating 72 subjects x 500 draws takes minutes; re-plotting the same draws
+    takes seconds. Without this, every cosmetic change to a PPC figure pays the
+    full simulation cost again.
+    """
+    key = _cache_key(model=model_name, variant=variant, n_ppc_samples=n_ppc_samples,
+                     seed=seed, no_contamination=no_contamination,
+                     max_num_regressors=MAX_NUM_REGRESSORS,
+                     max_num_categories=MAX_NUM_CATEGORIES,
+                     keep_intercept=KEEP_INTERCEPT)
+    path = Path(cache_dir) / f"{model_name}_{variant}_{key}.pkl"
+
+    if path.exists() and not refresh:
+        logging.info(f"[cache hit] {path}")
+        with path.open("rb") as fh:
+            return pickle.load(fh)
+
+    result = collect_ppc(
+        model_name=model_name, variant=variant, n_ppc_samples=n_ppc_samples,
+        seed=seed, no_contamination=no_contamination,
+    )
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("wb") as fh:
+        pickle.dump(result, fh, protocol=pickle.HIGHEST_PROTOCOL)
+    logging.info(f"[cache write] {path}")
+    return result
+
+
 def _kde_eval(data, xs):
     if len(data) < 5:
         return np.zeros_like(xs)
@@ -320,8 +369,22 @@ def _draw_idx(n_draws, max_lines):
     return np.linspace(0, n_draws - 1, max_lines).round().astype(int)
 
 
-OBS_COLOR = "#1a1a2e"
-PPC_COLOR = "#e94560"
+# Observed data is the shared reference all three families are judged against, so
+# it keeps ONE neutral colour in every figure; only the PREDICTED series carries a
+# family hue. Giving the observations a colour that moved between families would
+# imply the data changed with the model.
+OBS_COLOR = OBSERVED_COLOR
+
+
+def _ppc_colors(model_name):
+    """``(line, fill)`` for this family's predictive series.
+
+    The saturated stop for medians and individual draws, the light stop for the
+    band beneath them, so band and line read as one family rather than as two
+    unrelated series. See ``cogformer.utils.plot_utils.FAMILY_PALETTES``.
+    """
+    c = family_colors(model_name)
+    return c["main_effect"], c["interaction"]
 
 # Ratcliff's conventional RT quantile set. DO NOT change this default: these
 # figures are read against published results that use exactly these five levels,
@@ -333,11 +396,53 @@ PPC_COLOR = "#e94560"
 # to produce a SEPARATE tail figure via --rt_quantiles, not to widen this one.
 DEFAULT_RT_QUANTILES = (0.1, 0.3, 0.5, 0.7, 0.9)
 
+# Grouping variables are named after the data columns, which is right in code and
+# wrong on the face of a figure -- "by stim_type" puts a snake_case identifier in
+# front of a reader. Titles go through this map; anything absent falls back to the
+# raw key, so adding a condition never silently breaks a title.
+CONDITION_DISPLAY = {
+    "stim_type":  "stimulus type",
+    "truth":      "factual truth",
+    "congruency": "congruency",
+    "session":    "session",
+    "speed":      "speed instruction",
+    "difficulty": "difficulty",
+}
+
+
+def _cond_label(cond_name):
+    return CONDITION_DISPLAY.get(cond_name, cond_name)
+
+
+def _legend(ax, **kw):
+    """Legend whose swatches are legible regardless of how the artist was drawn.
+
+    The individual predictive draws are plotted at alpha 0.15 and lw 0.5, which is
+    right on the axes -- a hundred of them overlaid read as a cloud -- and wrong in
+    a legend, where a single hairline at 15% opacity is effectively invisible. Rebuild
+    the "PPC draws" entry at full opacity and a visible width; pass everything else
+    through untouched.
+    """
+    handles, labels = ax.get_legend_handles_labels()
+    fixed = []
+    for h, l in zip(handles, labels):
+        if l == "PPC draws":
+            h = Line2D([], [], color=h.get_color(), lw=1.2, alpha=0.9)
+        fixed.append(h)
+    return ax.legend(fixed, labels, **kw)
+
+
+# ONE interval level across every figure in this experiment. The RT density PPC
+# previously drew a 90% band while every quantile panel drew 95%, so comparing a
+# density against its own quantile plot silently compared two different intervals.
+PPC_CI = 95.0
+_CI_LO, _CI_HI = (100 - PPC_CI) / 2, 100 - (100 - PPC_CI) / 2
+
 
 def plot_ppc(obs_pooled, ppc_pooled, conditions, model_name, variant, outdir,
              draw_lines=True, max_lines=100, line_alpha=0.15, line_width=0.5):
     obs_color = OBS_COLOR
-    ppc_color = PPC_COLOR
+    ppc_color, ppc_fill = _ppc_colors(model_name)
     n_cond_groups = len(conditions)
 
     for cond_name, cond_col, label_map in conditions:
@@ -362,11 +467,11 @@ def plot_ppc(obs_pooled, ppc_pooled, conditions, model_name, variant, outdir,
             # Posterior predictive band
             if ppc_samples:
                 ppc_kdes = np.stack([_kde_eval(s, xs) for s in ppc_samples], axis=0)
-                lo = np.percentile(ppc_kdes, 5, axis=0)
-                hi = np.percentile(ppc_kdes, 95, axis=0)
+                lo = np.percentile(ppc_kdes, _CI_LO, axis=0)
+                hi = np.percentile(ppc_kdes, _CI_HI, axis=0)
                 med = np.median(ppc_kdes, axis=0)
-                ax.fill_between(xs, lo, hi, color=ppc_color, alpha=0.25,
-                                label="PPC 90% CI", zorder=1)
+                ax.fill_between(xs, lo, hi, color=ppc_fill, alpha=0.40,
+                                label=f"PPC {PPC_CI:g}% CI", zorder=1)
 
                 # Individual posterior-predictive draws. The band summarises the
                 # draws POINTWISE, so it hides whether any single draw has the
@@ -393,9 +498,9 @@ def plot_ppc(obs_pooled, ppc_pooled, conditions, model_name, variant, outdir,
             ax.tick_params(labelsize=7)
             ax.spines[["top", "right"]].set_visible(False)
 
-        axes[0].legend(fontsize=7, frameon=False)
+        _legend(axes[0], fontsize=7, frameon=False)
         fig.suptitle(
-            f"{model_name.upper()} ({variant}) — PPC by {cond_name}",
+            f"{model_name.upper()} — RT posterior predictive by {_cond_label(cond_name)}",
             fontsize=10,
         )
         fig.tight_layout()
@@ -435,18 +540,26 @@ def _quantile_stats(obs, ppc_samples, quantiles):
     if ppc_q.size == 0:
         return obs_q, None, None, None
     med = np.median(ppc_q, axis=0)
-    lo, hi = np.percentile(ppc_q, [2.5, 97.5], axis=0)
+    lo, hi = np.percentile(ppc_q, [_CI_LO, _CI_HI], axis=0)
     return obs_q, med, lo, hi
 
 
 def plot_rt_quantiles(obs_pooled, ppc_pooled, conditions, model_name, variant, outdir,
-                      quantiles=DEFAULT_RT_QUANTILES, ppc_color=PPC_COLOR):
+                      quantiles=DEFAULT_RT_QUANTILES, ppc_color=None):
     """RT quantiles by level: observed points against the PPC quantile interval.
 
     Complements the density PPC. A KDE can look acceptable while specific
     quantiles are systematically displaced, because the eye integrates over the
     curve; here each quantile is its own comparison with its own interval.
     """
+    # ppc_color is an override used by ppc_compare_original.py to draw the ORIGINAL
+    # authors' series through this same function. An override has no ramp behind it,
+    # so line and band share the one colour; the default path takes the family ramp's
+    # saturated and light stops.
+    if ppc_color is None:
+        ppc_color, ppc_fill = _ppc_colors(model_name)
+    else:
+        ppc_fill = ppc_color
     tag = _quantile_tag(quantiles)
     quantiles = np.asarray(quantiles, dtype=float)
     xs = np.arange(len(quantiles))
@@ -465,8 +578,8 @@ def plot_rt_quantiles(obs_pooled, ppc_pooled, conditions, model_name, variant, o
             obs_q, med, lo, hi = _quantile_stats(obs, ppc_samples, quantiles)
 
             if med is not None:
-                ax.fill_between(xs, lo, hi, color=ppc_color, alpha=0.25,
-                                label="PPC 95% CI", zorder=1)
+                ax.fill_between(xs, lo, hi, color=ppc_fill, alpha=0.40,
+                                label=f"PPC {PPC_CI:g}% CI", zorder=1)
                 ax.plot(xs, med, "o-", color=ppc_color, lw=1.4, ms=4,
                         label="PPC median", zorder=2)
             ax.plot(xs, obs_q, "s--", color=OBS_COLOR, lw=1.6, ms=4,
@@ -480,8 +593,8 @@ def plot_rt_quantiles(obs_pooled, ppc_pooled, conditions, model_name, variant, o
             ax.tick_params(labelsize=7)
             ax.spines[["top", "right"]].set_visible(False)
 
-        axes[0, 0].legend(fontsize=7, frameon=False)
-        fig.suptitle(f"{model_name.upper()} ({variant}) — RT quantiles by {cond_name}",
+        _legend(axes[0, 0], fontsize=7, frameon=False)
+        fig.suptitle(f"{model_name.upper()} — RT quantiles by {_cond_label(cond_name)}",
                      fontsize=10)
         fig.tight_layout()
         outdir.mkdir(parents=True, exist_ok=True)
@@ -492,13 +605,16 @@ def plot_rt_quantiles(obs_pooled, ppc_pooled, conditions, model_name, variant, o
 
 
 def plot_rt_qq(obs_pooled, ppc_pooled, conditions, model_name, variant, outdir,
-               quantiles=DEFAULT_RT_QUANTILES, ppc_color=PPC_COLOR):
+               quantiles=DEFAULT_RT_QUANTILES, ppc_color=None):
     """Q-Q: observed RT quantile against the predicted one, with a 45-degree reference.
 
     Reads differently from plot_rt_quantiles: deviation from the diagonal is the
     misfit in seconds, so systematic over- or under-prediction shows as a tilt
     rather than as two curves to mentally subtract.
     """
+    # Error bars only, no band, so this one needs just the line colour.
+    if ppc_color is None:
+        ppc_color = _ppc_colors(model_name)[0]
     tag = _quantile_tag(quantiles)
     quantiles = np.asarray(quantiles, dtype=float)
 
@@ -521,10 +637,10 @@ def plot_rt_qq(obs_pooled, ppc_pooled, conditions, model_name, variant, outdir,
             span = np.concatenate([obs_q, lo, hi])
             pad = 0.05 * (span.max() - span.min() or 1.0)
             ends = [span.min() - pad, span.max() + pad]
-            ax.plot(ends, ends, "k--", lw=1, zorder=1)
+            ax.plot(ends, ends, ls="--", color=GUIDE_COLOR, lw=1, zorder=1)
             ax.errorbar(obs_q, med, yerr=[med - lo, hi - med], fmt="o",
                         color=ppc_color, ms=4, lw=1.2, capsize=3,
-                        label="PPC median + 95% CI", zorder=2)
+                        label=f"PPC median + {PPC_CI:g}% CI", zorder=2)
             for x, y, q in zip(obs_q, med, quantiles):
                 ax.annotate(f"{q:g}", (x, y), textcoords="offset points",
                             xytext=(4, -8), fontsize=6, color=OBS_COLOR)
@@ -539,8 +655,8 @@ def plot_rt_qq(obs_pooled, ppc_pooled, conditions, model_name, variant, outdir,
 
         visible = [a for a in axes[0] if a.get_visible()]
         if visible:
-            visible[0].legend(fontsize=7, frameon=False)
-        fig.suptitle(f"{model_name.upper()} ({variant}) — RT Q-Q by {cond_name}",
+            _legend(visible[0], fontsize=7, frameon=False)
+        fig.suptitle(f"{model_name.upper()} — RT quantile\u2013quantile by {_cond_label(cond_name)}",
                      fontsize=10)
         fig.tight_layout()
         outdir.mkdir(parents=True, exist_ok=True)
@@ -551,7 +667,7 @@ def plot_rt_qq(obs_pooled, ppc_pooled, conditions, model_name, variant, outdir,
 
 
 def plot_choice_quantiles(obs_ch, ppc_ch, conditions, model_name, variant, outdir,
-                          quantiles=DEFAULT_RT_QUANTILES, ppc_color=PPC_COLOR):
+                          quantiles=DEFAULT_RT_QUANTILES, ppc_color=None):
     """Quantile plot on the RESPONSE dimension. CDM only.
 
     CDM's response is a continuous angle, so quantiles of theta are meaningful in
@@ -563,6 +679,14 @@ def plot_choice_quantiles(obs_ch, ppc_ch, conditions, model_name, variant, outdi
         logging.info(f"[choice quantiles] skipped for {model_name}: response is discrete")
         return
 
+    # ppc_color is an override used by ppc_compare_original.py to draw the ORIGINAL
+    # authors' series through this same function. An override has no ramp behind it,
+    # so line and band share the one colour; the default path takes the family ramp's
+    # saturated and light stops.
+    if ppc_color is None:
+        ppc_color, ppc_fill = _ppc_colors(model_name)
+    else:
+        ppc_fill = ppc_color
     quantiles = np.asarray(quantiles, dtype=float)
     tag = _quantile_tag(quantiles)
     xs = np.arange(len(quantiles))
@@ -581,22 +705,22 @@ def plot_choice_quantiles(obs_ch, ppc_ch, conditions, model_name, variant, outdi
             draws = [np.asarray(p, dtype=float) for p in ppc_ch[cond_name][lbl]]
             obs_q, med, lo, hi = _quantile_stats(o, draws, quantiles)
             if med is not None:
-                ax.fill_between(xs, lo, hi, color=ppc_color, alpha=0.25,
-                                label="PPC 95% CI", zorder=1)
+                ax.fill_between(xs, lo, hi, color=ppc_fill, alpha=0.40,
+                                label=f"PPC {PPC_CI:g}% CI", zorder=1)
                 ax.plot(xs, med, "o-", color=ppc_color, lw=1.4, ms=4,
                         label="PPC median", zorder=2)
             ax.plot(xs, obs_q, "s--", color=OBS_COLOR, lw=1.6, ms=4,
                     label="Observed", zorder=3)
-            ax.axhline(0.0, color="grey", ls=":", lw=0.8, zorder=0)
+            ax.axhline(0.0, color=GUIDE_COLOR, ls=":", lw=0.8, zorder=0)
             ax.set_xticks(xs); ax.set_xticklabels([f"{q:g}" for q in quantiles])
             ax.set_title(lbl, fontsize=9)
-            ax.set_xlabel("quantile", fontsize=8)
-            ax.set_ylabel(r"response deviation $\theta$ (rad)", fontsize=8)
+            ax.set_xlabel("Response quantile", fontsize=8)
+            ax.set_ylabel(r"Response deviation $\theta$ (rad)", fontsize=8)
             ax.tick_params(labelsize=7)
             ax.spines[["top", "right"]].set_visible(False)
-        axes[0, 0].legend(fontsize=7, frameon=False)
-        fig.suptitle(f"{model_name.upper()} ({variant}) — response-angle quantiles "
-                     f"by {cond_name}", fontsize=10)
+        _legend(axes[0, 0], fontsize=7, frameon=False)
+        fig.suptitle(f"{model_name.upper()} — response-angle quantiles "
+                     f"by {_cond_label(cond_name)}", fontsize=10)
         fig.tight_layout()
         savepath = outdir / f"{model_name}_{variant}_choice_quantiles_{cond_name}{tag}.pdf"
         fig.savefig(savepath, bbox_inches="tight")
@@ -613,6 +737,7 @@ def plot_choice_ppc(obs_ch, ppc_ch, conditions, model_name, variant, outdir,
     density against the predicted one; for DDM/RDM it compares choice proportions.
     """
     circular = model_name == "cdm"
+    ppc_color, ppc_fill = _ppc_colors(model_name)
     outdir.mkdir(parents=True, exist_ok=True)
 
     for cond_name, _, label_map in conditions:
@@ -630,9 +755,9 @@ def plot_choice_ppc(obs_ch, ppc_ch, conditions, model_name, variant, outdir,
             if circular:
                 xs = np.linspace(-np.pi, np.pi, 400)
                 dens = np.array([_kde_eval(np.asarray(p, dtype=float), xs) for p in P])
-                lo, hi = np.percentile(dens, [2.5, 97.5], axis=0)
-                ax.fill_between(xs, lo, hi, alpha=0.30, color="#c44e52", lw=0,
-                                label="PPC 95%", zorder=1)
+                lo, hi = np.percentile(dens, [_CI_LO, _CI_HI], axis=0)
+                ax.fill_between(xs, lo, hi, alpha=0.40, color=ppc_fill, lw=0,
+                                label=f"PPC {PPC_CI:g}% CI", zorder=1)
 
                 # Same reasoning as the RT PPC: the band is pointwise, so it
                 # cannot show whether individual draws put mass at +-pi/2 or
@@ -640,18 +765,18 @@ def plot_choice_ppc(obs_ch, ppc_ch, conditions, model_name, variant, outdir,
                 # CDM, whose misfit lives in the shape of the angular density.
                 if draw_lines and max_lines > 0:
                     for k, i in enumerate(_draw_idx(len(dens), max_lines)):
-                        ax.plot(xs, dens[i], color="#c44e52", lw=line_width,
+                        ax.plot(xs, dens[i], color=ppc_color, lw=line_width,
                                 alpha=line_alpha, zorder=2, solid_capstyle="butt",
                                 label="PPC draws" if k == 0 else None)
 
-                ax.plot(xs, np.median(dens, axis=0), color="#c44e52", lw=1.4,
+                ax.plot(xs, np.median(dens, axis=0), color=ppc_color, lw=1.4,
                         label="PPC median", zorder=3)
-                ax.plot(xs, _kde_eval(o, xs), color="black", lw=1.8,
-                        label="observed", zorder=4)
+                ax.plot(xs, _kde_eval(o, xs), color=OBS_COLOR, lw=1.8,
+                        label="Observed", zorder=4)
                 for v in (-np.pi / 2, np.pi / 2):
-                    ax.axvline(v, color="steelblue", ls=":", lw=1.2, zorder=0)
+                    ax.axvline(v, color=GUIDE_COLOR, ls=":", lw=1.2, zorder=0)
                 ax.set_xlim(-np.pi, np.pi)
-                ax.set_xlabel(r"response deviation $\theta$ (rad)", fontsize=9)
+                ax.set_xlabel(r"Response deviation $\theta$ (rad)", fontsize=9)
                 frac_o = float(np.mean(np.abs(o) > np.pi / 2))
                 frac_p = float(np.median([np.mean(np.abs(np.asarray(p)) > np.pi / 2) for p in P]))
                 ax.set_title(f"{lbl}\n$P(|\\theta|>\\pi/2)$: obs {frac_o:.3f} / ppc {frac_p:.3f}",
@@ -660,23 +785,24 @@ def plot_choice_ppc(obs_ch, ppc_ch, conditions, model_name, variant, outdir,
                 levels = np.unique(o)
                 obs_p = np.array([np.mean(o == v) for v in levels])
                 ppc_p = np.array([[np.mean(np.asarray(p) == v) for v in levels] for p in P])
-                lo, hi = np.percentile(ppc_p, [2.5, 97.5], axis=0)
+                lo, hi = np.percentile(ppc_p, [_CI_LO, _CI_HI], axis=0)
                 med = np.median(ppc_p, axis=0)
                 x = np.arange(len(levels))
-                ax.bar(x, obs_p, width=0.55, color="black", alpha=0.75, label="observed")
-                ax.errorbar(x, med, yerr=[med - lo, hi - med], fmt="o", color="#c44e52",
-                            capsize=4, lw=1.4, label="PPC median + 95%")
+                ax.bar(x, obs_p, width=0.55, color=OBS_COLOR, alpha=0.85, label="Observed")
+                ax.errorbar(x, med, yerr=[med - lo, hi - med], fmt="o", color=ppc_color,
+                            capsize=4, lw=1.4, label=f"PPC median + {PPC_CI:g}% CI")
                 ax.set_xticks(x); ax.set_xticklabels([f"{int(v)}" for v in levels])
-                ax.set_xlabel("choice", fontsize=9)
+                ax.set_xlabel("Choice", fontsize=9)
                 ax.set_title(lbl, fontsize=9)
 
-            ax.set_ylabel("density" if circular else "proportion", fontsize=9)
+            ax.set_ylabel("Density" if circular else "Proportion", fontsize=9)
             ax.tick_params(labelsize=7)
             ax.spines[["top", "right"]].set_visible(False)
             if j == 0:
-                ax.legend(fontsize=7, frameon=False)
+                _legend(ax, fontsize=7, frameon=False)
 
-        fig.suptitle(f"{model_name.upper()} {variant} — response-dimension PPC ({cond_name})",
+        what = "response-angle posterior predictive" if circular else "choice proportions"
+        fig.suptitle(f"{model_name.upper()} — {what} by {_cond_label(cond_name)}",
                      fontsize=10)
         fig.tight_layout()
         savepath = outdir / f"{model_name}_{variant}_choice_ppc_{cond_name}.pdf"
@@ -717,6 +843,11 @@ def parse_args():
                         "body of the distribution; add e.g. 0.99 to probe the tail.")
     p.add_argument("--no_contamination", action="store_true",
                    help="Set pi=0 during simulation to isolate distributional fit from lapse contamination.")
+    p.add_argument("--no_cache", action="store_true",
+                   help="Simulate from scratch and do not read or write the draw cache.")
+    p.add_argument("--refresh_cache", action="store_true",
+                   help="Re-simulate and overwrite the cached draws for this configuration.")
+    p.add_argument("--cache_dir", type=str, default=str(CACHE_DIR))
     return p.parse_args()
 
 
@@ -732,13 +863,24 @@ def main():
     outdir = Path(args.outdir) if args.outdir else FIG_DIR / args.model
     logging.info(f"Running PPC: model={args.model}, variant={args.variant}, n_ppc_samples={args.n_ppc_samples}")
 
-    obs_pooled, ppc_pooled, conditions, obs_ch, ppc_ch = collect_ppc(
-        model_name=args.model,
-        variant=args.variant,
-        n_ppc_samples=args.n_ppc_samples,
-        seed=args.seed,
-        no_contamination=args.no_contamination,
-    )
+    if args.no_cache:
+        obs_pooled, ppc_pooled, conditions, obs_ch, ppc_ch = collect_ppc(
+            model_name=args.model,
+            variant=args.variant,
+            n_ppc_samples=args.n_ppc_samples,
+            seed=args.seed,
+            no_contamination=args.no_contamination,
+        )
+    else:
+        obs_pooled, ppc_pooled, conditions, obs_ch, ppc_ch = collect_ppc_cached(
+            model_name=args.model,
+            variant=args.variant,
+            n_ppc_samples=args.n_ppc_samples,
+            seed=args.seed,
+            no_contamination=args.no_contamination,
+            cache_dir=args.cache_dir,
+            refresh=args.refresh_cache,
+        )
     plot_ppc(obs_pooled, ppc_pooled, conditions, args.model, args.variant, outdir,
              draw_lines=not args.no_ppc_lines, max_lines=args.ppc_max_lines,
              line_alpha=args.ppc_line_alpha, line_width=args.ppc_line_width)

@@ -144,8 +144,32 @@ MASK_RANDOMIZER_KWARGS = {
 # BYPASSES the link function, so this is a post-link value, not an unconstrained one.
 V_FIXED = 1.0375
 
+# S_V_FIXED is the prior median of s_v on the natural scale -- shifted_softplus(-1.0),
+# -1.0 being the prior location -- chosen exactly as V_FIXED was.
+#
+# WHY pinning s_v is a different trade from pinning v. Under intercept_only with
+# constant item values the data see only mu = (1+omega)/2 * v_diff and
+# Delta = (1-omega)(2v + v_diff): two functionals for three parameters, one flat
+# direction, which is what --fix_v removes -- at the cost of v no longer being
+# INFERRED. The across-trial drift variance is a third functional,
+# s_v^2 * (1 + omega^2). Pinning s_v turns that into a constraint on omega, which
+# closes the same system from the other side and leaves v free to be recovered.
+#
+# Measured before running: s_v is itself only weakly recovered (r = 0.22-0.34 across
+# the 7-dim and varying-values arms) and its within-posterior correlation with both
+# omega and v is ~0.00, so the channel this reasoning leans on is real but thin.
+# That is the empirical question these variants exist to answer.
+S_V_FIXED = 0.3133
 
-def resolve_case(case: str, fix_v: bool):
+# Parameters that may be pinned, with the post-link value injected for each.
+PINNABLE = {"v": V_FIXED, "s_v": S_V_FIXED}
+
+
+def _pinned(fix_v: bool, fix_s_v: bool) -> list:
+    return [q for q, on in (("v", fix_v), ("s_v", fix_s_v)) if on]
+
+
+def resolve_case(case: str, fix_v: bool, fix_s_v: bool = False):
     """Design config + mask-randomizer kwargs for a case, with v optionally pinned.
 
     Dropping "v" from the design config leaves its column of the parameter mask
@@ -156,27 +180,34 @@ def resolve_case(case: str, fix_v: bool):
     Train and validate MUST call this with the same fix_v, or their simulated data
     distributions diverge -- the same failure mode as the empty-fixed_values bug.
     """
-    if not fix_v:
+    pins = _pinned(fix_v, fix_s_v)
+    if not pins:
         return DESIGN_CONFIGS[case], MASK_RANDOMIZER_KWARGS
     if case != "intercept_only":
         raise ValueError(
-            f"--fix_v is only defined for intercept_only, got {case!r}: intercept_v "
-            "regresses v on u_1, and pinning v would leave that term empty."
+            f"pinning {pins} is only defined for intercept_only, got {case!r}: "
+            "intercept_v regresses v on u_1, and pinning it would leave that "
+            "term empty."
         )
     return (
-        {"1": [p for p in INTRINSIC_PARAMS if p != "v"]},
+        {"1": [q for q in INTRINSIC_PARAMS if q not in pins]},
         {
-            "free_intrinsics": [p for p in MASK_RANDOMIZER_KWARGS["free_intrinsics"]
-                                if p != "v"],
-            "fixed_intrinsics": MASK_RANDOMIZER_KWARGS["fixed_intrinsics"] + ["v"],
-            "fixed_values": {"v": V_FIXED},
+            "free_intrinsics": [q for q in MASK_RANDOMIZER_KWARGS["free_intrinsics"]
+                                if q not in pins],
+            "fixed_intrinsics": MASK_RANDOMIZER_KWARGS["fixed_intrinsics"] + pins,
+            "fixed_values": {q: PINNABLE[q] for q in pins},
         },
     )
 
 
-def _variant(p: Path, fix_v: bool) -> Path:
+_VARIANT_SUFFIX = {(): "", ("v",): "_vfixed", ("s_v",): "_svfixed",
+                   ("v", "s_v"): "_vsvfixed"}
+
+
+def _variant(p: Path, fix_v: bool, fix_s_v: bool = False) -> Path:
     """Route the v-fixed run to its own output tree, leaving 7-dim results in place."""
-    return p.with_name(p.name + "_vfixed") if fix_v else p
+    suf = _VARIANT_SUFFIX[tuple(_pinned(fix_v, fix_s_v))]
+    return p.with_name(p.name + suf) if suf else p
 
 # Must match addm_bf_apply.py so both arms see identical inputs.
 MAX_NUM_REGRESSORS = 4
@@ -197,8 +228,8 @@ class ADDMBaselineSimulator(bf.simulators.Simulator):
     """Emits raw per-trial data for the SetTransformer to summarise itself."""
 
     def __init__(self, case: str, num_obs: int = 500, first_fixation: str = "item0",
-                 fix_v: bool = False):
-        self.design_config, mask_kwargs = resolve_case(case, fix_v)
+                 fix_v: bool = False, fix_s_v: bool = False):
+        self.design_config, mask_kwargs = resolve_case(case, fix_v, fix_s_v)
         self.num_obs = num_obs
         self.extra_sample_kwargs = CASE_SAMPLE_KWARGS.get(case, {})
         self.model_family = ModelFamily(
@@ -353,13 +384,14 @@ def _sample_chunked(approximator, key: str, conditions, num_samples: int, chunk:
     return np.concatenate(outs, axis=0)
 
 
-def ckpt_path(case: str, first_fixation: str, tag: str = "", fix_v: bool = False) -> str:
+def ckpt_path(case: str, first_fixation: str, tag: str = "", fix_v: bool = False,
+              fix_s_v: bool = False) -> str:
     # first_fixation is in the path: the probe script keys only on case, so a
     # second run with a different gaze rule silently overwrites the first.
     # tag serves the same purpose for anything the CLI cannot express -- notably
     # which BayesFlow defaults the run used, since that is a property of the
     # installed library rather than of any argument.
-    return str(_variant(CKPT_DIR, fix_v) / case / (first_fixation + _suffix(tag))
+    return str(_variant(CKPT_DIR, fix_v, fix_s_v) / case / (first_fixation + _suffix(tag))
                / "addm_baseline_fm")
 
 
@@ -370,7 +402,7 @@ def _suffix(tag: str) -> str:
 def train(args):
     simulator = ADDMBaselineSimulator(case=args.case, num_obs=args.num_obs,
                                       first_fixation=args.first_fixation,
-                                      fix_v=args.fix_v)
+                                      fix_v=args.fix_v, fix_s_v=args.fix_s_v)
     summary_net = build_summary_network()
 
     workflow = bf.BasicWorkflow(
@@ -380,7 +412,7 @@ def train(args):
                                                   args.time_power_law_alpha),
         summary_network=summary_net,
         checkpoint_filepath=ckpt_path(args.case, args.first_fixation, args.tag,
-                                      args.fix_v),
+                                      args.fix_v, args.fix_s_v),
     )
 
     logging.info(
@@ -404,9 +436,10 @@ def train(args):
 def validate(args):
     simulator = ADDMBaselineSimulator(case=args.case, num_obs=args.num_obs,
                                       first_fixation=args.first_fixation,
-                                      fix_v=args.fix_v)
+                                      fix_v=args.fix_v, fix_s_v=args.fix_s_v)
     approximator = keras.saving.load_model(
-        ckpt_path(args.case, args.first_fixation, args.tag, args.fix_v) + "/model.keras"
+        ckpt_path(args.case, args.first_fixation, args.tag, args.fix_v,
+                  args.fix_s_v) + "/model.keras"
     )
 
     val_sims = simulator.sample(args.val_batch_size)
@@ -417,7 +450,7 @@ def validate(args):
     # The simulator now emits only the active cells, so no masking here.
     true_active = val_sims["params"]
 
-    outdir = (_variant(FIGURES_DIR, args.fix_v) / args.case
+    outdir = (_variant(FIGURES_DIR, args.fix_v, args.fix_s_v) / args.case
               / (args.first_fixation + _suffix(args.tag)))
     outdir.mkdir(parents=True, exist_ok=True)
     np.savez(
@@ -472,6 +505,10 @@ def parse_args():
     p.add_argument("--first_fixation", type=str, default="item0",
                    choices=["random", "item0", "item1"],
                    help="Must match the frozen-encoder arm for the comparison to hold.")
+    p.add_argument("--fix_s_v", action="store_true",
+                   help="Pin across-trial drift variability s_v to S_V_FIXED instead of "
+                        "inferring it. Combine with --fix_v to pin both. Each combination "
+                        "writes to its own tree (_svfixed / _vsvfixed). intercept_only only.")
     p.add_argument("--fix_v", action="store_true",
                    help="Pin the common value v to V_FIXED instead of inferring it, "
                         "removing the (v, v_diff, omega) flat direction. Drops the "

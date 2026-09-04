@@ -195,10 +195,15 @@ posteriors are additionally stale, dated 2026-06-02:
 
 - **RDM predates the Stroop data.** Every RDM figure here was produced before the
   Stroop dataset landed and will need regenerating once that analysis is settled.
-- **The CDM choice-quantile plots come from uncommitted code.** As of this snapshot
-  `experiments/real_data/ppc.py` carries ~56 uncommitted lines adding
-  `plot_choice_quantiles`, and the two `cdm/choice_quantiles_*.pdf` files were
-  untracked. A clean checkout would not reproduce them.
+- **These figures come from uncommitted code.** As of this snapshot
+  `experiments/real_data/ppc.py` carries an uncommitted restyle: per-family
+  identity colours from `cogformer.utils.plot_utils.FAMILY_PALETTES` (DDM
+  magenta, RDM purple-blue, CDM green), one `PPC_CI` interval level replacing a
+  mix of 90% and 95% bands, condition names routed through `CONDITION_DISPLAY`,
+  and titles no longer carrying the `(mc)` variant tag. The git commit recorded
+  above is therefore the parent of the code that drew these, not that code
+  itself. A clean checkout would reproduce the same NUMBERS -- the posterior
+  draws in `posteriors/` are unchanged -- but not the same appearance.
 - Adjacent analyses NOT included here: `ppc/r4c4_fulldraws/` (contamination
   sensitivity, contam vs nocontam per family, 20 files) and the DDM-only
   `ppc/ddm_combined/` and `ppc/ddm_original/` sets.

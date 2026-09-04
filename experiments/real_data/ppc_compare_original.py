@@ -27,7 +27,10 @@ matplotlib.use("Agg")
 from .ppc import (MODEL_REGISTRY, plot_rt_quantiles, plot_rt_qq,
                   DEFAULT_RT_QUANTILES, _quantile_stats)
 
-THEIR_COLOR = "#6969ff"
+# The DDM ramp's dark stop, not #6969ff: that hex is now RDM's identity colour
+# and would read as a second model family on what is a DDM-only comparison.
+from cogformer.utils.plot_utils import family_colors
+THEIR_COLOR = family_colors("ddm")["intercept"]
 COL = {"stim_type": "stim_type", "truth": "factual_truth"}
 
 

@@ -333,3 +333,95 @@ def staedtler_fineliner():
         "cm": cogformer_cm_colors()
     }
     return colors
+
+
+# --------------------------------------------------------------------------- #
+# Model-family identity colours
+# --------------------------------------------------------------------------- #
+# The palettes above are keyed by EXPERIMENT -- bf = the BayesFlow baseline arm,
+# fm = model-family runs, cm/mc = model-class runs. Any figure that puts several
+# model families side by side needs the opposite key: one hue per FAMILY, held
+# fixed across every figure and every experiment, so a reader learns "magenta is
+# DDM" once and it keeps meaning that.
+#
+# Each family reuses an existing ramp rather than inventing new hex, so the two
+# keying schemes can never disagree about what a given hex means:
+#
+#     ddm  magenta/red  <- cogformer_fm_colors
+#     rdm  purple/blue  <- cogformer_vi_colors
+#     cdm  green        <- cdm_colors  (see below -- NOT bf_colors)
+#     lba  blue/teal    <- cogformer_cm_colors
+#
+# Each ramp runs dark -> saturated -> light across (intercept, main_effect,
+# interaction) and keeps that effect-type meaning within a family. A figure that
+# needs a SINGLE colour per family should take ``main_effect``, the saturated
+# stop; ``interaction`` is the light stop and reads well as a fill underneath it.
+def cdm_colors():
+    """CDM's identity green.
+
+    Deliberately NOT bf_colors(), whose greens are the BayesFlow baseline's and
+    are built to recede behind the CogFormer result. Measured against the DDM and
+    RDM ramps, that palette fails as a family identity on three counts: its mid
+    stop is far too dark (HSV value 0.36 against DDM 0.93 / RDM 1.00), so a CDM
+    median line barely separates from the near-black observed curve (contrast 2.20
+    against DDM 4.02 / RDM 4.11); its dark and mid stops are nearly the same
+    colour (contrast 1.33 against DDM 2.44 / RDM 2.55), leaving an effectively
+    two-stop ramp; and its light stop is desaturated to 0.22 against DDM 0.59 /
+    RDM 0.72, reading grey-green rather than green.
+
+    This ramp keeps the original brand dark green and repairs the other two stops:
+    mid/observed contrast 4.94, dark-mid separation 2.98.
+    """
+    colors = {
+        "intercept": "#284734",
+        "main_effect": "#1F9E55",
+        "interaction": "#8FD9A8",
+    }
+    return colors
+
+
+FAMILY_PALETTES = {
+    "ddm": cogformer_fm_colors,
+    "rdm": cogformer_vi_colors,
+    "cdm": cdm_colors,
+    "lba": cogformer_cm_colors,
+}
+
+# Observed data is not a model, so it never takes a family colour: it is the
+# shared reference every family is judged against, and giving it a hue that moves
+# between figures would imply it changes with the model. Neutral near-black
+# everywhere, with a lighter grey for non-data guide lines.
+OBSERVED_COLOR = "#1a1a2e"
+GUIDE_COLOR = "#9a9aa5"
+
+
+def family_colors(family: str) -> dict:
+    """Three-stop identity ramp for one model family.
+
+    Parameters
+    ----------
+    family : str
+        Model family key, case-insensitive: ``ddm``, ``rdm``, ``cdm`` or ``lba``.
+
+    Returns
+    -------
+    dict with keys ``intercept`` (dark), ``main_effect`` (saturated) and
+    ``interaction`` (light).
+    """
+    key = family.lower()
+    if key not in FAMILY_PALETTES:
+        raise KeyError(
+            f"no identity palette for model family {family!r}; "
+            f"known families: {sorted(FAMILY_PALETTES)}"
+        )
+    return FAMILY_PALETTES[key]()
+
+
+def family_line_fill(family: str) -> tuple[str, str]:
+    """``(line, fill)`` for the common one-family-per-panel case.
+
+    The saturated stop for the estimate and the light stop for the band beneath
+    it, so the two read as one family rather than as two series.
+    """
+    c = family_colors(family)
+    return c["main_effect"], c["interaction"]

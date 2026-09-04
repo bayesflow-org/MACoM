@@ -1,8 +1,13 @@
 """One figure per condition with THREE series: observed, ours, and the original.
 
-    observed  black          the data
-    ours      magenta-red    #e94560   CogFormer model-class PPC
-    theirs    blue-purple    #6969ff   the original authors' resimulations
+    observed  neutral near-black       the data
+    ours      DDM saturated (#EC008C)  CogFormer model-class PPC
+    theirs    DDM dark     (#59315F)   the original authors' resimulations
+
+Both predictive series sit on the DDM identity ramp and are told apart by
+lightness and marker, not by hue. An earlier version drew "theirs" in #6969ff,
+which is now RDM's identity colour -- on a DDM figure that reads as a second
+model family rather than as a second method.
 
 Ours is regenerated here via collect_ppc rather than read from disk, because
 ppc.py computes its quantiles inside the plotting function and never persists
@@ -20,9 +25,12 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 
 from . import ppc as P
-from .ppc import MODEL_REGISTRY, DEFAULT_RT_QUANTILES, _quantile_stats, OBS_COLOR, PPC_COLOR
+from .ppc import MODEL_REGISTRY, DEFAULT_RT_QUANTILES, _quantile_stats, OBS_COLOR
+from cogformer.utils.plot_utils import family_colors
 
-THEIR_COLOR = "#6969ff"
+_DDM = family_colors("ddm")
+OUR_COLOR = _DDM["main_effect"]
+THEIR_COLOR = _DDM["intercept"]
 COL = {"stim_type": "stim_type", "truth": "factual_truth"}
 
 
@@ -72,7 +80,7 @@ def main():
             theirs = [g["rt"].to_numpy() for _, g in
                       pred[pred[COL[cond_name]] == int(round(val + 0.5))].groupby("resim_id")]
             for series, samples, color, mark in (
-                    ("ours", ours_pooled[cond_name][lbl], PPC_COLOR, "o"),
+                    ("ours", ours_pooled[cond_name][lbl], OUR_COLOR, "o"),
                     ("theirs", theirs, THEIR_COLOR, "^")):
                 obs_q, med, lo, hi = _quantile_stats(obs, samples, qs)
                 if med is None:
@@ -86,7 +94,7 @@ def main():
                                  "lo": lo[j], "hi": hi[j],
                                  "inside_95ci": bool(lo[j] <= obs_q[j] <= hi[j])})
             ax.plot(x, np.quantile(obs, qs), "s--", color=OBS_COLOR, lw=1.6, ms=5,
-                    zorder=3, label="observed")
+                    zorder=3, label="Observed")
             ax.set_xticks(x); ax.set_xticklabels([f"{q:g}" for q in qs])
             ax.set_title(lbl, fontsize=9)
             ax.set_xlabel("RT quantile", fontsize=8); ax.set_ylabel("RT (s)", fontsize=8)

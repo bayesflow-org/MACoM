@@ -70,6 +70,7 @@ from cogformer.diagnostics.metric.adaptive_c2st import compute_c2st_accuracy
 from .addm_bf_apply import (
     CogFormerEncoderSummary, _load_cogformer, _sample_chunked,
     active_labels, ckpt_path as frozen_ckpt_path, FROZEN_COLOR,
+    _pinned, _VARIANT_SUFFIX,
 )
 from .addm_bf_baseline import (
     ADDMBaselineSimulator, ckpt_path as baseline_ckpt_path,
@@ -89,7 +90,8 @@ def build_shared_validation(args, device):
     distribution.
     """
     sim = ADDMBaselineSimulator(case=args.case, num_obs=args.num_obs,
-                                first_fixation=args.first_fixation, fix_v=args.fix_v)
+                                first_fixation=args.first_fixation, fix_v=args.fix_v,
+                                fix_s_v=args.fix_s_v)
     out = sim.sample(args.n_val)
     raw, true_params, masks = out["data"], out["params"], out["masks"]
 
@@ -123,7 +125,8 @@ def main():
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
     args = parse_args()
     device = torch.device(args.encoder_device)
-    tag = args.out_tag or (args.case + ("_vfixed" if args.fix_v else ""))
+    tag = args.out_tag or (args.case + _VARIANT_SUFFIX[tuple(_pinned(args.fix_v,
+                                                                    args.fix_s_v))])
     outdir, figdir = OUT_ROOT / tag, FIG_ROOT / tag
     outdir.mkdir(parents=True, exist_ok=True)
     figdir.mkdir(parents=True, exist_ok=True)
@@ -132,10 +135,10 @@ def main():
     plain, pretty = active_labels(masks[0])
 
     frozen = keras.saving.load_model(
-        frozen_ckpt_path(args.case, args.fix_v) + "/model.keras")
+        frozen_ckpt_path(args.case, args.fix_v, args.fix_s_v) + "/model.keras")
     baseline = keras.saving.load_model(
-        baseline_ckpt_path(args.case, args.first_fixation, args.tag, args.fix_v)
-        + "/model.keras")
+        baseline_ckpt_path(args.case, args.first_fixation, args.tag, args.fix_v,
+                           args.fix_s_v) + "/model.keras")
 
     # ── posterior draws on the SHARED datasets ────────────────────────────────
     dr_f = _sample_chunked(frozen, "summaries", summaries, args.num_samples,
@@ -240,6 +243,9 @@ def parse_args():
     p.add_argument("--case", type=str, default="intercept_only")
     p.add_argument("--first_fixation", type=str, default="item0")
     p.add_argument("--fix_v", action="store_true")
+    p.add_argument("--fix_s_v", action="store_true",
+                   help="Pin s_v (combine with --fix_v to pin both). Must match the "
+                        "flags the checkpoints were trained with.")
     p.add_argument("--tag", type=str, default="vfixed_e500",
                    help="Baseline arm's checkpoint tag.")
     p.add_argument("--out_tag", type=str, default=None)

@@ -3,14 +3,14 @@
 Frozen snapshot. Every figure here comes from ONE checkpoint; this tree supersedes
 the scattered per-run directories under `outputs/figures/model_class/cf/`.
 
-Assembled 2026-09-02 19:05:11Z by
-`experiments/finalize_experiment_1.py` — 259 files.
+Assembled 2026-09-04 18:17:22Z by
+`experiments/finalize_experiment_1.py` — 261 files.
 
 ## Provenance
 
 - checkpoint: `outputs/checkpoints/model_class/cf/r4c4_b256_e10000/cogformer_model_class_fm_l8_h8_p256_s32_d128_b256_e10000_t100.pt
   sha256: 56e997f37e1c945c4ae6d022ebe546b2010e6f257ad537cee1a9b966d7409811`
-- git commit: `c9d6f9704b88c743d6b301c82b16f83bd7d28e97`
+- git commit: `224b31bac1a886a808514f705a23d550a0adfcfe`
 - per-file sources, sizes and original mtimes: `MANIFEST.csv`
 
 ## Contents
@@ -20,7 +20,7 @@ Assembled 2026-09-02 19:05:11Z by
 | `random_ensemble/` | 12 randomly drawn design configs, 4 per family (one combined set) |
 | `benchmark_ensemble/` | `bench5` (5 OG cases) and `bench6` (+ `mixed_predictor`), per family |
 | `per_case/` | the 18: 6 benchmark cases × 3 families, plotted separately |
-| `information_gain/` | expected information gain vs trial count, four continuous/binary designs |
+| `information_gain/` | expected information gain and NRMSE vs trial count, four continuous/binary designs |
 | `amortization_gap/` | reserved — BayesFlow comparison, not yet run |
 | `predictions/` | raw posterior draws backing every figure, for re-plotting |
 
@@ -46,14 +46,41 @@ ever added, this rename becomes wrong** — the panel would no longer be pi-spec
 
 `information_gain/` sweeps four designs (CC/CB/BC/BB — each of two predictors either
 continuous or binary) against trial count, both predictors loading on `v` and `a`.
-The metric is a Gaussian expected information gain, a log-volume RATIO, chosen because
-a ratio cancels the per-SD rescaling that puts continuous and binary regressors on a
-common estimand. Two caveats travel with the numbers:
+The left panel is a Gaussian expected information gain, a log-volume RATIO, chosen
+because a ratio cancels the per-SD rescaling that puts continuous and binary regressors
+on a common estimand.
+
+The right panel is mean NRMSE over the 11 active cells (draw-based RMSE against the
+truth, normalised by the SD of the targets -- the repo's canonical `_rmse`). It
+REPLACED a posterior-contraction panel, which said nothing the EIG panel did not: EIG
+is the log-volume contraction of the same posterior, so the two are near-monotone
+transforms of one another and BOTH are pure posterior-WIDTH measures. Neither can see a
+design that sharpens the posterior around the wrong value. Since draw-based MSE
+decomposes as
+
+    NRMSE^2 = bias^2 / var(true) + (1 - contraction)
+
+the old panel reported only the second term. The recovered bias/sd(true) runs 0.15-0.44
+and is non-zero at every design and trial count, so that omission was real rather than
+theoretical. It also separates two readings the old panel confounded: BB's NRMSE
+flattens at 0.443/0.444 between 800 and 1000 trials while CC keeps improving to 0.305,
+so the all-binary design stops converting extra trials into ACCURACY, not merely into
+posterior width.
+
+`posterior_draws.npz` holds the draws and targets behind both panels for all 20 cells
+(`<design>_<n>_pred` (200, 200, 11), `<design>_<n>_true` (200, 11)). The first version
+of this sweep persisted only summary scalars, so adding NRMSE later cost a second
+four-hour GPU run -- posterior draws against truth cannot be reconstructed from a
+contraction value. Any further metric is now a CPU replot.
+
+Two caveats travel with the numbers:
 
 - The designs carry DIFFERENT priors over that estimand (1.704 nats between CC and BB,
   from the `cell_means` contrast having twice the variance of a continuous slope). That
   offset is constant in n, so it shifts the level of every gap but cancels from the
-  slope — only the TREND and the derived trial multipliers are prior-free.
+  slope. Sigma_prior is itself estimated from 1500 draws, so re-running the sweep moves
+  EIG by ~0.2 nats (max 0.78 observed) without changing the design ordering at any
+  trial count. Only — only the TREND and the derived trial multipliers are prior-free.
 - Category proportions are Dirichlet-drawn, so "binary" means an unbalanced
   dichotomisation (realised balance 0.38–0.45), not a median split. These curves answer
   factor-vs-parametric, not median-split-vs-continuous.

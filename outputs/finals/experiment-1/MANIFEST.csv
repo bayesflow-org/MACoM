@@ -47,9 +47,11 @@ benchmark_ensemble/bench6/rdm/metrics.pdf,outputs/figures/model_class/cf/r4c4_b2
 benchmark_ensemble/bench6/rdm/metrics_pi.pdf,outputs/figures/model_class/cf/r4c4_b256_e10000_ensemble_benchmark/rdm_bench6_ensemble_metrics_global.pdf,22332,2026-09-02 19:04:56Z,True
 benchmark_ensemble/bench6/rdm/recovery.pdf,outputs/figures/model_class/cf/r4c4_b256_e10000_ensemble_benchmark/rdm_bench6_ensemble_recovery.pdf,645804,2026-09-02 19:04:50Z,False
 benchmark_ensemble/bench6/rdm/recovery_pi.pdf,outputs/figures/model_class/cf/r4c4_b256_e10000_ensemble_benchmark/rdm_bench6_ensemble_recovery_global.pdf,64216,2026-09-02 19:04:51Z,True
-information_gain/contraction_per_cell.npz,outputs/data/design_opt/ddm/design_contraction.npz,6670,2026-09-02 09:36:35Z,False
-information_gain/information_gain.csv,outputs/data/design_opt/ddm/design_eig.csv,1320,2026-09-02 09:36:35Z,False
-information_gain/information_gain.pdf,outputs/data/design_opt/ddm/design_eig.pdf,22222,2026-09-02 09:36:35Z,False
+information_gain/contraction_per_cell.npz,outputs/data/design_opt/ddm/design_contraction.npz,6670,2026-09-04 17:29:03Z,False
+information_gain/information_gain.csv,outputs/data/design_opt/ddm/design_eig.csv,1620,2026-09-04 18:10:08Z,False
+information_gain/information_gain.pdf,outputs/data/design_opt/ddm/design_eig.pdf,21471,2026-09-04 18:17:12Z,False
+information_gain/nrmse_per_cell.npz,outputs/data/design_opt/ddm/design_nrmse.npz,6670,2026-09-04 17:29:03Z,False
+information_gain/posterior_draws.npz,outputs/data/design_opt/ddm/design_draws.npz,32811807,2026-09-04 17:29:05Z,False
 per_case/cdm/fixed/coverage.pdf,outputs/figures/model_class/cf/r4c4_b256_e10000_validate/cdm/fixed/cdm_fixed_fm_coverage.pdf,31264,2026-08-07 23:37:58Z,False
 per_case/cdm/fixed/coverage_pi.pdf,outputs/figures/model_class/cf/r4c4_b256_e10000_validate/cdm/fixed/cdm_fixed_fm_coverage_global.pdf,18396,2026-08-07 23:37:58Z,True
 per_case/cdm/fixed/ecdf.pdf,outputs/figures/model_class/cf/r4c4_b256_e10000_validate/cdm/fixed/cdm_fixed_fm_ecdf.pdf,36377,2026-08-07 23:37:58Z,False

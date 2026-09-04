@@ -114,6 +114,8 @@ from cogformer.simulator.benchmarks.ssms.priors import ddm_priors, rdm_priors, c
 from cogformer.simulator.benchmarks.ssms.link_funs import (
     ddm_link_fun, rdm_link_fun, cdm_link_fun)
 
+from cogformer.diagnostics.metric.adaptive_metrics import _rmse
+
 from ..configs import MODELS as _BASE_MODELS
 from ..utils import (add_global_params, infer_free_fixed_intrinsics,
                      build_encoder_input_dim, chunked_sample)
@@ -305,6 +307,33 @@ def prior_logdet(args, model_class, ddm_cfg, adapter, categorical_regressors, nu
     return gaussian_logdet(true_active)
 
 
+def nrmse_with_se(pred_active, true_active, n_boot=200, seed=0):
+    """Mean NRMSE over active cells, plus a bootstrap SE over datasets.
+
+    ``_rmse`` averages over the dataset axis internally, so the spread across
+    datasets -- the uncertainty in the plotted mean -- is gone by the time it
+    returns. Resampling datasets recovers it. This is uncertainty in the MEAN, the
+    same quantity ``post_se`` reports for the EIG panel, so the two shaded bands on
+    the figure mean the same thing.
+    """
+    n, _, n_cells = pred_active.shape
+
+    def _mean_nrmse(idx):
+        return float(np.mean([
+            _rmse(pred_active[idx, :, j], true_active[idx, j],
+                  normalize="std", aggregation=np.mean)
+            for j in range(n_cells)
+        ]))
+
+    per_cell = np.array([
+        _rmse(pred_active[:, :, j], true_active[:, j], normalize="std", aggregation=np.mean)
+        for j in range(n_cells)
+    ])
+    rng = np.random.default_rng(seed)
+    boots = [_mean_nrmse(rng.integers(0, n, n)) for _ in range(n_boot)]
+    return per_cell, float(np.std(boots, ddof=1))
+
+
 def run_cell(args, model_class, ddm_cfg, cogformer, adapter, device,
              design_label, categorical_regressors, num_obs, logdet_prior):
     samples, n_global, gidx = simulate_cell(args, model_class, ddm_cfg,
@@ -330,6 +359,16 @@ def run_cell(args, model_class, ddm_cfg, cogformer, adapter, device,
 
     contraction = 1.0 - (pred_active.std(axis=1) ** 2).mean(axis=0) / true_active.var(axis=0)
 
+    # NRMSE per active cell, using the project's canonical estimator so this number is
+    # comparable with every other NRMSE reported in the repo: RMSE is taken per
+    # posterior DRAW against the truth and then averaged, and normalised by the SD of
+    # the targets. Contraction and EIG both measure posterior WIDTH -- EIG is the
+    # log-volume contraction of the same posterior -- so they move together almost by
+    # construction. NRMSE measures distance from the truth instead, which is a
+    # different claim: a design can sharpen the posterior and sharpen it in the wrong
+    # place, and only this metric can say so.
+    nrmse, nrmse_se = nrmse_with_se(pred_active, true_active, seed=args.seed or 0)
+
     # Realised split balance for the categorical regressors: sd = sqrt(p(1-p)) => the
     # closer to 0.5 the more balanced. 1.0 is recorded for all-continuous designs.
     slope_rows = sorted({r for r in np.nonzero(mask)[0] if r != 0})
@@ -345,10 +384,12 @@ def run_cell(args, model_class, ddm_cfg, cogformer, adapter, device,
         "post_logvol": post_logvol, "post_se": post_se,
         "logdet_prior": logdet_prior, "eig_nats": eig,
         "mean_contraction": float(np.mean(contraction)),
+        "mean_nrmse": float(np.mean(nrmse)),
+        "nrmse_se": nrmse_se,
         "mean_split_balance": balance,
         "ood": num_obs < TRAIN_MIN_OBS or num_obs > TRAIN_MAX_OBS,
         "mask_signature": "".join("1" if b else "0" for b in mask.ravel()),
-    }, contraction
+    }, contraction, nrmse, pred_active.astype(np.float32), true_active.astype(np.float32)
 
 
 def main():
@@ -380,20 +421,23 @@ def main():
         logging.info(f"[{label}] logdet(Sigma_prior) = {prior_ld[label]:.4f} "
                      f"({args.prior_batch} draws)")
 
-    rows, contractions, signatures = [], {}, set()
+    rows, contractions, nrmses, draws, signatures = [], {}, {}, {}, set()
     for (label, cats), n in product(DESIGNS, obs_grid):
         if args.seed is not None:
             np.random.seed(args.seed + hash((label, n)) % 100_000)
             torch.manual_seed(args.seed + hash((label, n)) % 100_000)
         logging.info(f"[{label} / num_obs={n}] simulating + sampling")
-        row, contr = run_cell(args, model_class, ddm_cfg, cogformer, adapter, device,
-                              label, cats, n, prior_ld[label])
-        rows.append(row); contractions[(label, n)] = contr
+        row, contr, nrm, pred_a, true_a = run_cell(
+            args, model_class, ddm_cfg, cogformer, adapter, device,
+            label, cats, n, prior_ld[label])
+        rows.append(row); contractions[(label, n)] = contr; nrmses[(label, n)] = nrm
+        draws[(label, n)] = (pred_a, true_a)
         signatures.add(row["mask_signature"])
         logging.info(
             f"[{label} / num_obs={n}] post_logvol {row['post_logvol']:.3f} +/- "
             f"{row['post_se']:.3f}  (logdet_prior {row['logdet_prior']:.3f}, "
-            f"EIG {row['eig_nats']:.3f}, contraction {row['mean_contraction']:.3f})")
+            f"EIG {row['eig_nats']:.3f}, contraction {row['mean_contraction']:.3f}, "
+            f"NRMSE {row['mean_nrmse']:.4f})")
 
     # The comparison is only meaningful if every design produced the same parameter
     # mask; otherwise EIG values are log-volumes in different-dimensional spaces.
@@ -407,28 +451,96 @@ def main():
     df.to_csv(outdir / "design_eig.csv", index=False, float_format="%.4f")
     np.savez(outdir / "design_contraction.npz",
              **{f"{l}_{n}": c for (l, n), c in contractions.items()})
+    # Per-cell NRMSE, so the aggregate in the figure can be read apart by parameter
+    # without paying for another four-hour sweep.
+    np.savez(outdir / "design_nrmse.npz",
+             **{f"{l}_{n}": c for (l, n), c in nrmses.items()})
+    # The posterior draws and their targets, per cell. This sweep costs ~4 GPU-hours
+    # and its first version persisted only summary scalars, so adding NRMSE later
+    # meant paying for the whole thing again -- posterior draws against truth cannot
+    # be reconstructed from a contraction value. Any future metric (calibration
+    # error, coverage, log gamma, a per-parameter split) is now a CPU replot.
+    np.savez_compressed(
+        outdir / "design_draws.npz",
+        **{f"{l}_{n}_pred": pr for (l, n), (pr, _) in draws.items()},
+        **{f"{l}_{n}_true": tr for (l, n), (_, tr) in draws.items()})
     logging.info("\n" + df.to_string(index=False, float_format=lambda x: f"{x:.3f}"))
     _plot(df, outdir)
     logging.info(f"[saved] {outdir}")
 
 
 def _plot(df, outdir):
-    fig, axes = plt.subplots(1, 2, figsize=(11, 4.2))
+    """EIG and NRMSE by design.
+
+    The second panel used to show mean posterior contraction, which said the same
+    thing as the first: EIG is the log-volume contraction of the posterior, so the
+    two curves are near-monotone transforms of one another and neither can catch a
+    design that sharpens the posterior around the wrong value. NRMSE measures error
+    against the truth, so the pair now covers precision AND accuracy.
+
+    Both panels shade +/- 1 SE of the plotted mean rather than drawing capped error
+    bars: with four overlapping designs the caps collided and read as data.
+    """
+    # Sized so two SQUARE panels sit side by side without a gulf between them:
+    # set_box_aspect below fixes each axes box to 1:1, and a figure much wider than
+    # 2x the panel height would just pad the middle with whitespace.
+    fig, axes = plt.subplots(1, 2, figsize=(9.0, 5.0))
+    handles, labels = [], []
     for label in [d[0] for d in DESIGNS]:
-        s = df[df.design == label].sort_values("num_obs")
+        sub = df[df.design == label].sort_values("num_obs")
         c = DESIGN_COLORS[label]
-        axes[0].errorbar(s.num_obs, s.eig_nats, yerr=s.post_se, marker="o", ms=4,
-                         capsize=3, color=c, label=label)
-        axes[1].plot(s.num_obs, s.mean_contraction, marker="o", ms=4, color=c, label=label)
-    axes[0].set_ylabel("expected information gain (nats)")
-    axes[1].set_ylabel("mean posterior contraction")
+        x = sub.num_obs.to_numpy()
+        for ax, mean_col, se_col in ((axes[0], "eig_nats", "post_se"),
+                                     (axes[1], "mean_nrmse", "nrmse_se")):
+            y = sub[mean_col].to_numpy()
+            (line,) = ax.plot(x, y, marker="o", ms=4, lw=1.6, color=c, label=label)
+            if se_col in sub and sub[se_col].notna().all():
+                se = sub[se_col].to_numpy()
+                ax.fill_between(x, y - se, y + se, color=c, alpha=0.18, lw=0)
+        handles.append(line); labels.append(label)
+
+    LABEL_FS = 14
+    LEGEND_FS = 12
+    axes[0].set_ylabel("Expected information gain (nats)", fontsize=LABEL_FS)
+    axes[1].set_ylabel("Mean NRMSE", fontsize=LABEL_FS)
+    # Ticks only at the trial counts actually swept. Matplotlib's default locator
+    # adds 300/500/700/900, which invites reading a value off the curve at a trial
+    # count that was never run.
+    ticks = sorted(df.num_obs.unique())
     for ax in axes:
-        ax.set_xlabel("trials per dataset")
-        ax.legend(title="u₁u₂  (C=continuous, B=binary)", fontsize=8)
+        ax.set_xlabel("Trials per dataset", fontsize=LABEL_FS)
+        ax.set_xticks(ticks)
+        ax.set_xticklabels([str(int(t)) for t in ticks])
         ax.grid(alpha=0.25)
-    axes[0].set_title("Information gain by design")
-    axes[1].set_title("Contraction by design")
-    fig.tight_layout()
+        ax.spines[["top", "right"]].set_visible(False)
+        # Square BOX, not equal data aspect: x is trials and y is nats or NRMSE, so
+        # set_aspect("equal") would be meaningless. set_box_aspect constrains the
+        # drawn rectangle instead, which is what "square subplot" means here.
+        ax.set_box_aspect(1)
+
+    # One legend for both panels, a single row along the bottom. Per-axes legends
+    # duplicated the same four entries and each one sat on top of a curve.
+    #
+    # The decoder text sits to the LEFT of the entries rather than above them, which
+    # matplotlib's legend `title` cannot do -- it only ever stacks the title on top.
+    # So the text is a separate artist: draw once to measure both, place the pair so
+    # the combined block is centred, then pin the text to the legend's left edge.
+    fig.tight_layout(rect=[0, 0.09, 1, 1])
+    leg = fig.legend(handles, labels, loc="lower center", ncol=len(labels),
+                     frameon=False, fontsize=LEGEND_FS, bbox_to_anchor=(0.5, 0.028))
+    desc = fig.text(0.5, 0.045, "u\u2081u\u2082   (C = Continuous, B = Binary)",
+                    ha="right", va="center", fontsize=LEGEND_FS)
+
+    gap = 0.012
+    inv = fig.transFigure.inverted()
+    fig.canvas.draw()
+    lb = leg.get_window_extent().transformed(inv)
+    tb = desc.get_window_extent().transformed(inv)
+    # Centre (text + gap + legend) as a unit, not the legend alone.
+    leg.set_bbox_to_anchor((0.5 + (tb.width + gap) / 2, 0.015), transform=fig.transFigure)
+    fig.canvas.draw()
+    lb = leg.get_window_extent().transformed(inv)
+    desc.set_position((lb.x0 - gap, (lb.y0 + lb.y1) / 2))
     fig.savefig(outdir / "design_eig.pdf", bbox_inches="tight")
     plt.close(fig)
 
