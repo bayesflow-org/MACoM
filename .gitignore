@@ -216,7 +216,19 @@ __marimo__/
 .streamlit/secrets.toml
 
 # Results
-outputs/checkpoints/
+# Ignore checkpoints EXCEPT the LBA-finetuned one: it is the artifact behind
+# experiment 3's forgetting result, and at 27 MB it is small enough to version
+# alongside the figures it produced. Same structure as the figures block below --
+# a negation cannot re-include a path whose parent directory is excluded, so every
+# parent level is unignored and its other children re-ignored in turn.
+outputs/checkpoints/*
+!outputs/checkpoints/model_class/
+outputs/checkpoints/model_class/*
+!outputs/checkpoints/model_class/cf/
+outputs/checkpoints/model_class/cf/*
+!outputs/checkpoints/model_class/cf/lba_finetune/
+outputs/checkpoints/model_class/cf/lba_finetune/*
+!outputs/checkpoints/model_class/cf/lba_finetune/*.pt
 outputs/data/
 outputs/timing/
 outputs/logs/
