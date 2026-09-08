@@ -134,10 +134,21 @@ class LBAFinetuner:
         checkpoint_dir = Path("./outputs/checkpoints/model_class/cf/lba_finetune/")
         checkpoint_dir.mkdir(parents=True, exist_ok=True)
 
+        traj = int(train_config.get("trajectory_interval", 0) or 0)
+
         def _save(epoch_done: int) -> None:
-            torch.save({"state_dict": self.net.state_dict(), "epoch": epoch_done},
-                       checkpoint_dir / checkpoint_path)
+            payload = {"state_dict": self.net.state_dict(), "epoch": epoch_done}
+            torch.save(payload, checkpoint_dir / checkpoint_path)
             logging.info(f"[saved] {checkpoint_dir / checkpoint_path} (epoch {epoch_done})")
+            # An epoch-stamped COPY, kept only at trajectory_interval multiples. The
+            # rolling save above overwrites one file, which is right for crash recovery
+            # and wrong for anything that wants the training path: every intermediate
+            # state of the 2026-08-14 run was destroyed by the next save, so a learning
+            # curve over finetuning could not be reconstructed without retraining.
+            if traj and epoch_done % traj == 0:
+                stamped = checkpoint_dir / f"{Path(checkpoint_path).stem}_ep{epoch_done}.pt"
+                torch.save(payload, stamped)
+                logging.info(f"[saved] {stamped} (trajectory)")
 
         global_step = 0
         optimizer = AdamW(self.net.parameters(), lr=train_config["learning_rate"])
@@ -379,6 +390,15 @@ def parse_args():
     parser.add_argument("--epochs", type=int, default=2000)
     parser.add_argument("--steps_per_epoch", type=int, default=100)
     parser.add_argument("--val_interval", type=int, default=500)
+    parser.add_argument("--trajectory_interval", type=int, default=0,
+                        help="Epochs between EPOCH-STAMPED checkpoint copies (0 = off). "
+                             "Unlike --checkpoint_interval, which overwrites one file, "
+                             "these are kept, so the finetuning trajectory can be "
+                             "evaluated after the fact. 27 MB each.")
+    parser.add_argument("--seed", type=int, default=None,
+                        help="Seed torch/numpy/random. The 2026-08-14 run set no seed, "
+                             "so its trajectory cannot be reproduced; pass one to make "
+                             "a run repeatable.")
     parser.add_argument("--checkpoint_interval", type=int, default=25,
                         help="Epochs between checkpoint saves, independent of "
                              "--val_interval. Overwrites a single file, so the cost is "
@@ -403,6 +423,13 @@ if __name__ == "__main__":
     args = parse_args()
 
     logging.basicConfig(level=logging.INFO)
+    if args.seed is not None:
+        import random as _random
+        _random.seed(args.seed)
+        np.random.seed(args.seed)
+        torch.manual_seed(args.seed)
+        torch.cuda.manual_seed_all(args.seed)
+        logging.info(f"[seed] {args.seed} (torch, numpy, random)")
     torch.set_float32_matmul_precision("high")
     torch.backends.cuda.matmul.allow_tf32 = True
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -435,6 +462,7 @@ if __name__ == "__main__":
         "gradient_clip_norm": 5.0,
         "val_interval":      args.val_interval,
         "checkpoint_interval": args.checkpoint_interval,
+        "trajectory_interval": args.trajectory_interval,
         "device":            device,
         "model_family_config": model_family_config,
         "train_sample_config": train_sample_config,

@@ -1,0 +1,2 @@
+rsa,rsa_null_mean,rsa_null_sd,cka,cka_null_mean,cka_null_sd,n_conditions,n_repeats,dim_frozen,dim_learned
+0.7910,0.8404,0.0518,0.8270,0.8463,0.0499,200,4,128,16

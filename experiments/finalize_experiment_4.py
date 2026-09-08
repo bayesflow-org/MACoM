@@ -39,12 +39,25 @@ VARIANTS = {
     "varying_values": ("addm/varying_values", "addm/varying_values",
                        "addm_baseline/varying_values/item0_varying_e500",
                        "varying_values"),
+    # s_v pinned, v left FREE: the test of whether the drift-variance functional
+    # s_v^2(1+omega^2) can stand in for pinning v. It cannot -- v recovery goes
+    # 0.130 -> -0.005 (frozen) and 0.006 -> 0.091 (baseline), i.e. nothing either way.
+    "svfixed": ("addm_svfixed/intercept_only", "addm_svfixed/intercept_only",
+                "addm_baseline_svfixed/intercept_only/item0_svfixed_e500",
+                "intercept_only_svfixed"),
+    # Both pinned. The control for the above: it says whether pinning s_v sharpens
+    # the parameters that were ALREADY identified, separately from whether it
+    # rescues v. It does not -- every cell matches vfixed to within noise.
+    "vsvfixed": ("addm_vsvfixed/intercept_only", "addm_vsvfixed/intercept_only",
+                 "addm_baseline_vsvfixed/intercept_only/item0_vsvfixed_e500",
+                 "intercept_only_vsvfixed"),
 }
 # Superseded exploratory baselines from the 469-dim / BayesFlow-defaults debugging.
 # Only item0_bd_7d_e500 is the final 7-dim baseline arm.
 SUPERSEDED = ["item0_bd_7d", "item0_best_defaults", "item0_best_defaults_a0",
               "item0_main_7d", "item0_main_do0"]
-REP_DIRS = ["varying_values", "intercept_only_vfixed", "crossfamily", "lba"]
+REP_DIRS = ["varying_values", "intercept_only_vfixed", "crossfamily", "lba",
+            "intercept_only_svfixed", "intercept_only_vsvfixed"]
 KEEP_EXT = {".pdf", ".csv", ".npz"}
 
 

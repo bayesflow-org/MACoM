@@ -69,14 +69,14 @@ from cogformer.diagnostics.metric.adaptive_c2st import compute_c2st_accuracy
 
 from .addm_bf_apply import (
     CogFormerEncoderSummary, _load_cogformer, _sample_chunked,
-    active_labels, ckpt_path as frozen_ckpt_path, FROZEN_COLOR,
+    active_labels, ckpt_path as frozen_ckpt_path, FROZEN_COLOR, BASELINE_COLOR,
     _pinned, _VARIANT_SUFFIX,
 )
 from .addm_bf_baseline import (
     ADDMBaselineSimulator, ckpt_path as baseline_ckpt_path,
 )
 
-BASELINE_COLOR = "#132a70"   # BayesFlow's default, as used by the baseline arm
+# BASELINE_COLOR is imported from addm_bf_apply (single definition).
 OUT_ROOT = Path("./outputs/data/encoder_rep/addm_compare")
 FIG_ROOT = Path("./outputs/figures/encoder_rep/addm_compare")
 

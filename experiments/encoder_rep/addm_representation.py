@@ -52,19 +52,22 @@ import keras
 import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
+from matplotlib.lines import Line2D
+from matplotlib.ticker import MaxNLocator
 from rsatoolbox.data import Dataset
 from rsatoolbox.rdm import calc_rdm, compare
 
 from cogformer.simulator.benchmarks.ssms.link_funs import addm_link_fun
+from cogformer.utils.plot_utils import cogformer_fm_colors
 from .representation import simulate_repeats, cka
 from .addm_bf_apply import (CogFormerEncoderSummary, _load_cogformer, INTRINSIC_PARAMS,
-                            VARIABLE_NAMES, resolve_case, FROZEN_COLOR,
+                            VARIABLE_NAMES, resolve_case, FROZEN_COLOR, BASELINE_COLOR,
                             _pinned, _VARIANT_SUFFIX)
 from .addm_bf_baseline import (ADDMBaselineSimulator, MAX_NUM_REGRESSORS,
                                MAX_NUM_CATEGORIES, CASE_SAMPLE_KWARGS,
                                ckpt_path as baseline_ckpt_path, active_labels)
 
-BASELINE_COLOR = "#132a70"
+# BASELINE_COLOR is imported from addm_bf_apply (single definition).
 OUT = Path("./outputs/data/encoder_rep/representation")
 FIG = Path("./outputs/figures/encoder_rep/representation")
 
@@ -173,60 +176,12 @@ def gram_of(summaries):
     return x @ x.T
 
 
-def _square_heatmap(M, title, color, cbar_label, outpath, cmap, vmin=None, vmax=None):
-    """One matrix, one figure, square pixels.
-
-    These were panels in a four-across strip, which forced them to ~3 inches wide;
-    at 200x200 conditions that put four condition rows in a single pixel column and
-    the block structure was unreadable. Standalone they get room to resolve it.
-    """
-    fig, ax = plt.subplots(figsize=(5.6, 5.0))
-    im = ax.imshow(M, cmap=cmap, vmin=vmin, vmax=vmax, interpolation="nearest",
-                   aspect="equal")
-    ax.set_title(title, color=color, fontsize=11, pad=8)
-    ax.set_xlabel("condition"); ax.set_ylabel("condition")
-    cb = fig.colorbar(im, ax=ax, fraction=0.046, pad=0.03)
-    cb.set_label(cbar_label, fontsize=9)
-    cb.ax.tick_params(labelsize=8)
-    fig.tight_layout(); fig.savefig(outpath, bbox_inches="tight"); plt.close(fig)
-
-
-def plot_rdm(rdm, title, color, outpath):
-    """One representational dissimilarity matrix."""
-    _square_heatmap(rdm.get_matrices()[0], title, color,
-                    "crossnobis dissimilarity", outpath, cmap="viridis")
-
-
-def plot_gram(summaries, title, color, outpath):
-    """One centred Gram matrix, symmetric diverging scale about zero.
-
-    vmax is the 98th percentile of |K| rather than its max: a handful of extreme
-    entries otherwise compress the whole map into the middle of the colormap. The
-    colorbar is labelled so the clip is stated rather than implied.
-    """
-    K = gram_of(summaries)
-    v = np.percentile(np.abs(K), 98)
-    _square_heatmap(K, title, color, "centred inner product (clipped at |98th pct|)",
-                    outpath, cmap="RdBu_r", vmin=-v, vmax=v)
-
-
-def plot_rdm_correspondence(rdm_f, rdm_l, score, outpath):
-    """Frozen against learned dissimilarity, one point per condition pair."""
-    f = rdm_f.get_vectors()[0]; l = rdm_l.get_vectors()[0]
-    fig, ax = plt.subplots(figsize=(5.2, 4.6))
-    ax.scatter(f, l, s=6, alpha=0.3, color=FROZEN_COLOR, edgecolors="none")
-    ax.set_xlabel("frozen RDM (crossnobis)"); ax.set_ylabel("learned RDM")
-    ax.set_title(f"RDM correspondence   r = {score:.3f}", fontsize=11)
-    ax.spines[["top", "right"]].set_visible(False)
-    fig.tight_layout(); fig.savefig(outpath, bbox_inches="tight"); plt.close(fig)
-
-
 def _unit_gram(summaries):
     """Centred Gram scaled to unit Frobenius norm over its OFF-DIAGONAL entries.
 
     Required before the two arms can be differenced at all. The frozen summary is
-    128-d and the learned one 16-d, and their raw Gram norms differ by up to 2x
-    (measured: ratio 0.89 on varying_values, 1.98 on intercept_only_vfixed), so a raw
+    128-d and the learned one 16-d, and their raw Gram norms differ by up to 3.6x
+    (measured: ratio 0.89 on varying_values, 3.58 on intercept_only_vsvfixed), so a raw
     K_learned - K_frozen would be dominated by that scale factor and would show "one
     encoder has larger inner products", not "the two organise conditions differently".
 
@@ -241,69 +196,203 @@ def _unit_gram(summaries):
     return K
 
 
-def plot_gram_residual(fro, lea, outpath):
-    """Learned minus frozen, after each is scaled to unit norm.
+# Correspondence scatter. Taken from the shared palette rather than hardcoded, and
+# deliberately NOT an arm colour: the cloud is a joint plot of both arms, so borrowing
+# either one's colour would imply it belongs to that arm.
+SCATTER_COLOR = cogformer_fm_colors()["interaction"]   # #FF6969
 
-    Positive (red) means the LEARNED encoder places that pair of conditions closer
-    together than the frozen one does; negative (blue) the reverse. The two Gram
-    heatmaps show what each arm encodes; this shows only where they disagree, which
-    is the part the CKA scalar compresses into one number.
 
-    The Frobenius norm of this residual is not free: for unit-norm matrices
-    ||A - B||_F = sqrt(2(1 - <A,B>)), and <A,B> is the alignment CKA reports. It is
-    printed in the title as a consistency check against cka_vs_null.pdf.
+def _shared_ticks(ax, ticks, labels=None):
+    """Identical tick positions on both axes.
+
+    Matplotlib locates x and y independently, which on a square 200x200 map gave
+    y every 25 and x every 50, and on the scatter 9 y-ticks against 5 x-ticks. Both
+    axes carry the same quantity here, so they must carry the same ticks.
     """
-    A_f, A_l = _unit_gram(fro), _unit_gram(lea)
-    R = A_l - A_f
-    iu = np.triu_indices_from(R, k=1)
-    # Upper triangle only, matching how _unit_gram normalised: summing the full
-    # symmetric matrix counts every pair twice and reports 2x the alignment.
-    align = float(A_f[iu] @ A_l[iu])
-    fro_norm = float(np.linalg.norm(R[iu]))
-
-    v = np.percentile(np.abs(R[iu]), 98)
-    _square_heatmap(
-        R, f"learned - frozen residual\n"
-           f"$\\|\\Delta K\\|_F$ = {fro_norm:.3f}   (alignment {align:.3f})",
-        "0.25", "normalised inner-product difference (clipped at |98th pct|)",
-        outpath, cmap="RdBu_r", vmin=-v, vmax=v)
+    ax.set_xticks(ticks, labels)
+    ax.set_yticks(ticks, labels)
 
 
-def plot_gram_correspondence(fro, lea, cka_obs, outpath):
-    """Frozen against learned centred inner product, one point per condition PAIR.
+def _matrix_scatter_panel(mats, titles, colors, cbar_label, xy, scatter_title,
+                          stat_text, axis_label, scatter_labels, outpath, cmap):
+    """Three heatmaps on ONE shared scale plus a full-height correspondence scatter.
 
-    The Gram analogue of plot_rdm_correspondence, and the honest visual for CKA:
-    CKA compares centred Gram matrices, so this scatter is the alignment the scalar
-    summarises. The two heatmaps show each Gram separately and leave the reader to
-    compare 200x200 cells by eye; this shows the correspondence directly.
+    Shared by the RSA and CKA panels so their layout cannot drift apart -- the two
+    diverged once already when a hand-rolled recovery plot silently overwrote the
+    BayesFlow one, and duplicated layout code is how that happens.
 
-    Only OFF-DIAGONAL entries are plotted, matching the unbiased HSIC estimator in
-    representation.cka, which zeroes the diagonal before computing anything. Keeping
-    the diagonal would add n points at the squared-norm scale -- an order of magnitude
-    above every off-diagonal entry -- that contribute nothing to the reported number.
+    ``mats`` is (first, second, residual); the residual is expected to read fainter
+    than its two inputs, which is the shared structure showing rather than a
+    rendering artifact.
 
-    Two statistics are annotated because they are NOT the same thing. CKA is the
-    reported quantity; the entrywise Pearson r is what the eye reads off this cloud.
-    They differ because CKA is an uncentred alignment with HSIC's bias correction,
-    so quoting only one invites reading the other off the picture.
+    The colormap is DIVERGING (Spectral_r, red positive) and the limits are symmetric
+    about zero, so zero lands on the colormap's centre in all three panels and they
+    stay directly comparable. viridis was tried first and rejected: it is monotonic, so
+    values clustered near zero all mapped to the same mid-range teal, and the residual
+    -- whose entire content is which DIRECTION each pair moved -- read as near-uniform.
+
+    Spectral_r is a ColorBrewer palette, not perceptually uniform, so apparent contrast
+    does not scale linearly with magnitude. That is an accepted trade here: these panels
+    are read for structure, and the value a reader needs precisely is the scalar in the
+    correspondence panel, not a cell estimated off the colorbar.
     """
-    Kf, Kl = gram_of(fro), gram_of(lea)
-    iu = np.triu_indices_from(Kf, k=1)
-    f, l = Kf[iu], Kl[iu]
-    r = float(np.corrcoef(f, l)[0, 1])
+    M0 = mats[0]
+    n = M0.shape[0]
+    iu = np.triu_indices(n, k=1)
+    v = max(np.percentile(np.abs(M[iu]), 98) for M in mats)
 
-    fig, ax = plt.subplots(figsize=(5.2, 4.6))
-    # Gram entries are signed and centred on zero, unlike the all-positive RDM
-    # dissimilarities, so the axes through the origin carry meaning here.
+    # Gap between the x-labels and the colorbar. Most of it is not hspace but slack
+    # inside the maps row -- the squares are centred in a taller slot -- so trimming
+    # hspace alone barely moves it. Lowering the figure height removes the slack;
+    # widening the maps block buys back the block height the scatter is sized from.
+    # Measured on the LABEL's tight bbox, not the axes box: the label sits below the
+    # box, so an axes-to-axes measurement overstates the clearance and lets the two
+    # collide. Chosen point halves the clearance (0.45 -> 0.23 in) while the scatter
+    # side barely moves (3.70 -> 3.58 in).
+    fig = plt.figure(figsize=(17.5, 4.7))
+    outer = fig.add_gridspec(1, 3, width_ratios=[3.4, 0.34, 1.05], wspace=0.10)
+    maps_gs = outer[0, 0].subgridspec(2, 3, height_ratios=[1.0, 0.055],
+                                      hspace=0.42, wspace=0.14)
+    axes = [fig.add_subplot(maps_gs[0, i]) for i in range(3)]
+    cax = fig.add_subplot(maps_gs[1, :])
+    ax = fig.add_subplot(outer[0, 2])
+
+    # imshow centres cell i at i and ends the axis at n - 0.5, so np.arange(0, n, 50)
+    # stops at 150 and the last 50 draws run off with nothing marking where the matrix
+    # ends. The terminal tick goes on the axis EDGE (n - 0.5, the outer boundary of
+    # cell n-1) and is labelled n, so it reads as "after the 200th draw" rather than
+    # mislabelling cell 199 as 200.
+    step = np.arange(0, n, 50)
+    map_ticks = np.append(step.astype(float), n - 0.5)
+    map_labels = [str(int(t)) for t in step] + [str(n)]
+    for a, M, title, color in zip(axes, mats, titles, colors):
+        im = a.imshow(M, cmap=cmap, vmin=-v, vmax=v, interpolation="nearest",
+                      aspect="equal")
+        a.set_title(title, color=color, fontsize=12, pad=8)
+        a.set_xlabel(axis_label, fontsize=11)
+        _shared_ticks(a, map_ticks, map_labels)
+        a.set_xlim(-0.5, n - 0.5); a.set_ylim(n - 0.5, -0.5)
+    axes[0].set_ylabel(axis_label, fontsize=11)
+    for a in axes[1:3]:
+        a.set_yticklabels([])
+
+    cb = fig.colorbar(im, cax=cax, orientation="horizontal")
+    cb.set_label(cbar_label, fontsize=11)
+    cb.ax.tick_params(labelsize=9)
+
+    x, y = xy
+    # Limits from the DATA rather than symmetric about zero, but identical on both
+    # axes so y = x still renders at 45 degrees. Gram entries are near-symmetric so
+    # this changes nothing there; z-scored dissimilarities have a floor, and forcing
+    # symmetry left the whole lower-left of that panel empty.
+    lo = float(min(x.min(), y.min())); hi = float(max(x.max(), y.max()))
+    pad = 0.03 * (hi - lo)
+    lo, hi = lo - pad, hi + pad
+    ax.plot([lo, hi], [lo, hi], ls="--", color="0.45", lw=1, zorder=1)
     ax.axhline(0, color="0.85", lw=0.8, zorder=0)
     ax.axvline(0, color="0.85", lw=0.8, zorder=0)
-    ax.scatter(f, l, s=6, alpha=0.25, color=FROZEN_COLOR, edgecolors="none")
-    ax.set_xlabel(f"frozen Gram ({fro.shape[-1]}-d), off-diagonal")
-    ax.set_ylabel(f"learned Gram ({lea.shape[-1]}-d), off-diagonal")
-    ax.set_title(f"Gram correspondence   CKA = {cka_obs:.3f}   (entrywise r = {r:.3f})",
-                 fontsize=10)
+    ax.scatter(x, y, s=5, alpha=0.30, color=SCATTER_COLOR, edgecolors="none", zorder=2)
+    ax.set_xlim(lo, hi); ax.set_ylim(lo, hi)
+    sc_ticks = MaxNLocator(nbins=5, steps=[1, 2, 2.5, 5, 10]).tick_values(lo, hi)
+    _shared_ticks(ax, sc_ticks[(sc_ticks >= lo) & (sc_ticks <= hi)])
+    ax.set_xlabel(scatter_labels[0], fontsize=11)
+    ax.set_ylabel(scatter_labels[1], fontsize=11)
+    ax.set_title(scatter_title, fontsize=12, pad=8)
+    # The statistic sits inside the panel, lower right, rather than in the title:
+    # it belongs to the cloud, and the titles across the row then read as a plain
+    # list of what each panel shows. Axes coordinates, so it follows the box when
+    # the panel is repositioned below.
+    ax.text(0.97, 0.045, stat_text, transform=ax.transAxes,
+            ha="right", va="bottom", fontsize=12)
     ax.spines[["top", "right"]].set_visible(False)
-    fig.tight_layout(); fig.savefig(outpath, bbox_inches="tight"); plt.close(fig)
+
+    # Size the scatter to the FULL height of the left block -- top of the maps down to
+    # the bottom of the colorbar -- and make it square by setting its position
+    # directly. aspect="equal" cannot do this: it shrinks the box to fit whatever
+    # vertical space the title and tick labels happen to leave. With the box square
+    # and xlim == ylim, the y = x reference still renders at 45 degrees.
+    fig.canvas.draw()
+    top = axes[0].get_position().y1
+    bot = cax.get_position().y0
+    H = top - bot
+    figW, figH = fig.get_size_inches()
+    W = H * figH / figW                      # equal side lengths in INCHES
+    gap = 0.075
+    ax.set_aspect("auto")
+    ax.set_position([cax.get_position().x1 + gap, bot, W, H])
+
+    # Divider: the left block shares one color scale and one normalization; the
+    # scatter is a different kind of plot of the same numbers. Placed just clear of
+    # the block so the scatter's y-LABEL stays on the scatter's side of the rule.
+    xd = cax.get_position().x1 + 0.013
+    fig.add_artist(Line2D([xd, xd], [bot, top], transform=fig.transFigure,
+                          color="0.72", linewidth=1.1, zorder=10))
+
+    fig.savefig(outpath, bbox_inches="tight"); plt.close(fig)
+
+
+def plot_gram_panel(fro, lea, cka_obs, outpath):
+    """CKA side: two centred Gram matrices, their residual, and the scatter.
+
+    Each Gram is scaled to unit Frobenius norm over its off-diagonal, then BOTH are
+    multiplied by one shared constant that puts them in [-1, 1]. A common factor
+    cancels from every ratio, so the scatter's alignment is still exactly the reported
+    CKA and the residual still satisfies ||R|| / ||A|| = sqrt(2(1 - CKA)).
+
+    This is NOT cosine normalization, which divides each entry by sqrt(K_ii K_jj) and
+    shifts the alignment 1-2 points off the reported CKA in variant-dependent
+    directions. Entries stay SIGNED -- about half the off-diagonals are negative and
+    zero means orthogonal -- so the map is diverging and centred on zero.
+    """
+    A_f, A_l = _unit_gram(fro), _unit_gram(lea)
+    iu = np.triu_indices_from(A_f, k=1)
+    A_f, A_l = (A_f, A_l) / np.abs(np.concatenate([A_f[iu], A_l[iu]])).max()
+    _matrix_scatter_panel(
+        # Set Transformer first, so the Residual (Set Transformer - CogFormer) reads
+        # as first minus second, matching the order it is displayed in.
+        (A_l, A_f, A_l - A_f),
+        ("Set Transformer", "CogFormer", "Residual"),
+        (BASELINE_COLOR, FROZEN_COLOR, "0.25"),
+        "Inner product", (A_f[iu], A_l[iu]),
+        "Correspondence", f"CKA = {cka_obs:.3f}", "Parameter draw",
+        ("CogFormer", "Set Transformer"), outpath, "Spectral_r")
+
+
+def _z_rdm(rdm):
+    """RDM z-scored over its off-diagonal -- the normalization Pearson r applies.
+
+    The two RDMs are ~21x apart in scale (crossnobis units depend on the
+    representation), so they cannot share a color scale untransformed. RSA is a
+    Pearson correlation, which centres AND scales, so z-scoring is the transform that
+    makes the picture show exactly what the reported r measures: it reproduces
+    corr(z_f, z_l) = r and ||z_l - z_f|| / sqrt(n) = sqrt(2(1 - r)).
+
+    A consequence worth stating: z-scored dissimilarities are SIGNED, centred on the
+    mean dissimilarity rather than on zero, so these maps read "more/less dissimilar
+    than typical" and use a diverging colormap. The raw RDM's "0 = identical" anchor
+    is not preserved -- it cannot be, by any transform that also makes the two arms
+    comparable.
+    """
+    M = rdm.get_matrices()[0].astype(float)
+    iu = np.triu_indices_from(M, k=1)
+    v = M[iu]
+    Z = (M - v.mean()) / (v.std() + 1e-12)
+    np.fill_diagonal(Z, 0.0)
+    return Z
+
+
+def plot_rdm_panel(rdm_f, rdm_l, score, outpath):
+    """RSA side, mirroring plot_gram_panel exactly: two RDMs, residual, scatter."""
+    Z_f, Z_l = _z_rdm(rdm_f), _z_rdm(rdm_l)
+    iu = np.triu_indices_from(Z_f, k=1)
+    Z_f, Z_l = (Z_f, Z_l) / np.abs(np.concatenate([Z_f[iu], Z_l[iu]])).max()
+    _matrix_scatter_panel(
+        (Z_l, Z_f, Z_l - Z_f),
+        ("Set Transformer", "CogFormer", "Residual"),
+        (BASELINE_COLOR, FROZEN_COLOR, "0.25"),
+        "Dissimilarity, z-scored", (Z_f[iu], Z_l[iu]),
+        "Correspondence", f"r = {score:.3f}", "Parameter draw",
+        ("CogFormer", "Set Transformer"), outpath, "Spectral_r")
 
 
 def plot_rsa_vs_null(score, null_rsa, cka_obs, null_cka, outpath):
@@ -316,7 +405,7 @@ def plot_rsa_vs_null(score, null_rsa, cka_obs, null_cka, outpath):
     ax.axvline(cka_obs, color=BASELINE_COLOR, lw=2, ls="--",
                label=f"observed CKA {cka_obs:.3f}")
     ax.set_title("RSA vs dimensionality-matched null", fontsize=11)
-    ax.set_xlabel("similarity"); ax.set_ylabel("count")
+    ax.set_xlabel("Similarity"); ax.set_ylabel("Count")
     ax.spines[["top", "right"]].set_visible(False)
     ax.legend(fontsize=8, frameon=False)
     fig.tight_layout(); fig.savefig(outpath, bbox_inches="tight"); plt.close(fig)
@@ -330,7 +419,7 @@ def plot_cka_vs_null(cka_obs, null_cka, outpath):
     ax.axvline(cka_obs, color=BASELINE_COLOR, lw=2, label=f"observed {cka_obs:.3f}")
     z = (cka_obs - np.mean(null_cka)) / (np.std(null_cka) + 1e-12)
     ax.set_title(f"CKA vs dimensionality-matched null   (z = {z:+.2f})", fontsize=11)
-    ax.set_xlabel("linear CKA"); ax.set_ylabel("count")
+    ax.set_xlabel("Linear CKA"); ax.set_ylabel("Count")
     ax.spines[["top", "right"]].set_visible(False)
     ax.legend(fontsize=8, frameon=False)
     fig.tight_layout(); fig.savefig(outpath, bbox_inches="tight"); plt.close(fig)
@@ -344,18 +433,8 @@ def plot_representation_set(rdm_f, rdm_l, fro, lea, score, null_rsa,
     Splitting them means each matrix can be read at a usable size, and a figure can
     be dropped into a document without cropping three neighbours off it.
     """
-    d_f, d_l = fro.shape[-1], lea.shape[-1]
-    plot_rdm(rdm_f, f"frozen CogFormer ({d_f}-d)", FROZEN_COLOR,
-             figdir / "rdm_frozen.pdf")
-    plot_rdm(rdm_l, f"learned SetTransformer ({d_l}-d)", BASELINE_COLOR,
-             figdir / "rdm_learned.pdf")
-    plot_gram(fro, f"frozen Gram ({d_f}-d)", FROZEN_COLOR,
-              figdir / "gram_frozen.pdf")
-    plot_gram(lea, f"learned Gram ({d_l}-d)", BASELINE_COLOR,
-              figdir / "gram_learned.pdf")
-    plot_gram_residual(fro, lea, figdir / "gram_residual.pdf")
-    plot_rdm_correspondence(rdm_f, rdm_l, score, figdir / "rdm_correspondence.pdf")
-    plot_gram_correspondence(fro, lea, cka_obs, figdir / "gram_correspondence.pdf")
+    plot_rdm_panel(rdm_f, rdm_l, score, figdir / "rdm_rsa.pdf")
+    plot_gram_panel(fro, lea, cka_obs, figdir / "gram_cka.pdf")
     plot_rsa_vs_null(score, null_rsa, cka_obs, null_cka, figdir / "rsa_vs_null.pdf")
     plot_cka_vs_null(cka_obs, null_cka, figdir / "cka_vs_null.pdf")
 
@@ -374,7 +453,7 @@ def plot_app2(df, outpath):
                         fontsize=6, color="dimgrey")
     ax.axhline(0, color="k", lw=.6)
     ax.set_xticks(x); ax.set_xticklabels(df.param, rotation=30, ha="right")
-    ax.set_ylabel("standardised regression weight on encoder RDM")
+    ax.set_ylabel("Standardized regression weight on encoder RDM")
     ax.set_title("What the representation encodes: unique contribution per parameter\n"
                  "(bars = joint regression, dots = diluted marginal, text = posterior contraction)",
                  fontsize=9)

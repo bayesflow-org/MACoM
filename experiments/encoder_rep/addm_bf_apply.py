@@ -188,7 +188,11 @@ def _variant(p: Path, fix_v: bool, fix_s_v: bool = False) -> Path:
 # gives r2c2->9, r2c3->14, r4c4->72, r5c5->186, and load_state_dict fails on any
 # mismatch at encoder.input_embedding. The model-class checkpoints are r4c4.
 # Frozen-encoder arm colour; kept in step with addm_diagnostics.FROZEN_COLOR.
-FROZEN_COLOR = "#6969ff"
+# THE arm colours for experiment 4. Defined once here and imported everywhere
+# else -- FROZEN_COLOR was previously duplicated in addm_diagnostics.py and
+# BASELINE_COLOR in three modules, which is how a palette drifts.
+FROZEN_COLOR = "#4E2A84"      # frozen CogFormer encoder
+BASELINE_COLOR = "#6969ff"    # learned SetTransformer baseline
 
 MAX_NUM_REGRESSORS = 4
 MAX_NUM_CATEGORIES = 4
@@ -423,34 +427,15 @@ def validate(args):
     )
     logging.info(f"[aDDM/{args.case}] Saved data to {out_dir}")
 
-    fig_dir = _variant(FIGURES_DIR, args.fix_v, args.fix_s_v) / args.case
-    fig_dir.mkdir(parents=True, exist_ok=True)
+    # Recovery and the other three diagnostics are drawn by addm_diagnostics.py from
+    # the npz written above, using bf.diagnostics.plots with FROZEN_COLOR. This script
+    # used to ALSO write its own hand-rolled recovery scatter here. Both files tidied
+    # to the same finals name (probe/<variant>/frozen/recovery.pdf), so whichever the
+    # assembler copied second won -- and it was the hand-rolled one, which is why the
+    # frozen arm's recovery plot looked nothing like the baseline's. Removed rather
+    # than renamed: it duplicated addm_diagnostics with a worse plot.
+    _ = active_labels(masks[0])
 
-    _, active_names = active_labels(masks[0])
-
-    _plot_recovery(true_active, pred_active, active_names, fig_dir / "addm_recovery.pdf")
-    logging.info(f"[aDDM/{args.case}] Saved figures to {fig_dir}")
-
-
-def _plot_recovery(true, pred, names, path):
-    n = true.shape[1]
-    fig, axes = plt.subplots(1, n, figsize=(3 * n, 3))
-    if n == 1:
-        axes = [axes]
-    for ax, j, name in zip(axes, range(n), names):
-        # pred is (n_datasets, n_draws, n_params): average over DRAWS (axis 1) to get
-        # one posterior mean per dataset. axis=0 averages over datasets and yields
-        # n_draws points, which cannot be plotted against n_datasets truths.
-        ax.scatter(true[:, j], pred[:, :, j].mean(axis=1), alpha=0.4, s=10,
-                   color=FROZEN_COLOR)
-        lo = min(true[:, j].min(), pred[:, :, j].min())
-        hi = max(true[:, j].max(), pred[:, :, j].max())
-        ax.plot([lo, hi], [lo, hi], "k--", lw=1)
-        ax.set_xlabel(f"True {name}")
-        ax.set_ylabel(f"Est. {name}")
-    fig.tight_layout()
-    fig.savefig(path, bbox_inches="tight")
-    plt.close(fig)
 
 
 def _load_cogformer(args, device):

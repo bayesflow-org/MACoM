@@ -142,6 +142,10 @@ MASK_RANDOMIZER_KWARGS = {
 # 0.6 being the prior location -- so the marginal data distribution stays as close
 # as possible to the v-free variant. Fixed-value injection in ModelFamily.sample()
 # BYPASSES the link function, so this is a post-link value, not an unconstrained one.
+# BayesFlow's own default, named so the baseline arm's colour is explicit
+# rather than inherited. Kept in step with addm_diagnostics.FROZEN_COLOR.
+from .addm_bf_apply import BASELINE_COLOR  # single definition
+
 V_FIXED = 1.0375
 
 # S_V_FIXED is the prior median of s_v on the natural scale -- shifted_softplus(-1.0),
@@ -469,11 +473,23 @@ def validate(args):
         "coverage": bf.diagnostics.plots.coverage,
         "z_score_contraction": bf.diagnostics.plots.z_score_contraction,
     }
+    # Colour kwargs only -- everything else is BayesFlow's default styling, matching
+    # addm_diagnostics.py for the frozen arm so the two arms differ ONLY in colour.
+    # BASELINE_COLOR is passed explicitly rather than relying on the library default
+    # happening to equal it, which would silently break on a BayesFlow upgrade.
+    # calibration_ecdf's fill_color stays grey: that band is the theoretical envelope,
+    # not this arm's data.
+    color_kwargs = {
+        "recovery": {"color": BASELINE_COLOR},
+        "calibration_ecdf": {"rank_ecdf_color": BASELINE_COLOR},
+        "coverage": {"color": BASELINE_COLOR},
+        "z_score_contraction": {"color": BASELINE_COLOR},
+    }
     for name, fn in plots.items():
         # Several BayesFlow plotters size their axis grid independently of the
         # variable count and then iterate every axis, overrunning ranks[:, j].
         fig = fn(estimates=pred_active, targets=true_active, variable_names=names,
-                 num_row=1, num_col=n_params)
+                 num_row=1, num_col=n_params, **color_kwargs[name])
         path = outdir / f"addm_baseline_{args.case}_{name}.pdf"
         fig.savefig(path, bbox_inches="tight")
         plt.close(fig)

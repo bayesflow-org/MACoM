@@ -28,7 +28,13 @@ VARIABLE_NAMES = [r"$v$", r"$v_\mathrm{diff}$", r"$\omega$",
 # Colour for the frozen-encoder arm. The BayesFlow baseline arm keeps the
 # library default (#132a70), so the two arms stay visually separable when their
 # diagnostics are read side by side.
-FROZEN_COLOR = "#6969ff"
+# Both arm colours come from addm_bf_apply so this module cannot drift from the
+# figures it is compared against. FROZEN_COLOR used to be redefined here.
+from .addm_bf_apply import FROZEN_COLOR, BASELINE_COLOR
+
+ARM_COLOR = {"frozen": FROZEN_COLOR, "baseline": BASELINE_COLOR}
+# Baseline files carry an extra infix so both arms can be regenerated in place.
+ARM_PREFIX = {"frozen": "addm", "baseline": "addm_baseline"}
 
 # The four diagnostics for this probe. recovery draws credible-interval error
 # bars by default (uncertainty_agg=credible_interval), so uncertainty is shown
@@ -38,16 +44,22 @@ FROZEN_COLOR = "#6969ff"
 # kwargs. calibration_ecdf's fill_color is deliberately left at grey: that band
 # is the theoretical reference envelope, not this arm's data, and recolouring it
 # would imply it belongs to the frozen arm.
-PLOTS = {
-    "recovery": (bf.diagnostics.plots.recovery,
-                 {"color": FROZEN_COLOR}),
-    "calibration_ecdf": (bf.diagnostics.plots.calibration_ecdf,
-                         {"rank_ecdf_color": FROZEN_COLOR}),
-    "coverage": (bf.diagnostics.plots.coverage,
-                 {"color": FROZEN_COLOR}),
-    "z_score_contraction": (bf.diagnostics.plots.z_score_contraction,
-                            {"color": FROZEN_COLOR}),
-}
+def plots_for(arm):
+    """The four diagnostics, coloured for one arm.
+
+    Built per call rather than as a module constant so both arms render through the
+    SAME code path -- the two previously diverged when this script drew one arm and
+    addm_bf_baseline drew the other. calibration_ecdf's fill_color is deliberately
+    left grey: that band is the theoretical reference envelope, not the arm's data.
+    """
+    c = ARM_COLOR[arm]
+    return {
+        "recovery": (bf.diagnostics.plots.recovery, {"color": c}),
+        "calibration_ecdf": (bf.diagnostics.plots.calibration_ecdf,
+                             {"rank_ecdf_color": c}),
+        "coverage": (bf.diagnostics.plots.coverage, {"color": c}),
+        "z_score_contraction": (bf.diagnostics.plots.z_score_contraction, {"color": c}),
+    }
 
 
 def active_labels(mask_row):
@@ -81,6 +93,17 @@ def parse_args():
     p.add_argument("--outdir", type=str, default=None,
                    help="Defaults to the directory holding --data.")
     p.add_argument("--case", type=str, default="intercept_only")
+    p.add_argument("--skip_metrics", action="store_true",
+                   help="Redraw the figures only, leaving the bf_metrics CSV alone. Use "
+                        "when RE-plotting: recomputing nrmse from the stored draws "
+                        "reproduces contraction and z_score exactly but moves nrmse by "
+                        "~0.5%% against the value the original validate run wrote from "
+                        "its in-memory arrays, and the CSV shipped with the results "
+                        "should stay the one that run produced.")
+    p.add_argument("--arm", type=str, default="frozen", choices=["frozen", "baseline"],
+                   help="Which arm the npz belongs to: picks the colour and the "
+                        "output filename prefix. Both arms replot from their saved "
+                        "npz on CPU -- no checkpoint or GPU needed.")
     return p.parse_args()
 
 
@@ -108,16 +131,21 @@ def main():
         )
     logging.info(f"{targets.shape[0]} datasets x {estimates.shape[1]} draws x {n_params} params")
 
-    for name, (fn, color_kwargs) in PLOTS.items():
+    prefix = ARM_PREFIX[args.arm]
+    for name, (fn, color_kwargs) in plots_for(args.arm).items():
         # Some BayesFlow plotters size their axis grid independently of the
         # variable count and then iterate every axis, which for 7 params builds
         # 2x4=8 panels and indexes past the end. Pin the layout to one row.
         fig = fn(estimates=estimates, targets=targets, variable_names=names,
                  num_row=1, num_col=n_params, **color_kwargs)
-        path = outdir / f"addm_{args.case}_{name}.pdf"
+        path = outdir / f"{prefix}_{args.case}_{name}.pdf"
         fig.savefig(path, bbox_inches="tight")
         plt.close(fig)
         logging.info(f"[saved] {path}")
+
+    if args.skip_metrics:
+        logging.info("[skip] metrics CSV left untouched (--skip_metrics)")
+        return
 
     # Posterior contraction quantifies what the plots show: contraction ~ 0 means
     # the posterior is no narrower than the prior, i.e. the data carried nothing
@@ -137,9 +165,9 @@ def main():
         rows.append({"param": n, "contraction": contraction[j],
                      "z_score": zscore[j], "nrmse": rmse[j]})
     import pandas as pd
-    pd.DataFrame(rows).to_csv(outdir / f"addm_{args.case}_bf_metrics.csv",
-                              index=False, float_format="%.4f")
-    logging.info(f"[saved] {outdir / f'addm_{args.case}_bf_metrics.csv'}")
+    csv_path = outdir / f"{prefix}_{args.case}_bf_metrics.csv"
+    pd.DataFrame(rows).to_csv(csv_path, index=False, float_format="%.4f")
+    logging.info(f"[saved] {csv_path}")
 
 
 if __name__ == "__main__":
