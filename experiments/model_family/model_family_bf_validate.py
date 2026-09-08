@@ -59,7 +59,11 @@ class ModelFamilyBF(bf.simulators.Simulator):
         self.config = case_configs[case]
         self.link_fn = model_cfg["link_fn"]
         self.model_family = ModelFamily(
-            model=model_cfg["model_cls"](),
+            # model_kwargs carries per-family simulator settings that differ from the
+            # class defaults -- today only LBA(fixed_A=0.5), which every other LBA arm
+            # pins via --lba_fixed_A. Constructing bare here trained the baseline on a
+            # different generative model than the arm it is compared against.
+            model=model_cfg["model_cls"](**model_cfg.get("model_kwargs", {})),
             prior=model_cfg["prior_fn"](),
             regressed_params=self.config["regressed_params"],
             mask_randomizer_kwargs=dict(

@@ -242,6 +242,17 @@ LBA_BENCHMARK_CONFIGS = {
 
 LBA_CONFIG = {
     "model_cls": LBA,
+    # fixed_A must be 0.5 everywhere, and LBA() defaults it to None. `a` MEANS a
+    # different thing under the two settings -- mean distance travelled to the
+    # boundary vs the legacy absolute threshold -- so posteriors from runs at
+    # different values are not comparable, and nothing downstream can detect the
+    # mismatch: the parameter vectors have identical shapes and names either way.
+    # Every other LBA arm pins 0.5 through its own --lba_fixed_A (finetune,
+    # zero-shot validate, finetune validate). The BF baseline reaches the simulator
+    # through this config instead of a CLI flag, so the value lives here, where
+    # model_family_bf_train and model_family_bf_validate both read it and therefore
+    # cannot drift apart from each other.
+    "model_kwargs": {"fixed_A": 0.5},
     "prior_fn": lba_priors,
     "link_fn": lba_link_fun,
     "name": "LBA",

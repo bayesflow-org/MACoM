@@ -68,7 +68,11 @@ class ModelFamilyBF(bf.simulators.Simulator):
         # supplies the parallelism. Threading here as well only re-creates the
         # fork-join penalty measured above.
         self.model_family = ModelFamily(
-            model=model_cfg["model_cls"](),
+            # model_kwargs carries per-family simulator settings that differ from the
+            # class defaults -- today only LBA(fixed_A=0.5), which every other LBA arm
+            # pins via --lba_fixed_A. Constructing bare here trained the baseline on a
+            # different generative model than the arm it is compared against.
+            model=model_cfg["model_cls"](**model_cfg.get("model_kwargs", {})),
             prior=model_cfg["prior_fn"](),
             num_workers=1,
             regressed_params=self.config["regressed_params"],
