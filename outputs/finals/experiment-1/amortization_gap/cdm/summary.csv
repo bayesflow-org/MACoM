@@ -1,0 +1,6 @@
+model,case,scenario,mean_accuracy,joint_c2st
+CDM,intercept_only,BF_vs_Original,0.5680482142857143,0.9936375
+CDM,regressed,BF_vs_Original,0.6150193181818181,0.9978125
+CDM,fixed,BF_vs_Original,0.5484,0.9725374999999999
+CDM,fixed_regressed,BF_vs_Original,0.5960805555555555,0.9973625
+CDM,interaction,BF_vs_Original,0.602228947368421,0.9979375000000001

@@ -33,6 +33,15 @@ FINALS = Path("outputs/finals/experiment-1")
 FIG = Path("outputs/figures/model_class/cf")
 DATA = Path("outputs/data/model_class")
 DESIGN_OPT = Path("outputs/data/design_opt/ddm")
+C2ST = Path("outputs/figures/c2st")
+BF_FIG = Path("outputs/figures/model_family/bf")
+BF_EVAL = Path("outputs/evaluations/model_family/bf")
+# The CogFormer arm of the C2ST is the PAIRED validate run, not the one behind
+# per_case/. per_case/ comes from {BASE}_validate, which simulated its own
+# datasets; the C2ST re-ran validation with --data_dir pointed at the BF npz so
+# both arms score the SAME datasets. Comparing per_case/ against the BF
+# diagnostics here would be comparing across different data.
+CF_PAIRED = Path("outputs/figures/model_class/cf_paired")
 BASE = "r4c4_b256_e10000"
 CKPT = Path(f"outputs/checkpoints/model_class/cf/{BASE}/"
             f"cogformer_model_class_fm_l8_h8_p256_s32_d128_b256_e10000_t100.pt")
@@ -45,6 +54,10 @@ CASES = ["intercept_only", "fixed", "regressed", "fixed_regressed",
 # benchmark_ensemble (bench5/bench6 x ddm/rdm/cdm), so running 12 more configs per
 # family would be a different object at ~7h of GPU for no added coverage.
 ENSEMBLE_DIR = f"{BASE}_ensemble"
+# The amortization gap covers bench5 only. model_family_c2st drops "full", and the
+# BF baselines were never trained on "mixed_predictor", so those two cases have no
+# BF arm to compare against and are absent by construction, not by omission.
+C2ST_CASES = ["intercept_only", "fixed", "regressed", "fixed_regressed", "interaction"]
 
 
 # Plot stems this snapshot contains. An ALLOWLIST rather than "copy the directory":
@@ -130,6 +143,47 @@ def plan() -> tuple[list[tuple[Path, Path]], list[Path]]:
                       (DESIGN_OPT / "design_draws.npz", "posterior_draws.npz")]:
         jobs.append((src, FINALS / "information_gain" / name))
 
+    # amortization gap: C2ST against the per-case BayesFlow baselines.
+    # The scenario tag is globbed, not hardcoded: model_family_c2st writes
+    # <fam>_<case>_{orig_vs_bf,ft_vs_bf,ft_vs_orig}_c2st.csv depending on which arms
+    # existed at run time, and DDM/CDM currently have orig_vs_bf only. LBA is
+    # deliberately absent -- it is not one of this experiment's three families.
+    for fam in FAMILIES:
+        jobs.append((C2ST / fam / f"{fam}_c2st_summary.csv",
+                     FINALS / "amortization_gap" / fam / "summary.csv"))
+        for case in C2ST_CASES:
+            cdir = C2ST / fam / case
+            for src in sorted(cdir.glob(f"{fam}_{case}_*_c2st.csv")) if cdir.is_dir() else []:
+                tag = src.name[len(f"{fam}_{case}_"):-len("_c2st.csv")]
+                jobs.append((src, FINALS / "amortization_gap" / fam / case / f"{tag}.csv"))
+
+    # Both arms of the comparison, per case, so the folder stands alone: bf_* is the
+    # per-case BayesFlow baseline, cf_* the paired CogFormer run scored on the same
+    # datasets. Same allowlist as everywhere else, and tidy() still maps the
+    # global-parameter panel to _pi.
+    for fam in FAMILIES:
+        for case in C2ST_CASES:
+            dest_dir = FINALS / "amortization_gap" / fam / case
+
+            bdir = BF_FIG / fam / case
+            for src in sorted(bdir.glob("*")) if bdir.is_dir() else []:
+                rest = src.name.replace(f"{fam}_family_{case}_bf_", "")
+                if not kept(rest):
+                    skipped.append(src); continue
+                jobs.append((src, dest_dir / f"bf_{tidy(rest)}"))
+
+            # NRMSE / calibration error / posterior contraction for the BF arm --
+            # the numbers that show how overconfident the baseline is.
+            jobs.append((BF_EVAL / f"{fam}_families_bf_{case}_evaluations.csv",
+                         dest_dir / "bf_evaluations.csv"))
+
+            cdir = CF_PAIRED / fam / case
+            for src in sorted(cdir.glob("*")) if cdir.is_dir() else []:
+                rest = src.name.replace(f"{fam}_{case}_fm_", "")
+                if not kept(rest):
+                    skipped.append(src); continue
+                jobs.append((src, dest_dir / f"cf_{tidy(rest)}"))
+
     # per-case predictions
     pdir = DATA / f"{BASE}_validate"
     for src in sorted(pdir.glob("*_cf_pred.npz")) if pdir.is_dir() else []:
@@ -180,6 +234,13 @@ def main():
         print(f"\n  [pending] benchmark_ensemble: {FIG / f'{BASE}_ensemble_benchmark'} "
               f"not present yet -- re-run this script once that stage finishes.")
 
+    gap_missing = [f for f in FAMILIES
+                   if not (C2ST / f / f"{f}_c2st_summary.csv").exists()]
+    if gap_missing:
+        print(f"\n  [pending] amortization_gap: no C2ST summary for "
+              f"{', '.join(gap_missing)} -- their BayesFlow baselines are still "
+              f"training. Re-run this script when they finish.")
+
     if skipped:
         print(f"\n  excluded by allowlist: {len(skipped)}")
         for x in skipped[:5]:
@@ -202,14 +263,49 @@ def main():
                             .strftime("%Y-%m-%d %H:%M:%SZ"),
             "renamed_global_to_pi": "_pi" in dest.name and "_global" in src.name,
         })
+    # Keep the folder present even when no family has finished yet; harmless once
+    # real files land beside it.
     (FINALS / "amortization_gap").mkdir(parents=True, exist_ok=True)
     (FINALS / "amortization_gap" / ".gitkeep").touch()
 
-    pd.DataFrame(rows).sort_values("destination").to_csv(
-        FINALS / "MANIFEST.csv", index=False)
+    # Carry forward rows this run cannot regenerate. The snapshot deliberately
+    # SUPERSEDES its sources -- the module docstring says they can be removed once
+    # copied -- so a later run finds those sources gone and, regenerating the
+    # manifest purely from sources, would drop files that are still sitting in the
+    # tree. Measured 2026-09-09: information_gain and random_ensemble had lost their
+    # sources, so a plain re-run would have shrunk the record from 260 rows to 240
+    # while the files stayed on disk. Keep any prior row whose destination still
+    # exists; drop the rest, which is a correction -- 19 `predictions/` rows named
+    # files that are no longer in the tree at all.
+    manifest = FINALS / "MANIFEST.csv"
+    carried = []
+    if manifest.exists():
+        have = {r["destination"] for r in rows}
+        for _, r in pd.read_csv(manifest).iterrows():
+            if r["destination"] not in have and (FINALS / r["destination"]).exists():
+                carried.append(dict(r))
+        if carried:
+            print(f"\n  carried {len(carried)} manifest rows whose sources are gone "
+                  f"but whose files remain in the tree")
+
+    pd.DataFrame(rows + carried).sort_values("destination").to_csv(
+        manifest, index=False)
     write_readme(len(rows))
     total = sum(r["bytes"] for r in rows)
     print(f"\nwrote {len(rows)} files ({total/1e9:.2f} GB) -> {FINALS}")
+
+
+def _gap_row() -> str:
+    """The README's amortization_gap line, describing what is actually present."""
+    d = FINALS / "amortization_gap"
+    fams = sorted(x.name for x in d.glob("*") if x.is_dir()) if d.is_dir() else []
+    if not fams:
+        return "reserved — BayesFlow comparison, not yet run"
+    n = len(list(d.rglob("*.csv")))
+    pend = [f for f in FAMILIES if f not in fams]
+    tail = f"; {', '.join(x.upper() for x in pend)} pending" if pend else ""
+    return (f"C2ST against the per-case BayesFlow baselines — "
+            f"{', '.join(x.upper() for x in fams)}, {n} CSVs{tail}")
 
 
 def write_readme(n_files: int):
@@ -236,8 +332,52 @@ Assembled {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%SZ')} by
 | `benchmark_ensemble/` | `bench5` (5 OG cases) and `bench6` (+ `mixed_predictor`), per family |
 | `per_case/` | the 18: 6 benchmark cases × 3 families, plotted separately |
 | `information_gain/` | expected information gain and NRMSE vs trial count, four continuous/binary designs |
-| `amortization_gap/` | reserved — BayesFlow comparison, not yet run |
+| `amortization_gap/` | {_gap_row()} |
 | `predictions/` | raw posterior draws backing every figure, for re-plotting |
+
+## Amortization gap — how to read it
+
+`amortization_gap/<family>/summary.csv` has one row per case with `mean_accuracy`
+(mean over per-parameter cells) and `joint_c2st` (all active cells at once).
+Each `<family>/<case>/` holds the comparison and both arms that produced it:
+
+| file | what |
+|---|---|
+| `orig_vs_bf.csv` | per-cell C2ST, plus `_mean_accuracy_` and `_joint_c2st_` rows |
+| `bf_*.pdf` / `bf_metrics.csv` | the per-case BayesFlow baseline's own diagnostics |
+| `bf_evaluations.csv` | BF NRMSE, calibration error, posterior contraction |
+| `cf_*.pdf` / `cf_metrics*.csv` | the CogFormer arm, same datasets |
+
+The `cf_*` files come from the PAIRED validate run, not from `per_case/`. `per_case/`
+simulated its own datasets; the C2ST re-ran validation against the BF simulations so
+both arms score identical data. Compare `bf_*` with `cf_*` here — comparing `bf_*`
+against `per_case/` would be comparing across different data.
+
+**Read `joint_c2st`, not `mean_accuracy`.** Both metrics pool draws across all 200
+datasets, and the pooled 1-D marginal of any single parameter is dominated by
+between-dataset spread, which both approximators reproduce — so `mean_accuracy`
+sits near 0.55 while `joint_c2st` runs 0.96–0.998. That is not a contradiction and
+not seven weak signals accumulating: seven independent cells at 0.55 would combine
+to about 0.63, not 0.99. Within a single dataset the posteriors genuinely differ —
+centres by 1–2.5 posterior SDs, widths by 2.3–10x — and only the joint classifier
+can localise a draw well enough to see it. Same pooling effect that
+`model_class_paired_c2st.py` documents for its per-dataset arm.
+
+**These numbers have no null floor.** `model_family_c2st.py` has none of the
+null-calibration machinery in `model_class_paired_c2st.py`, so nothing here is
+baseline-corrected. The joint values are far past any plausible floor (~0.49), but
+a per-cell 0.545 must not be quoted as "0.045 above chance".
+
+**C2ST is direction-blind, and here the direction favours CogFormer.** On identical
+datasets, the amortized model beats the per-case BayesFlow baseline on every
+parameter of both families — DDM `v` correlation 0.965 vs 0.817, RMSE 0.209 vs
+0.460 — while producing *wider* posteriors. The BF baselines are badly
+overconfident: their own diagnostics in
+`outputs/evaluations/model_family/bf/` report calibration error 0.39–0.47 and
+posterior contraction 0.993–0.999, and their posterior SDs are ~10x smaller than
+their own RMSE. So a large gap here is mostly a statement about BF, not a cost of
+amortization. Budgets differ and are not matched: ~51M simulations per BF case
+against ~256M for the one checkpoint covering every case and family.
 
 ## What is included
 
