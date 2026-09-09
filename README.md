@@ -1,6 +1,6 @@
-# MetaCog
+# MACoM
 
-**Meta-amortized cognitive models**
+**Meta-amortized cognitive modeling**
 
 Jerry M. Huang, Lukas Schumacher, Niek Stevenson, Mischa von Krause, and Stefan T. Radev
 
