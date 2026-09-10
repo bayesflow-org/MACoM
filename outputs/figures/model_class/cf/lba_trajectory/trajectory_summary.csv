@@ -1,0 +1,25 @@
+epoch,family,metric,mean,sd,n,se
+0,cdm,Calibration Error,0.068070,0.020380,6,0.008320
+0,cdm,NRMSE,0.068069,0.031368,6,0.012806
+0,cdm,Posterior Contraction,0.908558,0.071457,6,0.029172
+0,ddm,Calibration Error,0.071761,0.028396,6,0.011592
+0,ddm,NRMSE,0.080138,0.033682,6,0.013750
+0,ddm,Posterior Contraction,0.890899,0.085791,6,0.035024
+0,lba,Calibration Error,0.287808,0.085477,6,0.034896
+0,lba,NRMSE,0.316733,0.106391,6,0.043434
+0,lba,Posterior Contraction,0.667023,0.133900,6,0.054665
+0,rdm,Calibration Error,0.074737,0.032407,6,0.013230
+0,rdm,NRMSE,0.108567,0.031996,6,0.013062
+0,rdm,Posterior Contraction,0.813037,0.106598,6,0.043519
+500,cdm,Calibration Error,0.056793,0.015866,6,0.006477
+500,cdm,NRMSE,0.067850,0.031867,6,0.013010
+500,cdm,Posterior Contraction,0.906743,0.072356,6,0.029539
+500,ddm,Calibration Error,0.066593,0.023564,6,0.009620
+500,ddm,NRMSE,0.081457,0.034776,6,0.014197
+500,ddm,Posterior Contraction,0.886760,0.087603,6,0.035764
+500,lba,Calibration Error,0.032384,0.008479,6,0.003461
+500,lba,NRMSE,0.123439,0.042133,6,0.017201
+500,lba,Posterior Contraction,0.763646,0.139152,6,0.056809
+500,rdm,Calibration Error,0.069629,0.028076,6,0.011462
+500,rdm,NRMSE,0.108848,0.032057,6,0.013087
+500,rdm,Posterior Contraction,0.810514,0.106832,6,0.043614

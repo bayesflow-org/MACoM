@@ -499,6 +499,9 @@ predictions/zeroshot/lba_interaction_mid1_cf_pred.npz,outputs/figures/model_clas
 predictions/zeroshot/lba_intercept_only_mid1_cf_pred.npz,outputs/figures/model_class/cf/paired_lba_20260816/zeroshot/predictions/lba_intercept_only_mid1_cf_pred.npz,75794924,2026-08-15 22:39:06Z,False
 predictions/zeroshot/lba_mixed_predictor_mid1_cf_pred.npz,outputs/figures/model_class/cf/paired_lba_20260816/zeroshot/predictions/lba_mixed_predictor_mid1_cf_pred.npz,75417848,2026-08-15 22:39:15Z,False
 predictions/zeroshot/lba_regressed_mid1_cf_pred.npz,outputs/figures/model_class/cf/paired_lba_20260816/zeroshot/predictions/lba_regressed_mid1_cf_pred.npz,75794924,2026-08-15 22:39:09Z,False
+trajectory/lba_finetuning_trajectory_ep0-500.pdf,outputs/figures/model_class/cf/lba_trajectory/lba_finetuning_trajectory_ep0-500.pdf,25992,2026-09-10 19:15:51Z,False
+trajectory/trajectory_per_scenario.csv,outputs/figures/model_class/cf/lba_trajectory/trajectory_per_scenario.csv,6347,2026-09-10 19:15:51Z,False
+trajectory/trajectory_summary.csv,outputs/figures/model_class/cf/lba_trajectory/trajectory_summary.csv,1265,2026-09-10 19:15:51Z,False
 zeroshot/lba/fixed/coverage.pdf,outputs/figures/model_class/cf/paired_lba_20260816/zeroshot/fixed/mid_rdm/lba_fixed_mid1_coverage.pdf,27723,2026-08-15 22:39:08Z,False
 zeroshot/lba/fixed/coverage_pi.pdf,outputs/figures/model_class/cf/paired_lba_20260816/zeroshot/fixed/mid_rdm/lba_fixed_mid1_coverage_global.pdf,18798,2026-08-15 22:39:08Z,True
 zeroshot/lba/fixed/ecdf.pdf,outputs/figures/model_class/cf/paired_lba_20260816/zeroshot/fixed/mid_rdm/lba_fixed_mid1_ecdf.pdf,35717,2026-08-15 22:39:09Z,False

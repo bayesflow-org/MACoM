@@ -1,11 +1,42 @@
 # Experiment 3 — LBA zero-shot inference and finetuning
 
 Frozen snapshot of the three-arm paired validation. Assembled
-2026-09-02 18:58:27Z by
-`experiments/finalize_experiment_3.py` — 560 files. Git commit `c9d6f9704b88c743d6b301c82b16f83bd7d28e97`.
+2026-09-10 19:16:26Z by
+`experiments/finalize_experiment_3.py` — 563 files. Git commit `44747cdb9a7ea1c4dcec638dd17ec0aad4c4162d`.
 
 `paired_validation_notes.md` is the original run's write-up and carries the headline
 tables; `MANIFEST.csv` records per-file provenance.
+
+## trajectory/ — finetuning path, NOT just its endpoints
+
+**INTERIM — the evaluation is still running.** Epochs present: 0-500. The remaining checkpoints are still being scored; this figure will be replaced by the five-epoch version.
+
+The three arms above are ENDPOINTS: pre-finetune and post-finetune. `trajectory/` adds
+the path between them, evaluating diagnostics at epochs 0/500/1000/1500/2000 of a
+re-run finetune. It answers a question the endpoints assert but cannot show: whether
+LBA's gain is gradual or front-loaded, and whether the three trained families drift at
+any point rather than only at the end.
+
+- `lba_finetuning_trajectory*.pdf` — NRMSE, posterior contraction and calibration
+  error against epoch, one line per family. Note contraction runs the OPPOSITE way to
+  the other two (higher is better), which is stated on each panel.
+- `trajectory_summary.csv` — the plotted means, aggregated over parameters then over
+  scenarios.
+- `trajectory_per_scenario.csv` — one row per (epoch, family, scenario, metric). Kept
+  because the family mean hides genuine disagreement between scenarios: LBA's
+  per-scenario NRMSE spans 0.20-0.48 at epoch 0.
+
+Epoch 0 is not "untrained": it is the pre-finetune checkpoint with LBA's embedding row
+warm-started by COPYING RDM's, which is exactly the zero-shot condition. Every epoch was
+scored on IDENTICAL datasets (`seed_case` with a fixed seed), verified by byte-comparing
+`true_set` across epochs, so movement along a line is the checkpoint changing and not
+the test set.
+
+**Lineage warning.** The trajectory comes from a SECOND finetune run (2026-09-09,
+seeded), while `finetuned/` above still comes from the 2026-08-14 run, which set no
+seed. The two are therefore not the same model, and the trajectory's endpoint will not
+exactly equal the `finetuned/` numbers. Reconciling them -- rebuilding the arms from the
+seeded lineage -- is pending.
 
 ## Arms
 

@@ -16,6 +16,7 @@ of which flags a run happened to pass.
     python -m experiments.finalize_experiment_3
 """
 import argparse
+import re
 import shutil
 import subprocess
 from datetime import datetime, timezone
@@ -25,6 +26,11 @@ import pandas as pd
 
 FINALS = Path("outputs/finals/experiment-3")
 SRC = Path("outputs/figures/model_class/cf/paired_lba_20260816")
+# Finetuning trajectory: diagnostics at epochs 0/500/1000/1500/2000, evaluated on
+# identical seeded datasets. Separate source tree because it is a different KIND of
+# result from the three-arm paired validation -- the arms are endpoints, this is the
+# path between them -- and is produced by its own script.
+TRAJ_SRC = Path("outputs/figures/model_class/cf/lba_trajectory")
 
 # arm -> (families, filename infix). zeroshot covers LBA only.
 ARMS = {"zeroshot": (["lba"], "mid1"),
@@ -75,6 +81,15 @@ def plan():
             name = name.replace(f"{rel.parts[0]}_", "", 1)
         jobs.append((src, FINALS / "c2st" / rel.parent / name))
 
+    # Trajectory: the figure plus BOTH backing CSVs. The per-scenario file matters
+    # because the family mean hides real disagreement between scenarios (LBA's
+    # per-scenario NRMSE spans 0.20-0.48 at epoch 0), and a reader who only has the
+    # summary cannot recover that.
+    if TRAJ_SRC.is_dir():
+        for src in sorted(TRAJ_SRC.iterdir()):
+            if src.suffix in {".pdf", ".csv"}:
+                jobs.append((src, FINALS / "trajectory" / src.name))
+
     readme = SRC / "README.md"
     if readme.exists():
         jobs.append((readme, FINALS / "paired_validation_notes.md"))
@@ -124,6 +139,20 @@ def main():
     print(f"\nwrote {len(rows)} files -> {FINALS}")
 
 
+def _traj_note() -> str:
+    """State plainly whether the trajectory is complete, rather than letting a partial
+    curve sit in a frozen tree looking finished."""
+    import glob as _glob
+    figs = _glob.glob(str(FINALS / "trajectory" / "lba_finetuning_trajectory*.pdf"))
+    full = any(f.endswith("lba_finetuning_trajectory.pdf") for f in figs)
+    if full:
+        return "Complete: all five checkpoints (0/500/1000/1500/2000)."
+    eps = sorted({e for f in figs for e in re.findall(r"ep([0-9-]+)", f)})
+    return ("**INTERIM — the evaluation is still running.** Epochs present: "
+            f"{', '.join(eps) if eps else 'none'}. The remaining checkpoints are still "
+            "being scored; this figure will be replaced by the five-epoch version.")
+
+
 def write_readme(n, n_skipped):
     (FINALS / "README.md").write_text(f"""# Experiment 3 — LBA zero-shot inference and finetuning
 
@@ -133,6 +162,37 @@ Frozen snapshot of the three-arm paired validation. Assembled
 
 `paired_validation_notes.md` is the original run's write-up and carries the headline
 tables; `MANIFEST.csv` records per-file provenance.
+
+## trajectory/ — finetuning path, NOT just its endpoints
+
+{_traj_note()}
+
+The three arms above are ENDPOINTS: pre-finetune and post-finetune. `trajectory/` adds
+the path between them, evaluating diagnostics at epochs 0/500/1000/1500/2000 of a
+re-run finetune. It answers a question the endpoints assert but cannot show: whether
+LBA's gain is gradual or front-loaded, and whether the three trained families drift at
+any point rather than only at the end.
+
+- `lba_finetuning_trajectory*.pdf` — NRMSE, posterior contraction and calibration
+  error against epoch, one line per family. Note contraction runs the OPPOSITE way to
+  the other two (higher is better), which is stated on each panel.
+- `trajectory_summary.csv` — the plotted means, aggregated over parameters then over
+  scenarios.
+- `trajectory_per_scenario.csv` — one row per (epoch, family, scenario, metric). Kept
+  because the family mean hides genuine disagreement between scenarios: LBA's
+  per-scenario NRMSE spans 0.20-0.48 at epoch 0.
+
+Epoch 0 is not "untrained": it is the pre-finetune checkpoint with LBA's embedding row
+warm-started by COPYING RDM's, which is exactly the zero-shot condition. Every epoch was
+scored on IDENTICAL datasets (`seed_case` with a fixed seed), verified by byte-comparing
+`true_set` across epochs, so movement along a line is the checkpoint changing and not
+the test set.
+
+**Lineage warning.** The trajectory comes from a SECOND finetune run (2026-09-09,
+seeded), while `finetuned/` above still comes from the 2026-08-14 run, which set no
+seed. The two are therefore not the same model, and the trajectory's endpoint will not
+exactly equal the `finetuned/` numbers. Reconciling them -- rebuilding the arms from the
+seeded lineage -- is pending.
 
 ## Arms
 

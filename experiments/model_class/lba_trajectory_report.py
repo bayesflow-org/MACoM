@@ -56,14 +56,20 @@ LINE = {
 LABEL = {"lba": "LBA (acquired)", "ddm": "DDM", "rdm": "RDM", "cdm": "CDM"}
 
 
-def collect(root: Path) -> pd.DataFrame:
-    """Tidy frame: one row per (epoch, family, scenario, metric)."""
+def collect(root: Path, epochs) -> pd.DataFrame:
+    """Tidy frame: one row per (epoch, family, scenario, metric).
+
+    rglob, not glob: the validate script writes each case into its own
+    {family}/{scenario}/ subdirectory rather than flat into --outdir, so a
+    non-recursive glob silently finds nothing and the run looks like it produced
+    no metrics at all.
+    """
     rows = []
-    for ep in EPOCHS:
+    for ep in epochs:
         d = root / f"ep{ep}"
         if not d.is_dir():
             raise SystemExit(f"missing {d} -- run run_lba_traj_validate.sh first")
-        for csv in sorted(d.glob("*_ft_metrics.csv")):
+        for csv in sorted(d.rglob("*_ft_metrics.csv")):
             m = re.match(r"(?P<fam>[a-z]+)_(?P<scen>.+)_ft_metrics\.csv$", csv.name)
             if not m or m.group("fam") not in FAMILIES:
                 continue
@@ -90,7 +96,7 @@ def aggregate(tidy: pd.DataFrame) -> pd.DataFrame:
     return out
 
 
-def plot(agg: pd.DataFrame, outpath: Path):
+def plot(agg: pd.DataFrame, outpath: Path, epochs):
     fig, axes = plt.subplots(1, len(METRICS), figsize=(14.0, 5.2))
     handles, labels = [], []
     for ax, metric in zip(axes, METRICS):
@@ -108,11 +114,11 @@ def plot(agg: pd.DataFrame, outpath: Path):
                 handles.append(line); labels.append(LABEL[fam])
         ax.set_title(metric, fontsize=13, pad=24)
         ax.set_xlabel("Finetuning epoch", fontsize=12)
-        ax.set_xticks(EPOCHS)
+        ax.set_xticks(epochs)
         # Epoch 0 is not "no training": it is the pre-finetune model with LBA's
         # embedding warm-started from RDM, i.e. exactly the zero-shot condition
         # experiment 3 reports separately.
-        ax.set_xticklabels(["0\nzero-shot"] + [str(e) for e in EPOCHS[1:]], fontsize=10)
+        ax.set_xticklabels(["0\nzero-shot"] + [str(e) for e in epochs[1:]], fontsize=10)
         ax.yaxis.set_major_locator(MaxNLocator(nbins=5))
         ax.grid(alpha=0.25)
         ax.spines[["top", "right"]].set_visible(False)
@@ -138,12 +144,15 @@ def main():
     logging.basicConfig(level=logging.INFO, format="%(message)s")
     p = argparse.ArgumentParser()
     p.add_argument("--root", type=str, default=str(ROOT))
+    p.add_argument("--epochs", type=int, nargs="+", default=EPOCHS,
+                   help="Checkpoints to include. Pass a subset to plot a run that is "
+                        "still in progress, e.g. --epochs 0 500 1000.")
     p.add_argument("--outdir", type=str,
                    default="outputs/figures/model_class/cf/lba_trajectory")
     a = p.parse_args()
     outdir = Path(a.outdir); outdir.mkdir(parents=True, exist_ok=True)
 
-    tidy = collect(Path(a.root))
+    tidy = collect(Path(a.root), a.epochs)
     agg = aggregate(tidy)
     tidy.to_csv(outdir / "trajectory_per_scenario.csv", index=False, float_format="%.6f")
     agg.to_csv(outdir / "trajectory_summary.csv", index=False, float_format="%.6f")
@@ -155,7 +164,10 @@ def main():
                .reindex(columns=[f for f in FAMILIES if f in set(agg.family)]))
         logging.info(f"\n--- {metric} ---\n{piv.round(4).to_string()}")
 
-    plot(agg, outdir / "lba_finetuning_trajectory.pdf")
+    stem = "lba_finetuning_trajectory"
+    if list(a.epochs) != EPOCHS:
+        stem += "_ep" + "-".join(str(e) for e in a.epochs)
+    plot(agg, outdir / f"{stem}.pdf", a.epochs)
 
 
 if __name__ == "__main__":
