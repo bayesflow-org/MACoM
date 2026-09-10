@@ -83,6 +83,45 @@ class ModelFamilyBF(bf.simulators.Simulator):
             ),
         )
 
+    # The inference target is the FLATTENED PARAMETER GRID, and most of it is
+    # structurally zero. Measured 2026-09-10 over 4 independent batches per case:
+    #
+    #   case              grid  active  constant(std==0)
+    #   intercept_only       7       7      0
+    #   fixed                7       5      2
+    #   regressed           28      13     15   <- more than half
+    #   fixed_regressed     28      11     17   <- more than half
+    #   interaction         28      19      9
+    #
+    # Slicing to the active cells avoids asking the flow to reproduce dimensions
+    # that are always exactly 0.0, which is what experiments/encoder_rep/
+    # addm_bf_baseline.py does. It is a tidiness win, NOT a fix:
+    #
+    #   MEASURED (ddm/regressed, 300 epochs, slicing as the only variable):
+    #       full grid (28 dims, 15 dead)  calibration error 0.417
+    #       sliced   (13 active dims)     calibration error 0.405   (-3%)
+    #
+    #   And the predecessor project (../CogFormer, experiments/model_family/
+    #   family_bf_train.py) fed the FULL GRID including dead dims and still
+    #   reached calibration error 0.019 on this case. So dead dimensions were
+    #   never what broke these baselines -- the contaminated, unstandardized
+    #   summary input was. Do not read this block as a diagnosis.
+    #
+    # Kept on by default because -3% is in the right direction and costs nothing
+    # at training time; --no-slice_active_target restores the original target and
+    # matches the predecessor exactly. The one real cost is downstream: an
+    # active-only checkpoint emits a narrower params vector, so
+    # model_family_bf_validate has to detect the width and scatter back to the
+    # full grid before saving the npz.
+    #
+    # Safe because the active pattern is CONSTANT for every bench5 case -- all of
+    # them set fixed_config=True or carry an explicit design_config, and 4-batch
+    # probes over both models found exactly 1 distinct pattern each. _active is
+    # cached from the first batch and asserted on every later one, so a case that
+    # ever violated this would fail loudly instead of silently misaligning columns.
+    _active = None
+    slice_active_target = True   # set False to reproduce the pre-2026-09-10 target
+
     def sample(self, batch_size, num_obs=500, **kwargs):
         if isinstance(batch_size, tuple):
             batch_size = batch_size[0]
@@ -112,11 +151,24 @@ class ModelFamilyBF(bf.simulators.Simulator):
             param_matrices = param_matrices.squeeze(axis=1)
             param_masks = param_masks.squeeze(axis=1)
 
+        active = param_masks[0].astype(bool)
+        if self._active is None:
+            self._active = active
+        elif not np.array_equal(self._active, active):
+            raise RuntimeError(
+                f"active-parameter pattern changed between batches for "
+                f"{self.case}: cached {self._active.sum()} active, got "
+                f"{active.sum()}. Slicing the inference target assumes a constant "
+                f"pattern; this case needs the full grid instead."
+            )
+        if not np.all(param_masks == param_masks[0]):
+            raise RuntimeError(f"mask varies within batch for {self.case}")
+
         return {
             "design_matrices": samples["design_matrices"],
             "rts": samples["sim_data"]["rts"],
             "choices": samples["sim_data"]["choices"],
-            "params": param_matrices,
+            "params": param_matrices[:, active] if self.slice_active_target else param_matrices,
             "masks": param_masks,
         }
 
@@ -168,28 +220,91 @@ def test(model_key: str, case: str):
 
 
 def main(model_key: str, case: str, epochs: int = 1000, steps_per_epoch: int = 100,
-         batch_size: int = 64, sim_workers: int | None = None):
+         batch_size: int = 64, sim_workers: int | None = None,
+         standardize_summaries: bool = True, tag: str = "",
+         time_power_law_alpha: float | None = None,
+         slice_active_target: bool = True,
+         rt_transform: str = "none"):
     model_cfg = MODELS[model_key]
     simulator = ModelFamilyBF(model_key=model_key, case=case)
+    simulator.slice_active_target = slice_active_target
 
+    # The summary network sees rts, choices and design columns concatenated RAW --
+    # BayesFlow standardizes only inference_variables. Contamination replaces ~pi of
+    # trials with RT ~ Uniform(0, 20) against normal DDM RTs of 0.3-2s, which the
+    # predecessor project never had. Measured over 256x500 trials:
+    #
+    #                 rts sd    p99     max     frac>10s
+    #   predecessor    0.736    3.94    10.4     0.0000
+    #   ours           1.666   10.15    20.0     0.0102
+    #
+    # log(rts + 2) compresses that tail (a 20s outlier becomes 3.09, channel sd
+    # 7.79 -> 1.03) and stays finite on the rare rts = -1 "no response" sentinel,
+    # which plain log1p would send to -inf. The shift is +2 so that sentinel maps
+    # to exactly 0.
+    #
+    # The adapter is serialized INTO the checkpoint, so model_family_bf_validate
+    # picks the same transform up automatically -- there is no second place to keep
+    # in sync.
+    adapter = bf.Adapter().drop(["masks"]).convert_dtype("float64", "float32")
+    if rt_transform == "log":
+        adapter = adapter.shift("rts", by=2.0).log("rts")
     adapter = (
-        bf.Adapter()
-        .drop(["masks"])
-        .convert_dtype("float64", "float32")
+        adapter
         .concatenate(["design_matrices", "rts", "choices"], into="summary_variables")
         .rename("params", "inference_variables")
     )
 
+    # mlp_depths and mlp_widths are NOT SetTransformer parameters in BayesFlow
+    # 2.0.13 -- the constructor swallows unknown kwargs without raising (verified:
+    # even `total_nonsense_param=123` is accepted silently), so those two were
+    # discarded on every run since this file was written. The network has always
+    # used library-default MLP widths and dropout=0.05. Passing only real
+    # parameters makes the configuration match what actually gets built.
     summary_net = bf.networks.SetTransformer(
         summary_dim=32, seed_dim=64,
-        num_heads=(4, 4, 4, 4), mlp_depths=(1, 1, 1, 1),
-        embed_dims=(128, 128, 128, 128), mlp_widths=(128, 128, 128, 128),
+        num_heads=(4, 4, 4, 4),
+        embed_dims=(128, 128, 128, 128),
         num_seeds=4,
     )
-    inference_net = bf.networks.FlowMatching()
+    # time_power_law_alpha sets the TRAINING distribution of the flow-matching
+    # interpolation time: t = u ** (1 + alpha) for u ~ U(0,1), so E[t] = 1/(2+alpha).
+    # With theta_t = t*theta + (1-t)*z, t=1 is the DATA end -- the region where the
+    # velocity field learns to contract onto the posterior.
+    #
+    # BayesFlow 2.0.13 defaults this to 0.5, so a bare FlowMatching() trains with
+    # E[t]=0.4, biased toward the noise end and starving the contraction region.
+    # CogFormer draws t ~ U(0,1) (decoder.py: `t = torch.rand(...)`), i.e. alpha=0.
+    # The two arms of the amortization-gap comparison were therefore optimising
+    # DIFFERENT objectives. experiments/encoder_rep/addm_bf_baseline.py already
+    # names alpha=0.5 as "the leading suspect" for a calibration failure in the
+    # other BayesFlow baseline in this repo. Pass 0.0 to match CogFormer.
+    fm_kwargs = {}
+    if time_power_law_alpha is not None:
+        fm_kwargs["time_power_law_alpha"] = time_power_law_alpha
+    inference_net = bf.networks.FlowMatching(**fm_kwargs)
 
     ckpt_prefix = model_cfg["ckpt_prefix"]
     checkpoint_path = f"./outputs/checkpoints/model_family/bf/{model_key}/{ckpt_prefix}_{case}"
+    if tag:
+        checkpoint_path += f"__{tag}"
+
+    # BayesFlow standardizes ONLY inference_variables by default, so the summary
+    # network was being fed raw, wildly heterogeneous scales: response times in
+    # seconds (~0.2-2), binary choices, and design-matrix columns, all concatenated
+    # into one per-trial feature vector. Adding summary_variables routes them through
+    # the same adaptive Standardization layer.
+    #
+    # This is a SUSPECT, not a confirmed cause. The 2026-09 DDM/CDM baselines are
+    # badly overconfident -- calibration error 0.34-0.46 and posterior contraction
+    # 0.94-0.999 across all ten runs, with the true value outside the posterior in
+    # ~90% of datasets -- while CogFormer reaches 0.02-0.04 on the same simulations.
+    # Axis-swap, missing parameter standardization, ODE under-integration and
+    # degenerate masked dimensions were each ruled out. Verify with an A/B at
+    # matched budget before trusting a full run.
+    standardize = ["inference_variables"]
+    if standardize_summaries:
+        standardize.append("summary_variables")
 
     workflow = bf.BasicWorkflow(
         simulator=simulator,
@@ -197,7 +312,12 @@ def main(model_key: str, case: str, epochs: int = 1000, steps_per_epoch: int = 1
         summary_network=summary_net,
         inference_network=inference_net,
         checkpoint_filepath=checkpoint_path,
+        standardize=standardize,
     )
+    print(f"[cfg] rt_transform={rt_transform} "
+          f"slice_active_target={slice_active_target} standardize={standardize} "
+          f"time_power_law_alpha={getattr(inference_net, 'time_power_law_alpha', '?')} "
+          f"checkpoint={checkpoint_path}")
 
     # Build the dataset explicitly instead of calling fit_online, so that keras'
     # PyDataset parallelism is reachable. OnlineDataset IS a keras PyDataset and
@@ -246,6 +366,31 @@ if __name__ == "__main__":
     parser.add_argument("--epochs", type=int, default=1000)
     parser.add_argument("--steps_per_epoch", type=int, default=100)
     parser.add_argument("--batch_size", type=int, default=64)
+    parser.add_argument("--standardize_summaries", action=argparse.BooleanOptionalAction,
+                        default=True,
+                        help="Route summary_variables through BayesFlow's adaptive "
+                             "standardizer as well as inference_variables. Default on; "
+                             "--no-standardize_summaries reproduces the pre-2026-09-09 "
+                             "behaviour that produced the overconfident baselines.")
+    parser.add_argument("--rt_transform", type=str, default="none", choices=["none", "log"],
+                        help="'log' applies log(rts + 2) before the summary network, "
+                             "compressing the Uniform(0,20) contamination tail. Baked "
+                             "into the saved adapter, so validation inherits it.")
+    parser.add_argument("--slice_active_target", action=argparse.BooleanOptionalAction,
+                        default=True,
+                        help="Train the flow on ONLY the active parameter cells. The "
+                             "full grid is up to 60%% structurally zero. Measured worth "
+                             "-3%% calibration error, i.e. marginal -- the predecessor "
+                             "project fed the full grid and still reached 0.019. "
+                             "--no-slice_active_target restores the original target.")
+    parser.add_argument("--time_power_law_alpha", type=float, default=None,
+                        help="Flow-matching training time exponent: t = u**(1+alpha). "
+                             "BayesFlow defaults to 0.5 (biased toward the noise end); "
+                             "0.0 is uniform and matches CogFormer's decoder. Omit to "
+                             "keep the library default.")
+    parser.add_argument("--tag", type=str, default="",
+                        help="Suffix for the checkpoint directory, so an experimental "
+                             "run cannot overwrite a production baseline.")
     parser.add_argument("--sim_workers", type=int, default=None,
                         help="Dataset worker PROCESSES for simulation (each single-threaded "
                              "in numba). Default recommend_sim_workers() = cpu_count()-4. "
@@ -284,6 +429,11 @@ if __name__ == "__main__":
                 steps_per_epoch=args.steps_per_epoch,
                 batch_size=args.batch_size,
                 sim_workers=args.sim_workers,
+                standardize_summaries=args.standardize_summaries,
+                tag=args.tag,
+                time_power_law_alpha=args.time_power_law_alpha,
+                slice_active_target=args.slice_active_target,
+                rt_transform=args.rt_transform,
             )
         if args.use_wandb:
             wandb.finish()

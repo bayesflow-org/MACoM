@@ -21,7 +21,7 @@ from cogformer.diagnostics.metric.adaptive_metrics import adaptive_metrics as co
 from cogformer.utils.plot_utils import bf_colors
 
 from ..configs import MODELS as _BASE_MODELS
-from ..utils import add_global_params, reshape_bf_to_cf
+from ..utils import add_global_params, reshape_bf_to_cf, seed_case
 
 
 _BF_DIRS = {
@@ -144,7 +144,7 @@ def test(model_key: str, case: str):
 
 
 def main(model_key: str, case: str, batch_size: int = 200, num_samples: int = 200,
-         skip_posteriors: bool = False, skip_log_gamma: bool = True):
+         skip_posteriors: bool = False, skip_log_gamma: bool = True, seed: int = 0):
     model_cfg = MODELS[model_key]
     model_name = model_key
     case_config = model_cfg["case_configs"][case]
@@ -162,6 +162,13 @@ def main(model_key: str, case: str, batch_size: int = 200, num_samples: int = 20
     for d in (data_dir, figures_dir, evals_dir):
         d.mkdir(parents=True, exist_ok=True)
 
+    # Seeded per (model, case), like model_class_cf_validate. Without this the
+    # validation datasets were redrawn on every invocation, so re-running this
+    # script SILENTLY BROKE the pairing with any CogFormer predictions already
+    # generated against the previous npz -- and C2ST's only guard is a shape check
+    # that a re-pairing still passes. Seeding by identity (not by position) also
+    # makes a single case reproducible without running the whole sweep.
+    seed_case(seed, model_key, case)
     val_sims = simulator.sample(batch_size)
     post_draws = approximator.sample(
         conditions={"rts": val_sims["rts"], "choices": val_sims["choices"], "design_matrices": val_sims["design_matrices"]},
@@ -173,7 +180,33 @@ def main(model_key: str, case: str, batch_size: int = 200, num_samples: int = 20
     masks = val_sims["masks"]
     active_idx = masks[0].astype(bool)
     true_params = targets[:, active_idx]
-    pred_params = estimates[:, :, active_idx]
+
+    # Checkpoints trained after 2026-09-10 emit ONLY the active cells: the trainer
+    # slices the inference target because the full grid is up to 60% structurally
+    # zero (see model_family_bf_train.ModelFamilyBF). Older checkpoints emit the
+    # whole grid. Tell them apart by width rather than by a flag, so both load.
+    #
+    # The simulator here is NOT sliced, so true_set/param_masks stay full-grid, and
+    # pred_set is scattered back to full-grid before saving. Every downstream
+    # consumer -- model_family_c2st, which does pred_set[:, :, active_idx] -- is
+    # therefore unaffected by which era produced the checkpoint.
+    n_grid = int(masks.shape[-1])
+    n_active = int(active_idx.sum())
+    if estimates.shape[-1] == n_active:
+        pred_params = estimates
+        pred_full = np.zeros(estimates.shape[:2] + (n_grid,), dtype=estimates.dtype)
+        pred_full[:, :, active_idx] = estimates
+        logging.info(f"[{case}] active-only checkpoint ({n_active} of {n_grid} cells); "
+                     f"scattered to full grid for the npz")
+    elif estimates.shape[-1] == n_grid:
+        pred_params = estimates[:, :, active_idx]
+        pred_full = estimates
+        logging.info(f"[{case}] legacy full-grid checkpoint ({n_grid} cells)")
+    else:
+        raise ValueError(
+            f"[{case}] checkpoint emits {estimates.shape[-1]} params, which matches "
+            f"neither the active count ({n_active}) nor the full grid ({n_grid})."
+        )
     active_param_names = [name for name, active in zip(param_names, active_idx) if active] \
         if len(param_names) == len(active_idx) else param_names
 
@@ -182,7 +215,7 @@ def main(model_key: str, case: str, batch_size: int = 200, num_samples: int = 20
         rts=val_sims["rts"],
         choices=val_sims["choices"],
         true_set=val_sims["params"],
-        pred_set=post_draws["params"],
+        pred_set=pred_full,
         design_matrices=val_sims["design_matrices"],
         param_masks=val_sims["masks"],
     )
@@ -282,6 +315,8 @@ if __name__ == "__main__":
     parser.add_argument("--batch_size", type=int, default=200)
     parser.add_argument("--num_samples", type=int, default=200)
     parser.add_argument("--test", action="store_true")
+    parser.add_argument("--seed", type=int, default=0,
+                        help="Base seed; the actual seed is derived from (model, case).")
     parser.add_argument("--skip_posteriors", action="store_true")
     parser.add_argument("--skip_log_gamma", action="store_true", default=True)
     parser.add_argument("--include_log_gamma", dest="skip_log_gamma", action="store_false")
@@ -299,4 +334,5 @@ if __name__ == "__main__":
             num_samples=args.num_samples,
             skip_posteriors=args.skip_posteriors,
             skip_log_gamma=args.skip_log_gamma,
+            seed=args.seed,
         )
