@@ -1,0 +1,41 @@
+\subsection{Amortization gaps}
+\label{par:amortization-gaps}
+
+\begin{table}[t]
+\centering
+\small
+\caption{Absolute metric values (median $\pm$ SEM) aggregated across the five benchmark design configurations and all parameters in each configuration.}
+\label{tab:absolute-metrics}
+\begin{tabularx}{\textwidth}{llCCC}
+\toprule
+\textbf{Model} & \textbf{Method} & \textbf{NRMSE} ($\downarrow$) & \textbf{Cal. Error} ($\downarrow$) & \textbf{Post. Contr.} ($\uparrow$) \\
+\midrule
+\textbf{DDM} & \textbf{Baseline}& $0.078 \pm 0.007$ & $0.022 \pm 0.002$ & $0.902 \pm 0.023$ \\
+ & \textbf{CogFormer}-$\mathcal{C}$& $0.091 \pm 0.007$ & $0.029 \pm 0.003$ & $0.862 \pm 0.026$ \\
+\midrule
+\textbf{RDM} &\textbf{Baseline} & $0.112 \pm 0.008$ & $0.061 \pm 0.010$ & $0.803 \pm 0.032$ \\
+ & \textbf{CogFormer}-$\mathcal{C}$ & $0.117 \pm 0.009$ & $0.029 \pm 0.003$ & $0.750 \pm 0.036$ \\
+\midrule
+\textbf{CDM} & \textbf{Baseline} & $0.075 \pm 0.008$ & $0.020 \pm 0.001$ & $0.896 \pm 0.030$ \\
+ & \textbf{CogFormer}-$\mathcal{C}$ & $0.087 \pm 0.008$ & $0.028 \pm 0.002$ & $0.859 \pm 0.032$ \\
+\bottomrule
+\end{tabularx}
+\end{table}
+
+To summarize performance at each amortization level, we aggregate results across all model configurations and parameters, and report absolute values in \autoref{tab:absolute-metrics}. Across
+all three model families, CogFormer-$\mathcal{F}$ and CogFormer-$\mathcal{C}$ achieve NRMSE within ${\sim}15\%$ of the baseline, with posterior contraction declining by only $2$–$4\%$ in absolute terms---a consistent and modest cost of vastly expanded amortization. Calibration error in absolute values is consistently minimal across all three model families.
+Finally, posterior contraction tends to decrease with broader amortization scope.
+
+\begin{table}[t]
+\centering
+\small
+\caption{Joint C2ST (median $\pm $SEM) aggregated across 10 posteriors for each configuration.}
+\label{tab:c2st}
+\begin{tabularx}{\textwidth}{lCCC}
+\toprule
+\textbf{Comparison} & \textbf{DDM} & \textbf{RDM} & \textbf{CDM} \\
+\midrule
+\textbf{CogFormer}-$\mathcal{C}$ vs.\ \textbf{Baseline} &  $0.693 \pm 0.067$& $0.702 \pm 0.076$  & $0.668 \pm 0.068$\\
+\bottomrule
+\end{tabularx}
+\end{table}
