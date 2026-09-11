@@ -1,4 +1,4 @@
-"""Snapshot the 200-epoch BayesFlow baselines into finals/experiment_1/amortization_gap_e200.
+"""Snapshot the 200-epoch BayesFlow baselines into finals/experiment-1/amortization_gap_e200.
 
 WHY A SIBLING TREE RATHER THAN amortization_gap/.
 
@@ -29,7 +29,7 @@ from experiments.finalize_experiment_1 import (
 )
 
 TAG = "e200"
-DEST_ROOT = Path("outputs/finals/experiment_1") / f"amortization_gap_{TAG}"
+DEST_ROOT = Path("outputs/finals/experiment-1") / f"amortization_gap_{TAG}"
 # Only what the e200 run actually covers. Deliberately NOT finalize_experiment_1's
 # C2ST_CASES: naming the three untrained cases here would produce a tree that looks
 # half-empty rather than one that is complete for what was run.

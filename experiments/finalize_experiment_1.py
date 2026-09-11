@@ -1,4 +1,4 @@
-"""Assemble outputs/finals/experiment_1 -- the single-provenance snapshot for
+"""Assemble outputs/finals/experiment-1 -- the single-provenance snapshot for
 Experiment 1 (generalising to design space).
 
 WHY THIS EXISTS
@@ -29,7 +29,7 @@ from pathlib import Path
 
 import pandas as pd
 
-FINALS = Path("outputs/finals/experiment_1")
+FINALS = Path("outputs/finals/experiment-1")
 FIG = Path("outputs/figures/model_class/cf")
 DATA = Path("outputs/data/model_class")
 DESIGN_OPT = Path("outputs/data/design_opt/ddm")
