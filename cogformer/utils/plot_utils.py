@@ -350,7 +350,7 @@ def staedtler_fineliner():
 #     ddm  magenta/red  <- cogformer_fm_colors
 #     rdm  purple/blue  <- cogformer_vi_colors
 #     cdm  green        <- cdm_colors  (see below -- NOT bf_colors)
-#     lba  blue/teal    <- cogformer_cm_colors
+#     lba  orange/gold  <- lba_colors
 #
 # Each ramp runs dark -> saturated -> light across (intercept, main_effect,
 # interaction) and keeps that effect-type meaning within a family. A figure that
@@ -380,11 +380,44 @@ def cdm_colors():
     return colors
 
 
+def lba_colors():
+    """LBA's identity orange/gold.
+
+    Replaces ``cogformer_cm_colors`` (blue/teal) as LBA's family identity. Two
+    reasons, one practical and one structural.
+
+    Practically, the LBA figures were never rendering in teal: every model-class
+    validate script sets ``colors = cogformer_mc_colors()`` once, globally, and
+    that function is a byte-for-byte duplicate of ``cogformer_vi_colors`` -- RDM's
+    identity. So LBA has been drawn in RDM's purple/blue in every arm of
+    experiment 3, which is precisely the experiment where the two sit side by side.
+
+    Structurally, orange/gold is the only warm hue left unclaimed: DDM holds
+    magenta/red, RDM purple/blue, CDM green. Its nearest neighbour is DDM at 67
+    degrees of hue, against 114 and 151 for CDM and RDM.
+
+    Gold is intrinsically luminous, so the naive bright ramp (#F59E0B ->  #FCD34D)
+    puts the light stop at 1.44 contrast against a white page -- an invisible fill.
+    The mid stop is therefore deepened to a burnt orange, which buys room beneath
+    it: light/white 1.77 against CDM's 1.66, mid/observed 4.51 (DDM 4.02, RDM 4.11,
+    CDM 4.94), dark-mid separation 2.81 (band 2.44-2.98) and mid-light 2.14.
+
+    ``cogformer_cm_colors`` is NOT removed -- it is still the default colour inside
+    ``adaptive_recovery``, ``adaptive_coverage`` and ``adaptive_pair_posterior``.
+    """
+    colors = {
+        "intercept": "#5E3410",
+        "main_effect": "#C96A04",
+        "interaction": "#F3B94F",
+    }
+    return colors
+
+
 FAMILY_PALETTES = {
     "ddm": cogformer_fm_colors,
     "rdm": cogformer_vi_colors,
     "cdm": cdm_colors,
-    "lba": cogformer_cm_colors,
+    "lba": lba_colors,
 }
 
 # Observed data is not a model, so it never takes a family colour: it is the

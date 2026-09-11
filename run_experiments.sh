@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # run_experiments.sh — unified orchestrator for everything that lands in
-# outputs/finals/experiment-{1,2,3,4}/.
+# outputs/finals/experiment-{1,1a,2,3,4}/.
 #
 # One entry point, one config source (experiments/shared_config.sh), one log tree.
 # Supersedes run_experiment.sh (root, stale: built around the pre-reorg
@@ -9,7 +9,7 @@
 #
 # ── WHAT THIS PRODUCES ────────────────────────────────────────────────────────
 # Every stage writes into the source trees that experiments/finalize_experiment_N.py
-# reads, and the four `*_finalize` stages then assemble outputs/finals/experiment-N/.
+# reads, and the five `*_finalize` stages then assemble outputs/finals/experiment-N/.
 # The finalize stages are idempotent and non-destructive: they copy, carry forward
 # manifest rows whose sources are gone, and never delete. Running only the finalize
 # group is therefore always safe.
@@ -18,6 +18,7 @@
 #   bash run_experiments.sh                    # every stage, dependency order
 #   bash run_experiments.sh finalize           # just rebuild outputs/finals/
 #   bash run_experiments.sh exp2               # one experiment, produce + finalize
+#   bash run_experiments.sh exp1a              # the expensive gap arm, on its own
 #   bash run_experiments.sh e1_validate e1_finalize
 #   bash run_experiments.sh 9 12               # by number (see --list)
 #   bash run_experiments.sh --list             # print the stage table and exit
@@ -225,7 +226,13 @@ stage_e1_design_eig() {
             --batch_size 200 --num_samples 200 --samples_chunk_size 1
 }
 
-# ── amortization gap (stages A/B/C) ───────────────────────────────────────────
+# ══════════════════════════════════════════════════════════════════════════════
+# EXPERIMENT 1a — amortization gap (split out: 15 BayesFlow trainings)
+# ══════════════════════════════════════════════════════════════════════════════
+# Its own experiment because it is the only part of the Experiment-1 story that
+# cannot be produced from the MC checkpoint alone. Keeping it in exp1 meant a
+# cheap re-plot of the per-case figures sat behind a stage nobody wanted to
+# trigger. Outputs land in outputs/finals/experiment-1a/.
 # The gap is a paired C2ST: per bench5 case, how distinguishable are the posteriors
 # of a case-specific BayesFlow baseline from the single amortized ModelClass
 # CogFormer? 0.5 = indistinguishable = no gap.
@@ -236,12 +243,12 @@ stage_e1_design_eig() {
 # all and never did. So these three stages are a FULL REBUILD (~15 BF trainings),
 # not a refresh. finalize_experiment_1 carries the existing DDM/CDM rows forward,
 # so skipping this group leaves the current finals tree intact.
-marker_e1_gap_bf() { echo "${BF_DATA_DIR}/rdm_interaction_data.npz"; }
-stage_e1_gap_bf() {
+marker_e1a_bf() { echo "${BF_DATA_DIR}/rdm_interaction_data.npz"; }
+stage_e1a_bf() {
     for fam in "${FAMILIES[@]}"; do
         for case in "${GAP_CASES[@]}"; do
             run "BF baseline train ${fam}/${case}" -- \
-                "$PY" -m experiments.model_family.model_family_bf_train \
+                "$PY" -m experiments.experiment_1a.model_family_bf_train \
                     --model "$fam" --case "$case" \
                     --epochs "$MF_BF_EPOCHS" --steps_per_epoch 100 --batch_size 64 \
                     "${DRY[@]}" "${WANDB[@]}" || return 1
@@ -249,7 +256,7 @@ stage_e1_gap_bf() {
             # card on a shared box.
             run "BF baseline validate ${fam}/${case}" -- \
                 env XLA_PYTHON_CLIENT_PREALLOCATE=false \
-                "$PY" -m experiments.model_family.model_family_bf_validate \
+                "$PY" -m experiments.experiment_1a.model_family_bf_validate \
                     --model "$fam" --case "$case" \
                     --batch_size "$VAL_BATCH" --num_samples 200 \
                     --skip_posteriors || return 1
@@ -257,9 +264,9 @@ stage_e1_gap_bf() {
     done
 }
 
-marker_e1_gap_paired() { echo "${GAP_PRED_DIR}/rdm_interaction_cf_pred.npz"; }
-stage_e1_gap_paired() {
-    need "${BF_DATA_DIR}" "stage e1_gap_bf" || return 1
+marker_e1a_paired() { echo "${GAP_PRED_DIR}/rdm_interaction_cf_pred.npz"; }
+stage_e1a_paired() {
+    need "${BF_DATA_DIR}" "stage e1a_bf" || return 1
     # WHY PAIRED MATTERS. C2ST scores two sets of draws over the SAME simulated
     # datasets, so this re-runs CogFormer validation with --data_dir pointing at
     # the BF npz — loading BF's rts/choices/design_matrices instead of simulating
@@ -282,7 +289,7 @@ stage_e1_gap_paired() {
     done
     for fam in "${FAMILIES[@]}"; do
         run "paired CogFormer validation — ${fam}" -- \
-            "$PY" -m experiments.experiment_1.model_class_cf_validate \
+            "$PY" -m experiments.experiment_1a.model_class_cf_validate \
                 "${MC_ARCH[@]}" "${MC_GEOM[@]}" \
                 --checkpoint "$MC_CKPT" \
                 --data_dir "$GAP_SPLIT_ROOT/$fam" \
@@ -292,15 +299,15 @@ stage_e1_gap_paired() {
     done
 }
 
-marker_e1_gap_c2st() { echo "./outputs/figures/c2st/rdm/rdm_c2st_summary.csv"; }
-stage_e1_gap_c2st() {
-    need "$GAP_PRED_DIR" "stage e1_gap_paired" || return 1
+marker_e1a_c2st() { echo "./outputs/figures/c2st/rdm/rdm_c2st_summary.csv"; }
+stage_e1a_c2st() {
+    need "$GAP_PRED_DIR" "stage e1a_paired" || return 1
     # Only BF_vs_Original is reachable here: Original_vs_Finetuned additionally
     # needs --ft_pred_dir from the LBA-finetuned checkpoint, which is experiment 3's
     # forgetting study (stage e3_paired_c2st), not this one.
     for fam in "${FAMILIES[@]}"; do
         run "C2ST BF_vs_Original — ${fam}" -- \
-            "$PY" -m experiments.model_family.model_family_c2st \
+            "$PY" -m experiments.experiment_1a.model_family_c2st \
                 --model "$fam" \
                 --bf_data_dir "$BF_DATA_DIR" \
                 --mc_pred_dir "$GAP_PRED_DIR" \
@@ -313,6 +320,14 @@ marker_e1_finalize() { echo ""; }   # always runs: cheap, idempotent, carries ro
 stage_e1_finalize() {
     run "assemble outputs/finals/experiment-1" -- \
         "$PY" -m experiments.finalize_experiment_1
+}
+
+marker_e1a_finalize() { echo ""; }
+stage_e1a_finalize() {
+    # Carries forward manifest rows whose sources are gone — for DDM/CDM that is
+    # currently the ONLY thing keeping 172 rows attached to 172 surviving files.
+    run "assemble outputs/finals/experiment-1a" -- \
+        "$PY" -m experiments.finalize_experiment_1a
 }
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -512,22 +527,24 @@ stage_e4_finalize() {
 # stage table
 # ══════════════════════════════════════════════════════════════════════════════
 ALL_STAGES=(
-    e1_train e1_validate e1_ensemble e1_benchmark e1_design_eig
-    e1_gap_bf e1_gap_paired e1_gap_c2st e1_finalize
+    e1_train e1_validate e1_ensemble e1_benchmark e1_design_eig e1_finalize
+    e1a_bf e1a_paired e1a_c2st e1a_finalize
     e2_apply e2_ppc e2_finalize
     e3_zeroshot e3_finetune e3_ft_validate e3_original e3_paired_c2st
     e3_trajectory e3_finalize
     e4_probe e4_representation e4_finalize
 )
-GROUP_exp1="e1_train e1_validate e1_ensemble e1_benchmark e1_design_eig e1_gap_bf e1_gap_paired e1_gap_c2st e1_finalize"
+GROUP_exp1="e1_train e1_validate e1_ensemble e1_benchmark e1_design_eig e1_finalize"
+GROUP_exp1a="e1a_bf e1a_paired e1a_c2st e1a_finalize"
 GROUP_exp2="e2_apply e2_ppc e2_finalize"
 GROUP_exp3="e3_zeroshot e3_finetune e3_ft_validate e3_original e3_paired_c2st e3_trajectory e3_finalize"
 GROUP_exp4="e4_probe e4_representation e4_finalize"
-GROUP_finalize="e1_finalize e2_finalize e3_finalize e4_finalize"
+GROUP_finalize="e1_finalize e1a_finalize e2_finalize e3_finalize e4_finalize"
 
 expand_group() {
     case "$1" in
-        exp1) echo "$GROUP_exp1" ;;  exp2) echo "$GROUP_exp2" ;;
+        exp1) echo "$GROUP_exp1" ;;  exp1a) echo "$GROUP_exp1a" ;;
+        exp2) echo "$GROUP_exp2" ;;
         exp3) echo "$GROUP_exp3" ;;  exp4) echo "$GROUP_exp4" ;;
         finalize) echo "$GROUP_finalize" ;;
         all)  echo "${ALL_STAGES[*]}" ;;
@@ -548,7 +565,7 @@ print_table() {
         i=$((i+1))
     done
     echo
-    echo "groups: exp1 exp2 exp3 exp4 finalize all"
+    echo "groups: exp1 exp1a exp2 exp3 exp4 finalize all"
 }
 
 # ── selection ─────────────────────────────────────────────────────────────────

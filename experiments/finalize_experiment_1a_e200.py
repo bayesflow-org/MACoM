@@ -1,8 +1,8 @@
-"""Snapshot the 200-epoch BayesFlow baselines into finals/experiment-1/amortization_gap_e200.
+"""Snapshot the 200-epoch BayesFlow baselines into finals/experiment-1a/e200.
 
 WHY A SIBLING TREE RATHER THAN amortization_gap/.
 
-``amortization_gap/<fam>/<case>/`` is internally consistent: its ``bf_*`` figures, the
+``experiment-1a/<fam>/<case>/`` is internally consistent: its ``bf_*`` figures, the
 paired ``cf_*`` figures and the C2ST files (``orig_vs_bf.csv``, ``summary.csv``) all
 describe the SAME 2000-epoch BayesFlow checkpoints. Dropping the 200-epoch ``bf_*`` in
 there would leave the C2ST numbers describing a comparison that no longer matches the
@@ -15,7 +15,7 @@ It reuses finalize_experiment_1's ``kept`` allowlist and ``tidy`` (_global -> _p
 rather than restating them, so the two snapshots cannot drift in what they keep or how
 they name the global-parameter panel.
 
-Usage: .venv/bin/python -m experiments.finalize_experiment_1_e200 [--dry_run]
+Usage: python -m experiments.finalize_experiment_1a_e200 [--dry_run]
 """
 import argparse
 import shutil
@@ -24,12 +24,13 @@ from pathlib import Path
 
 import pandas as pd
 
-from experiments.finalize_experiment_1 import (
-    BF_EVAL, BF_FIG, git_commit, kept, sha256, tidy,
-)
+# kept/tidy/sha256/git_commit still live in finalize_experiment_1 (they serve the
+# whole finals tree); the BF source paths moved out with the gap itself.
+from experiments.finalize_experiment_1 import git_commit, kept, sha256, tidy
+from experiments.finalize_experiment_1a import BF_EVAL, BF_FIG
 
 TAG = "e200"
-DEST_ROOT = Path("outputs/finals/experiment-1") / f"amortization_gap_{TAG}"
+DEST_ROOT = Path("outputs/finals/experiment-1a") / TAG
 # Only what the e200 run actually covers. Deliberately NOT finalize_experiment_1's
 # C2ST_CASES: naming the three untrained cases here would produce a tree that looks
 # half-empty rather than one that is complete for what was run.

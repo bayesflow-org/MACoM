@@ -3,14 +3,14 @@
 Frozen snapshot. Every figure here comes from ONE checkpoint; this tree supersedes
 the scattered per-run directories under `outputs/figures/model_class/cf/`.
 
-Assembled 2026-09-11 21:40:06Z by
-`experiments/finalize_experiment_1.py` — 271 files.
+Assembled 2026-09-11 21:51:06Z by
+`experiments/finalize_experiment_1.py` — 261 files.
 
 ## Provenance
 
 - checkpoint: `outputs/checkpoints/model_class/cf/r4c4_b256_e10000/cogformer_model_class_fm_l8_h8_p256_s32_d128_b256_e10000_t100.pt
   sha256: 56e997f37e1c945c4ae6d022ebe546b2010e6f257ad537cee1a9b966d7409811`
-- git commit: `88b0fe7782e724ad5410ea8b19cc7fae9dced6aa`
+- git commit: `675154b89ed6bfb949ab32b9755ebed45a93e3fd`
 - per-file sources, sizes and original mtimes: `MANIFEST.csv`
 
 ## Contents
@@ -21,52 +21,12 @@ Assembled 2026-09-11 21:40:06Z by
 | `benchmark_ensemble/` | `bench5` (5 OG cases) and `bench6` (+ `mixed_predictor`), per family |
 | `per_case/` | the 18: 6 benchmark cases × 3 families, plotted separately |
 | `information_gain/` | expected information gain and NRMSE vs trial count, four continuous/binary designs |
-| `amortization_gap/` | C2ST against the per-case BayesFlow baselines — CDM, DDM, 52 CSVs; RDM pending |
 | `predictions/` | raw posterior draws backing every figure, for re-plotting |
 
-## Amortization gap — how to read it
-
-`amortization_gap/<family>/summary.csv` has one row per case with `mean_accuracy`
-(mean over per-parameter cells) and `joint_c2st` (all active cells at once).
-Each `<family>/<case>/` holds the comparison and both arms that produced it:
-
-| file | what |
-|---|---|
-| `orig_vs_bf.csv` | per-cell C2ST, plus `_mean_accuracy_` and `_joint_c2st_` rows |
-| `bf_*.pdf` / `bf_metrics.csv` | the per-case BayesFlow baseline's own diagnostics |
-| `bf_evaluations.csv` | BF NRMSE, calibration error, posterior contraction |
-| `cf_*.pdf` / `cf_metrics*.csv` | the CogFormer arm, same datasets |
-
-The `cf_*` files come from the PAIRED validate run, not from `per_case/`. `per_case/`
-simulated its own datasets; the C2ST re-ran validation against the BF simulations so
-both arms score identical data. Compare `bf_*` with `cf_*` here — comparing `bf_*`
-against `per_case/` would be comparing across different data.
-
-**Read `joint_c2st`, not `mean_accuracy`.** Both metrics pool draws across all 200
-datasets, and the pooled 1-D marginal of any single parameter is dominated by
-between-dataset spread, which both approximators reproduce — so `mean_accuracy`
-sits near 0.55 while `joint_c2st` runs 0.96–0.998. That is not a contradiction and
-not seven weak signals accumulating: seven independent cells at 0.55 would combine
-to about 0.63, not 0.99. Within a single dataset the posteriors genuinely differ —
-centres by 1–2.5 posterior SDs, widths by 2.3–10x — and only the joint classifier
-can localise a draw well enough to see it. Same pooling effect that
-`model_class_paired_c2st.py` documents for its per-dataset arm.
-
-**These numbers have no null floor.** `model_family_c2st.py` has none of the
-null-calibration machinery in `model_class_paired_c2st.py`, so nothing here is
-baseline-corrected. The joint values are far past any plausible floor (~0.49), but
-a per-cell 0.545 must not be quoted as "0.045 above chance".
-
-**C2ST is direction-blind, and here the direction favours CogFormer.** On identical
-datasets, the amortized model beats the per-case BayesFlow baseline on every
-parameter of both families — DDM `v` correlation 0.965 vs 0.817, RMSE 0.209 vs
-0.460 — while producing *wider* posteriors. The BF baselines are badly
-overconfident: their own diagnostics in
-`outputs/evaluations/model_family/bf/` report calibration error 0.39–0.47 and
-posterior contraction 0.993–0.999, and their posterior SDs are ~10x smaller than
-their own RMSE. So a large gap here is mostly a statement about BF, not a cost of
-amortization. Budgets differ and are not matched: ~51M simulations per BF case
-against ~256M for the one checkpoint covering every case and family.
+The amortization gap (C2ST against the per-case BayesFlow baselines) is no longer
+part of this tree: it needs 15 BayesFlow trainings that nothing else here needs, so
+it lives in `outputs/finals/experiment-1a/`, assembled by
+`experiments/finalize_experiment_1a.py`.
 
 ## What is included
 
