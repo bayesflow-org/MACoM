@@ -24,13 +24,15 @@ from scipy.stats import gaussian_kde
 from cogformer.simulator.benchmarks.ssms.ddm import DDM
 from cogformer.simulator.benchmarks.ssms.rdm import RDM
 from cogformer.simulator.benchmarks.ssms.cdm import CDM
-from cogformer.simulator.benchmarks.ssms.link_funs import ddm_link_fun, rdm_link_fun, cdm_link_fun
+from cogformer.simulator.benchmarks.ssms.lba import LBA
+from cogformer.simulator.benchmarks.ssms.link_funs import (ddm_link_fun, rdm_link_fun,
+                                                          cdm_link_fun, lba_link_fun)
 from cogformer.utils.plot_utils import family_colors, OBSERVED_COLOR, GUIDE_COLOR
 
 from ..configs import MODELS as _BASE_MODELS, GLOBAL_PARAMS, GLOBAL_VARIABLE_NAMES
 from ..utils import add_global_params
 from .data_utils import (
-    load_ddm_data, load_rdm_data, load_cdm_data,
+    load_ddm_data, load_rdm_data, load_cdm_data, load_lba_data,
     build_real_design_matrix, build_real_param_mask,
 )
 
@@ -76,9 +78,21 @@ RDM_CONDITIONS = [
     ("congruency", "u_1", {-0.5: "Incongruent", 0.5: "Congruent"}),
     ("session",    "u_2", {-0.5: "Session 0",   0.5: "Session 1"}),
 ]
+# Imported, NOT redeclared. The PPC must simulate from the same design the apply
+# script fitted; a private copy here would drift silently and the mismatch would
+# surface only as a bad-looking predictive.
+from .lba_mc_cf_apply import LBA_DESIGN_CONFIG
+
 CDM_CONDITIONS = [
     ("speed",       "u_1", {-0.5: "Unspeeded", 0.5: "Speeded"}),
     ("difficulty",  "u_2", {1: "Easy", 2: "Medium", 3: "Hard"}),
+]
+# u_2 is a 3-level categorical carried as two dummies, so _condition_labels
+# reconstructs levels 1/2/3 exactly as it does for CDM's difficulty.
+LBA_CONDITIONS = [
+    ("condition",  "u_1", {-0.5: "Accuracy", 0.5: "Speed"}),
+    ("frequency",  "u_2", {1: "High", 2: "Low", 3: "Very low"}),
+    ("lexicality", "u_3", {-0.5: "Nonword", 0.5: "Word"}),
 ]
 
 MODEL_REGISTRY = {
@@ -115,6 +129,21 @@ MODEL_REGISTRY = {
         "mf_param_key":        "intrinsic_params",
         "mc_local_param_key":  "cdm_intrinsic_params",
         "mc_local_to_global":  "cdm_local_to_global",
+    },
+    "lba": {
+        "loader":        load_lba_data,
+        "data_path":     "./data/data_application_lba.csv",
+        "design_config": LBA_DESIGN_CONFIG,
+        "model_cls":     LBA,
+        # fixed_A MUST match the checkpoint the posteriors came from. Without it `a`
+        # is the start-point range rather than the mean distance travelled, so the
+        # simulator would reinterpret the fitted parameter instead of erroring.
+        "model_kwargs":  {"fixed_A": 0.5},
+        "link_fun":      lba_link_fun,
+        "conditions":    LBA_CONDITIONS,
+        "mf_param_key":        "intrinsic_params",
+        "mc_local_param_key":  "lba_intrinsic_params",
+        "mc_local_to_global":  "lba_local_to_global",
     },
 }
 
@@ -205,7 +234,7 @@ def collect_ppc(
     logging.info(f"Using {n_use} of {n_samples_available} stored posterior draws")
 
     # Build model and link functions
-    model = cfg["model_cls"]()
+    model = cfg["model_cls"](**cfg.get("model_kwargs", {}))
     link_funs = cfg["link_fun"]()
     design_config = cfg["design_config"]
 
@@ -813,7 +842,8 @@ def plot_choice_ppc(obs_ch, ppc_ch, conditions, model_name, variant, outdir,
 
 def parse_args():
     p = argparse.ArgumentParser()
-    p.add_argument("--model", type=str, required=True, choices=["ddm", "rdm", "cdm"])
+    p.add_argument("--model", type=str, required=True,
+                   choices=["ddm", "rdm", "cdm", "lba"])
     p.add_argument("--variant", type=str, default="mf", choices=["mf", "mc"])
     p.add_argument("--n_ppc_samples", type=int, default=None,
                    help="Posterior draws to simulate from. Default: all draws stored in "

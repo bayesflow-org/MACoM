@@ -277,3 +277,70 @@ def load_cdm_data(csv_path: str) -> tuple[dict, list[int]]:
             "u_1:u_2": np.column_stack([inter_d2, inter_d3]),  # (num_obs, 2)
         }
     return data, sorted(data.keys())
+
+
+def load_lba_data(csv_path: str) -> tuple[dict, list[int]]:
+    """
+    Load LBA CSV data — lexical decision, Wagenmakers, Ratcliff, Gomez & McKoon (2008),
+    distributed as ``speed_acc`` in the R package ``rtdists`` (GPL-3).
+
+    Regressors (a balanced 2 x 3 x 2 factorial):
+      u_1     : condition, speed vs accuracy, effect coded +/-0.5  (1 column)
+      u_2     : freq_band (high / low / very_low), dummy coded to
+                (low, very_low); reference = high                  (2 columns)
+      u_3     : lexicality, word vs nonword, effect coded +/-0.5   (1 column)
+      u_1:u_2 : condition x (low, very_low)                        (2 columns)
+
+    WHY freq_band AND lexicality RATHER THAN ONE 6-LEVEL FACTOR. The source column
+    ``frequency`` has six levels -- high, low, very_low and nw_high, nw_low,
+    nw_very_low -- which exceeds max_num_categories=4. They are not six unrelated
+    conditions though: nonwords are frequency-matched to their base words, so the
+    column is a 3x2 factorial written as one string. Splitting it keeps both
+    manipulations; collapsing the three nonword levels into a single bucket, the
+    obvious alternative, silently discards the nonword frequency manipulation.
+
+    CHOICES ARE ACCURACY-CODED, and this is forced by the simulator rather than
+    chosen. For K = 2 alternatives LBA.prepare_params hardcodes accumulator 1 as the
+    favored one (``v[:, 0] = v``, ``v[:, 1] = v + v_diff``) and has no favored_idx
+    path, so the two accumulators are "correct" and "error", not "word" and
+    "nonword". ``v_diff`` therefore means the drift advantage of the CORRECT
+    accumulator. NOTE this is the opposite convention to load_ddm_data, which codes
+    by response and carries truth as a covariate; the two applications are not
+    directly comparable on v_diff without accounting for that.
+
+    Cleaning is the dataset's own ``censor`` flag, applied when the CSV is built:
+    31,351 of 31,522 trials retained, RT 0.181-2.986 s, and every ``error`` response
+    removed.
+
+    SEQUENCE LENGTH IS OUT OF DISTRIBUTION. Median 1,917 trials per subject against a
+    trained num_obs range of 200-1000 (both the base model-class run and the LBA
+    finetune used max_num_obs=1000). Each subject is fitted whole, so datasets are
+    ~1.9x the longest sequence the encoder saw in training. If posteriors look wrong,
+    suspect this before the design.
+    """
+    import pandas as pd
+    df = pd.read_csv(csv_path)
+
+    data = {}
+    for sid in sorted(df["id"].unique()):
+        sdf = df[df["id"] == sid].reset_index(drop=True)
+
+        # speed = +0.5, accuracy = -0.5, matching load_ddm_data's binary coding.
+        cond = np.where(sdf["condition"].values == "speed", 0.5, -0.5).astype(np.float32)
+
+        # Dummy coding, reference = "high" (the easiest, highest-drift level).
+        band = sdf["freq_band"].values
+        d_low = (band == "low").astype(np.float32)
+        d_vlo = (band == "very_low").astype(np.float32)
+
+        lex = np.where(sdf["lexicality"].values == "word", 0.5, -0.5).astype(np.float32)
+
+        data[int(sid)] = {
+            "rts":     sdf["rt"].values.astype(np.float32),
+            "choices": sdf["correct"].values.astype(np.float32),   # 1 = correct
+            "u_1":     cond,
+            "u_2":     np.column_stack([d_low, d_vlo]),            # (num_obs, 2)
+            "u_3":     lex,
+            "u_1:u_2": np.column_stack([d_low * cond, d_vlo * cond]),
+        }
+    return data, sorted(data.keys())
