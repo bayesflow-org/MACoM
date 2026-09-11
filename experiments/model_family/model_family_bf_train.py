@@ -104,8 +104,9 @@ class ModelFamilyBF(bf.simulators.Simulator):
     #   And the predecessor project (../CogFormer, experiments/model_family/
     #   family_bf_train.py) fed the FULL GRID including dead dims and still
     #   reached calibration error 0.019 on this case. So dead dimensions were
-    #   never what broke these baselines -- the contaminated, unstandardized
-    #   summary input was. Do not read this block as a diagnosis.
+    #   never what broke these baselines. Neither was the unstandardized summary
+    #   input -- see the standardize block in main(), where the A/B measured
+    #   standardizing it as slightly WORSE. Do not read this block as a diagnosis.
     #
     # Kept on by default because -3% is in the right direction and costs nothing
     # at training time; --no-slice_active_target restores the original target and
@@ -221,7 +222,7 @@ def test(model_key: str, case: str):
 
 def main(model_key: str, case: str, epochs: int = 1000, steps_per_epoch: int = 100,
          batch_size: int = 64, sim_workers: int | None = None,
-         standardize_summaries: bool = True, tag: str = "",
+         standardize_summaries: bool = False, tag: str = "",
          time_power_law_alpha: float | None = None,
          slice_active_target: bool = True,
          rt_transform: str = "none"):
@@ -289,19 +290,30 @@ def main(model_key: str, case: str, epochs: int = 1000, steps_per_epoch: int = 1
     if tag:
         checkpoint_path += f"__{tag}"
 
-    # BayesFlow standardizes ONLY inference_variables by default, so the summary
-    # network was being fed raw, wildly heterogeneous scales: response times in
-    # seconds (~0.2-2), binary choices, and design-matrix columns, all concatenated
-    # into one per-trial feature vector. Adding summary_variables routes them through
-    # the same adaptive Standardization layer.
+    # BayesFlow standardizes ONLY inference_variables by default, and so did the
+    # predecessor project (../CogFormer, experiments/model_family/family_bf_train.py):
+    # it never touched summary_variables. Routing them through the adaptive
+    # Standardization layer as well is therefore a DEVIATION from the reference rather
+    # than a step toward it -- and the A/B says it does not pay for itself:
     #
-    # This is a SUSPECT, not a confirmed cause. The 2026-09 DDM/CDM baselines are
-    # badly overconfident -- calibration error 0.34-0.46 and posterior contraction
-    # 0.94-0.999 across all ten runs, with the true value outside the posterior in
-    # ~90% of datasets -- while CogFormer reaches 0.02-0.04 on the same simulations.
-    # Axis-swap, missing parameter standardization, ODE under-integration and
-    # degenerate masked dimensions were each ruled out. Verify with an A/B at
-    # matched budget before trusting a full run.
+    #   MEASURED (ddm/intercept_only, 100 epochs, standardization the only variable;
+    #   outputs/logs/bf_ab_round2_driver.log)
+    #       raw (inference_variables only)        calibration error 0.119
+    #       std (+ summary_variables)             calibration error 0.166   WORSE
+    #       raw + rt_transform=log                calibration error 0.127
+    #       std + rt_transform=log                calibration error 0.137   WORSE
+    #
+    # So it is OFF by default, matching the predecessor. Kept switchable because the
+    # summary channel genuinely is heterogeneous -- RTs in seconds (~0.2-2), binary
+    # choices and design-matrix columns concatenated into one per-trial vector -- so a
+    # future change to the contamination tail could make it earn its place. Re-measure
+    # before turning it on.
+    #
+    # It was never the cause of the overconfident baselines either way. The dominant
+    # term is TRAINING LENGTH: calibration error degrades monotonically with epochs
+    # (ddm/intercept_only 0.145 at 100 ep -> 0.388 at 2000; rdm/intercept_only 0.295 at
+    # 300 -> 0.432 at 2000) while the posterior MEANS stay accurate and the spread
+    # collapses to ~10% of prior sd. Sweep epochs before changing anything here.
     standardize = ["inference_variables"]
     if standardize_summaries:
         standardize.append("summary_variables")
@@ -367,11 +379,13 @@ if __name__ == "__main__":
     parser.add_argument("--steps_per_epoch", type=int, default=100)
     parser.add_argument("--batch_size", type=int, default=64)
     parser.add_argument("--standardize_summaries", action=argparse.BooleanOptionalAction,
-                        default=True,
+                        default=False,
                         help="Route summary_variables through BayesFlow's adaptive "
-                             "standardizer as well as inference_variables. Default on; "
-                             "--no-standardize_summaries reproduces the pre-2026-09-09 "
-                             "behaviour that produced the overconfident baselines.")
+                             "standardizer as well as inference_variables. Default OFF, "
+                             "matching the predecessor project, which standardized only "
+                             "inference_variables. The A/B measured turning it on as a "
+                             "small regression (calibration error 0.166 vs 0.119), so "
+                             "--standardize_summaries is opt-in.")
     parser.add_argument("--rt_transform", type=str, default="none", choices=["none", "log"],
                         help="'log' applies log(rts + 2) before the summary network, "
                              "compressing the Uniform(0,20) contamination tail. Baked "

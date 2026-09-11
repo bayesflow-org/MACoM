@@ -33,6 +33,12 @@
 #                           decoder (t = torch.rand). BayesFlow defaults to 0.5,
 #                           which starves the data end where the field learns to
 #                           contract. Measured worth ~11% calibration error.
+#   --no-standardize_summaries
+#                           standardize inference_variables ONLY, as the
+#                           predecessor project did. Passed explicitly even though
+#                           it is now the script default, so a future default flip
+#                           cannot silently change this run. Standardizing the
+#                           summary channel measured WORSE (0.166 vs 0.119).
 #   NUMBA_THREADING_LAYER=workqueue   fork-safe sim workers (else silent deadlock)
 #   MPLBACKEND=Agg                    stale DISPLAY=:0 hangs matplotlib forever
 #
@@ -55,14 +61,19 @@ export PYTHONPATH="$PWD${PYTHONPATH:+:$PYTHONPATH}"
 #              called from a process already using GNU OpenMP" and the parent
 #              hangs on a futex forever. Needs workqueue.
 #
-#   bf_validate  does NOT fork, but constructs ModelFamily WITHOUT num_workers=1,
-#              so it simulates on ~8 threads. workqueue is not threadsafe ->
-#              "Numba workqueue threading layer is terminating: Concurrent access
-#              has been detected" and the process dies. Needs the default layer.
+#   bf_validate  does NOT fork. It USED to construct ModelFamily without
+#              num_workers=1, simulating on ~8 threads, and workqueue is not
+#              threadsafe -> "Numba workqueue threading layer is terminating:
+#              Concurrent access has been detected" and the process died. Caught by
+#              a DRY_RUN walkthrough on 2026-09-10, where a globally exported
+#              workqueue killed bf_validate before it wrote anything.
 #
-# Caught by a DRY_RUN walkthrough on 2026-09-10, where a globally exported
-# workqueue killed bf_validate before it wrote anything. So workqueue is set on
-# the TRAIN invocation only, below.
+#              bf_validate now pins num_workers=1 as well (it had to: the thread
+#              pool also made seed_case non-reproducible, so the validation set was
+#              redrawn on every run), so it is single-threaded and workqueue would
+#              in fact be safe there now. Still set on the TRAIN invocation only --
+#              validate does not need it, and the narrower scope is what the two
+#              stages actually require.
 export MPLBACKEND=Agg
 PY=.venv/bin/python
 source experiments/shared_config.sh
@@ -191,6 +202,7 @@ run_model() {
             --epochs "$EPOCHS" --steps_per_epoch "$STEPS" --batch_size "$BATCH" \
             --sim_workers "$SIM_WORKERS" \
             --slice_active_target --time_power_law_alpha 0.0 \
+            --no-standardize_summaries \
             --use_wandb > "$out" 2>&1
         local rc=$?
         if [ $rc -ne 0 ]; then
