@@ -197,6 +197,7 @@ def main():
             max_num_categories=args.max_num_categories,
             design_config=design_config,
             num_alternatives=3,
+            favored_idx=d["favored_idx"],
             model_id=rdm_model_id,
         )
 

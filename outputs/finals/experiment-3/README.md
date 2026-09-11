@@ -1,15 +1,15 @@
 # Experiment 3 — LBA zero-shot inference and finetuning
 
 Frozen snapshot of the three-arm paired validation. Assembled
-2026-09-10 21:29:56Z by
-`experiments/finalize_experiment_3.py` — 563 files. Git commit `84a68fec63e971c3802e915afb3184e87f000485`.
+2026-09-11 16:14:22Z by
+`experiments/finalize_experiment_3.py` — 563 files. Git commit `f22ce6aaa7ce71e1e7edbb78cae30e97a1b917fd`.
 
 `paired_validation_notes.md` is the original run's write-up and carries the headline
 tables; `MANIFEST.csv` records per-file provenance.
 
 ## trajectory/ — finetuning path, NOT just its endpoints
 
-**INTERIM — the evaluation is still running.** Epochs present: 0-500-1000. The remaining checkpoints are still being scored; this figure will be replaced by the five-epoch version.
+Complete: all five checkpoints (0/500/1000/1500/2000).
 
 The three arms above are ENDPOINTS: pre-finetune and post-finetune. `trajectory/` adds
 the path between them, evaluating diagnostics at epochs 0/500/1000/1500/2000 of a

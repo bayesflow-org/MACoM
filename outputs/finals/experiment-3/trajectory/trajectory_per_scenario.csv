@@ -215,3 +215,147 @@ epoch,family,scenario,metric,value
 1000,rdm,regressed,NRMSE,0.095136
 1000,rdm,regressed,Posterior Contraction,0.840893
 1000,rdm,regressed,Calibration Error,0.072329
+1500,cdm,fixed,NRMSE,0.033279
+1500,cdm,fixed,Posterior Contraction,0.989739
+1500,cdm,fixed,Calibration Error,0.032072
+1500,cdm,fixed_regressed,NRMSE,0.037957
+1500,cdm,fixed_regressed,Posterior Contraction,0.983896
+1500,cdm,fixed_regressed,Calibration Error,0.084276
+1500,cdm,interaction,NRMSE,0.075272
+1500,cdm,interaction,Posterior Contraction,0.891123
+1500,cdm,interaction,Calibration Error,0.043487
+1500,cdm,intercept_only,NRMSE,0.076983
+1500,cdm,intercept_only,Posterior Contraction,0.832414
+1500,cdm,intercept_only,Calibration Error,0.032127
+1500,cdm,mixed_predictor,NRMSE,0.121810
+1500,cdm,mixed_predictor,Posterior Contraction,0.812314
+1500,cdm,mixed_predictor,Calibration Error,0.046157
+1500,cdm,regressed,NRMSE,0.063405
+1500,cdm,regressed,Posterior Contraction,0.918327
+1500,cdm,regressed,Calibration Error,0.059145
+1500,ddm,fixed,NRMSE,0.041854
+1500,ddm,fixed,Posterior Contraction,0.984197
+1500,ddm,fixed,Calibration Error,0.060132
+1500,ddm,fixed_regressed,NRMSE,0.047899
+1500,ddm,fixed_regressed,Posterior Contraction,0.975792
+1500,ddm,fixed_regressed,Calibration Error,0.067513
+1500,ddm,interaction,NRMSE,0.083047
+1500,ddm,interaction,Posterior Contraction,0.878963
+1500,ddm,interaction,Calibration Error,0.044751
+1500,ddm,intercept_only,NRMSE,0.120152
+1500,ddm,intercept_only,Posterior Contraction,0.792370
+1500,ddm,intercept_only,Calibration Error,0.038202
+1500,ddm,mixed_predictor,NRMSE,0.123229
+1500,ddm,mixed_predictor,Posterior Contraction,0.781783
+1500,ddm,mixed_predictor,Calibration Error,0.042438
+1500,ddm,regressed,NRMSE,0.068570
+1500,ddm,regressed,Posterior Contraction,0.914383
+1500,ddm,regressed,Calibration Error,0.074178
+1500,lba,fixed,NRMSE,0.167581
+1500,lba,fixed,Posterior Contraction,0.642614
+1500,lba,fixed,Calibration Error,0.033454
+1500,lba,fixed_regressed,NRMSE,0.057179
+1500,lba,fixed_regressed,Posterior Contraction,0.957730
+1500,lba,fixed_regressed,Calibration Error,0.026184
+1500,lba,interaction,NRMSE,0.105519
+1500,lba,interaction,Posterior Contraction,0.835521
+1500,lba,interaction,Calibration Error,0.033640
+1500,lba,intercept_only,NRMSE,0.146100
+1500,lba,intercept_only,Posterior Contraction,0.665120
+1500,lba,intercept_only,Calibration Error,0.017719
+1500,lba,mixed_predictor,NRMSE,0.154026
+1500,lba,mixed_predictor,Posterior Contraction,0.692364
+1500,lba,mixed_predictor,Calibration Error,0.041509
+1500,lba,regressed,NRMSE,0.088917
+1500,lba,regressed,Posterior Contraction,0.882313
+1500,lba,regressed,Calibration Error,0.021553
+1500,rdm,fixed,NRMSE,0.085996
+1500,rdm,fixed,Posterior Contraction,0.907473
+1500,rdm,fixed,Calibration Error,0.067664
+1500,rdm,fixed_regressed,NRMSE,0.069818
+1500,rdm,fixed_regressed,Posterior Contraction,0.929169
+1500,rdm,fixed_regressed,Calibration Error,0.123026
+1500,rdm,interaction,NRMSE,0.109126
+1500,rdm,interaction,Posterior Contraction,0.807693
+1500,rdm,interaction,Calibration Error,0.044583
+1500,rdm,intercept_only,NRMSE,0.137393
+1500,rdm,intercept_only,Posterior Contraction,0.716007
+1500,rdm,intercept_only,Calibration Error,0.052982
+1500,rdm,mixed_predictor,NRMSE,0.153308
+1500,rdm,mixed_predictor,Posterior Contraction,0.667205
+1500,rdm,mixed_predictor,Calibration Error,0.045484
+1500,rdm,regressed,NRMSE,0.097125
+1500,rdm,regressed,Posterior Contraction,0.838348
+1500,rdm,regressed,Calibration Error,0.066224
+2000,cdm,fixed,NRMSE,0.034034
+2000,cdm,fixed,Posterior Contraction,0.989663
+2000,cdm,fixed,Calibration Error,0.066250
+2000,cdm,fixed_regressed,NRMSE,0.038416
+2000,cdm,fixed_regressed,Posterior Contraction,0.983364
+2000,cdm,fixed_regressed,Calibration Error,0.087993
+2000,cdm,interaction,NRMSE,0.075291
+2000,cdm,interaction,Posterior Contraction,0.888207
+2000,cdm,interaction,Calibration Error,0.051879
+2000,cdm,intercept_only,NRMSE,0.075465
+2000,cdm,intercept_only,Posterior Contraction,0.837238
+2000,cdm,intercept_only,Calibration Error,0.036776
+2000,cdm,mixed_predictor,NRMSE,0.121659
+2000,cdm,mixed_predictor,Posterior Contraction,0.810705
+2000,cdm,mixed_predictor,Calibration Error,0.042786
+2000,cdm,regressed,NRMSE,0.061786
+2000,cdm,regressed,Posterior Contraction,0.920664
+2000,cdm,regressed,Calibration Error,0.063789
+2000,ddm,fixed,NRMSE,0.043716
+2000,ddm,fixed,Posterior Contraction,0.984062
+2000,ddm,fixed,Calibration Error,0.096941
+2000,ddm,fixed_regressed,NRMSE,0.047997
+2000,ddm,fixed_regressed,Posterior Contraction,0.975981
+2000,ddm,fixed_regressed,Calibration Error,0.082592
+2000,ddm,interaction,NRMSE,0.084584
+2000,ddm,interaction,Posterior Contraction,0.875797
+2000,ddm,interaction,Calibration Error,0.051411
+2000,ddm,intercept_only,NRMSE,0.120792
+2000,ddm,intercept_only,Posterior Contraction,0.792066
+2000,ddm,intercept_only,Calibration Error,0.053531
+2000,ddm,mixed_predictor,NRMSE,0.123106
+2000,ddm,mixed_predictor,Posterior Contraction,0.780730
+2000,ddm,mixed_predictor,Calibration Error,0.040801
+2000,ddm,regressed,NRMSE,0.068842
+2000,ddm,regressed,Posterior Contraction,0.914059
+2000,ddm,regressed,Calibration Error,0.072719
+2000,lba,fixed,NRMSE,0.169580
+2000,lba,fixed,Posterior Contraction,0.635252
+2000,lba,fixed,Calibration Error,0.030888
+2000,lba,fixed_regressed,NRMSE,0.058325
+2000,lba,fixed_regressed,Posterior Contraction,0.957450
+2000,lba,fixed_regressed,Calibration Error,0.027961
+2000,lba,interaction,NRMSE,0.105032
+2000,lba,interaction,Posterior Contraction,0.833200
+2000,lba,interaction,Calibration Error,0.033151
+2000,lba,intercept_only,NRMSE,0.147790
+2000,lba,intercept_only,Posterior Contraction,0.663296
+2000,lba,intercept_only,Calibration Error,0.017325
+2000,lba,mixed_predictor,NRMSE,0.154161
+2000,lba,mixed_predictor,Posterior Contraction,0.696110
+2000,lba,mixed_predictor,Calibration Error,0.043974
+2000,lba,regressed,NRMSE,0.091800
+2000,lba,regressed,Posterior Contraction,0.884664
+2000,lba,regressed,Calibration Error,0.028079
+2000,rdm,fixed,NRMSE,0.087120
+2000,rdm,fixed,Posterior Contraction,0.908951
+2000,rdm,fixed,Calibration Error,0.086414
+2000,rdm,fixed_regressed,NRMSE,0.067384
+2000,rdm,fixed_regressed,Posterior Contraction,0.928158
+2000,rdm,fixed_regressed,Calibration Error,0.103076
+2000,rdm,interaction,NRMSE,0.109530
+2000,rdm,interaction,Posterior Contraction,0.808489
+2000,rdm,interaction,Calibration Error,0.053852
+2000,rdm,intercept_only,NRMSE,0.137718
+2000,rdm,intercept_only,Posterior Contraction,0.710558
+2000,rdm,intercept_only,Calibration Error,0.033772
+2000,rdm,mixed_predictor,NRMSE,0.155222
+2000,rdm,mixed_predictor,Posterior Contraction,0.669146
+2000,rdm,mixed_predictor,Calibration Error,0.053015
+2000,rdm,regressed,NRMSE,0.094816
+2000,rdm,regressed,Posterior Contraction,0.840913
+2000,rdm,regressed,Calibration Error,0.075224

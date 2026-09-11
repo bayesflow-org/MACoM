@@ -115,6 +115,10 @@ MODEL_REGISTRY = {
         "model_cls":     RDM,
         "link_fun":      rdm_link_fun,
         "conditions":    RDM_CONDITIONS,
+        # Stroop is a THREE-colour task (blue/green/red); responses are accumulator
+        # indices, observed at ~1/3 each. Without this the PPC simulates a 2-accumulator
+        # race and choice 2 comes out at exactly 0.
+        "num_alternatives":    3,
         "mf_param_key":        "intrinsic_params",
         "mc_local_param_key":  "rdm_intrinsic_params",
         "mc_local_to_global":  "rdm_local_to_global",
@@ -165,7 +169,8 @@ def _condition_labels(subject_data, condition_col, label_map):
 
 
 def _simulate_subject(model, link_funs, intrinsic_params, design_matrix, posterior_sample,
-                      no_contamination=False, param_mask_2d=None):
+                      no_contamination=False, param_mask_2d=None, fixed_natural=None,
+                      context=None):
     """
     Forward-simulate one set of trials from one posterior sample.
 
@@ -178,20 +183,35 @@ def _simulate_subject(model, link_funs, intrinsic_params, design_matrix, posteri
                        them into params that are intercept-only in the design
                        (pi, s_v, and for CDM v_theta/s_tau). Leaving it unapplied
                        inflated the effective contamination rate from ~0.4% to ~27%.
+    context          : dict or None — forwarded to model.prepare_params. REQUIRED for
+                       any family with more than two accumulators: prepare_params does
+                       `context or {}` and then `context.get("num_alternatives", 2)`, so
+                       omitting it silently simulates a TWO-accumulator race. For RDM
+                       that also hardcodes accumulator 1 as favored, making choice 2
+                       unreachable and choice 1 absorb ~73% of responses against
+                       3-choice data that is observed at ~1/3 each.
     Returns dict with "rts" (num_obs,) and "choices" (num_obs,).
     """
     if param_mask_2d is not None:
         posterior_sample = posterior_sample * param_mask_2d
     predictor = design_matrix @ posterior_sample  # (num_obs, n_params)
+    fixed_natural = fixed_natural or {}
     params = {}
     for j, pname in enumerate(intrinsic_params):
         if pname == "pi" and no_contamination:
             params[pname] = np.zeros(predictor.shape[0], dtype=np.float32)
+        elif pname in fixed_natural:
+            # Override on the NATURAL scale, AFTER the link, because that is where these
+            # constants are defined: the LBA literature's s_v = 1 is the SD of the drift
+            # distribution, and s_tau = 0 is not reachable through shifted_softplus at
+            # all (strictly positive; still 2e-9 at x = -20).
+            params[pname] = np.full(predictor.shape[0], float(fixed_natural[pname]),
+                                    dtype=np.float32)
         else:
             params[pname] = link_funs[pname](predictor[:, j])
 
     num_obs = predictor.shape[0]
-    prepared = model.prepare_params(params, num_obs=num_obs)
+    prepared = model.prepare_params(params, num_obs=num_obs, context=context)
     result = model.simulate(prepared)
     rts = result["rts"].squeeze()
     choices = result["choices"].squeeze()
@@ -201,6 +221,7 @@ def _simulate_subject(model, link_funs, intrinsic_params, design_matrix, posteri
 
 def collect_ppc(
     model_name, variant, n_ppc_samples=None, seed=0, no_contamination=False,
+    fixed_natural=None,
 ):
     rng = np.random.default_rng(seed)
     cfg = MODEL_REGISTRY[model_name]
@@ -274,7 +295,20 @@ def collect_ppc(
         d = subject_data[sid]
         num_obs = len(d["rts"])
 
-        regressors = {k: d[k] for k in d if k not in ("rts", "choices")}
+        # favored_idx / participant are trial metadata, not design columns. They are
+        # excluded by NAME rather than by presence in design_config because
+        # build_real_design_matrix ignores unknown keys, so a stray one would pass
+        # silently here and only surface as a wrong design much further downstream.
+        regressors = {k: d[k] for k in d
+                      if k not in ("rts", "choices", "favored_idx", "participant")}
+
+        # Per-subject simulation context. Only built for families that declare
+        # num_alternatives; DDM/CDM take prepare_params' own defaults.
+        sim_context = None
+        if cfg.get("num_alternatives") is not None:
+            sim_context = {"num_alternatives": int(cfg["num_alternatives"])}
+            if "favored_idx" in d:
+                sim_context["favored_idx"] = d["favored_idx"]
         dm = build_real_design_matrix(
             regressors=regressors,
             design_config=design_config,
@@ -297,7 +331,9 @@ def collect_ppc(
             post_sample = post_subj[s_idx].reshape(n_rows, n_params)
             sim = _simulate_subject(model, link_funs, intrinsic_params, dm, post_sample,
                                     no_contamination=no_contamination,
-                                    param_mask_2d=param_mask_2d)
+                                    param_mask_2d=param_mask_2d,
+                                    fixed_natural=fixed_natural,
+                                    context=sim_context)
 
             for cond_name, cond_col, label_map in cfg["conditions"]:
                 cond_vals = _condition_labels(d, cond_col, label_map)
@@ -352,7 +388,7 @@ def _cache_key(**kw):
 
 
 def collect_ppc_cached(model_name, variant, n_ppc_samples, seed, no_contamination,
-                       cache_dir=CACHE_DIR, refresh=False):
+                       cache_dir=CACHE_DIR, refresh=False, fixed_natural=None):
     """collect_ppc with an on-disk cache of its simulated draws.
 
     Simulating 72 subjects x 500 draws takes minutes; re-plotting the same draws
@@ -361,6 +397,8 @@ def collect_ppc_cached(model_name, variant, n_ppc_samples, seed, no_contaminatio
     """
     key = _cache_key(model=model_name, variant=variant, n_ppc_samples=n_ppc_samples,
                      seed=seed, no_contamination=no_contamination,
+                     fixed_natural=fixed_natural,
+                     num_alternatives=MODEL_REGISTRY[model_name].get("num_alternatives"),
                      max_num_regressors=MAX_NUM_REGRESSORS,
                      max_num_categories=MAX_NUM_CATEGORIES,
                      keep_intercept=KEEP_INTERCEPT)
@@ -373,7 +411,7 @@ def collect_ppc_cached(model_name, variant, n_ppc_samples, seed, no_contaminatio
 
     result = collect_ppc(
         model_name=model_name, variant=variant, n_ppc_samples=n_ppc_samples,
-        seed=seed, no_contamination=no_contamination,
+        seed=seed, no_contamination=no_contamination, fixed_natural=fixed_natural,
     )
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("wb") as fh:
@@ -873,6 +911,14 @@ def parse_args():
                         "body of the distribution; add e.g. 0.99 to probe the tail.")
     p.add_argument("--no_contamination", action="store_true",
                    help="Set pi=0 during simulation to isolate distributional fit from lapse contamination.")
+    p.add_argument("--fix_natural", type=str, default=None, metavar="P=V,...",
+                   help="Pin parameters to constants on the NATURAL (post-link) scale "
+                        "during SIMULATION ONLY, e.g. 's_v=1,s_tau=0'. A DIAGNOSTIC, "
+                        "not a refit: the posteriors were obtained with these free, and "
+                        "the other parameters were fitted to compensate for whatever "
+                        "values they took, so the predictive can get WORSE. It answers "
+                        "'what would this posterior predict if these took conventional "
+                        "values', not 'what if the model had been fitted that way'.")
     p.add_argument("--no_cache", action="store_true",
                    help="Simulate from scratch and do not read or write the draw cache.")
     p.add_argument("--refresh_cache", action="store_true",
@@ -893,6 +939,14 @@ def main():
     outdir = Path(args.outdir) if args.outdir else FIG_DIR / args.model
     logging.info(f"Running PPC: model={args.model}, variant={args.variant}, n_ppc_samples={args.n_ppc_samples}")
 
+    fixed_natural = None
+    if args.fix_natural:
+        fixed_natural = {}
+        for part in args.fix_natural.split(","):
+            k, _, v = part.partition("=")
+            fixed_natural[k.strip()] = float(v)
+        logging.info(f"[simulation override, natural scale] {fixed_natural}")
+
     if args.no_cache:
         obs_pooled, ppc_pooled, conditions, obs_ch, ppc_ch = collect_ppc(
             model_name=args.model,
@@ -900,6 +954,7 @@ def main():
             n_ppc_samples=args.n_ppc_samples,
             seed=args.seed,
             no_contamination=args.no_contamination,
+            fixed_natural=fixed_natural,
         )
     else:
         obs_pooled, ppc_pooled, conditions, obs_ch, ppc_ch = collect_ppc_cached(
@@ -910,6 +965,7 @@ def main():
             no_contamination=args.no_contamination,
             cache_dir=args.cache_dir,
             refresh=args.refresh_cache,
+            fixed_natural=fixed_natural,
         )
     plot_ppc(obs_pooled, ppc_pooled, conditions, args.model, args.variant, outdir,
              draw_lines=not args.no_ppc_lines, max_lines=args.ppc_max_lines,

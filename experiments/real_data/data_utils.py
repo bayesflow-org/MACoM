@@ -133,6 +133,7 @@ def build_subject_batch(
     design_config: dict,
     num_alternatives: int = 2,
     model_id: int | None = None,
+    favored_idx: np.ndarray | None = None,
 ) -> dict:
     """
     Pack a single subject's data into the batch dict expected by Adapter.adapt.
@@ -144,6 +145,16 @@ def build_subject_batch(
     param_mask : flat (max_num_cols * n_params,) array
     design_config : dict — used to build factorized position codes; must be the same
         config the design matrix and param mask were built from
+    favored_idx : (num_obs,) or None — which accumulator carries v + v_diff on each
+        trial. REQUIRED whenever num_alternatives > 2 and the favored accumulator
+        varies by trial.
+
+        Adapter.adapt reads this from ``per_trial_context`` and SILENTLY DEFAULTS TO
+        ZEROS when it is absent, i.e. "accumulator 0 is favored on every trial" with
+        no error raised. The simulators vary favored_idx per trial during training, so
+        omitting it here is a train/apply mismatch that produces plausible output.
+        Left as None for K = 2, where the simulators hardcode accumulator 1 as favored
+        and no per-trial index exists.
     """
     rts = np.asarray(rts, dtype=np.float32).reshape(-1, 1)
     choices = np.asarray(choices, dtype=np.float32).reshape(-1, 1)
@@ -168,6 +179,16 @@ def build_subject_batch(
         "max_num_categories": max_num_categories,
         "num_alternatives": np.array([num_alternatives], dtype=np.int32),
     }
+    if favored_idx is not None:
+        batch["per_trial_context"] = {
+            "favored_idx": np.asarray(favored_idx, dtype=np.float32).reshape(1, num_obs)
+        }
+    elif num_alternatives > 2:
+        raise ValueError(
+            f"num_alternatives={num_alternatives} but favored_idx was not supplied. "
+            "The adapter would default it to zeros, telling the encoder accumulator 0 "
+            "is favored on every trial. Pass favored_idx explicitly."
+        )
     if model_id is not None:
         batch["model_ids"] = np.array([model_id], dtype=np.int64)
     return batch
@@ -211,6 +232,13 @@ def load_rdm_data(csv_path: str) -> tuple[dict, list[int]]:
       u_1     : congruent, effect coded ±0.5  (congruent=+0.5, incongruent=-0.5)
       u_2     : session,   effect coded ±0.5  (session 0 → -0.5, session 1 → +0.5)
       u_1:u_2 : congruent × session           (continuous × continuous → 1 column)
+
+    favored_idx is the INK colour (``color``), i.e. the correct response, and it is the
+    accumulator that carries v + v_diff. It was previously not returned at all, so
+    build_subject_batch never passed it and Adapter.adapt silently defaulted it to
+    zeros -- telling the encoder "accumulator 0 is favored on every trial" for a
+    3-alternative task where that is true on only 33% of trials, while the simulator
+    varied it per trial throughout training.
     """
     import pandas as pd
     df = pd.read_csv(csv_path)
@@ -224,11 +252,12 @@ def load_rdm_data(csv_path: str) -> tuple[dict, list[int]]:
         session     = (sdf["session"].values * 1.0 - 0.5).astype(np.float32)
         interaction = (congruent * session).astype(np.float32)
         data[int(sid)] = {
-            "rts":     sdf["rt"].values.astype(np.float32),
-            "choices": sdf["resp"].values.astype(np.float32),
-            "u_1":     congruent,
-            "u_2":     session,
-            "u_1:u_2": interaction,
+            "rts":         sdf["rt"].values.astype(np.float32),
+            "choices":     sdf["resp"].values.astype(np.float32),
+            "favored_idx": sdf["color"].values.astype(np.float32),
+            "u_1":         congruent,
+            "u_2":         session,
+            "u_1:u_2":     interaction,
         }
     return data, sorted(data.keys())
 
@@ -342,5 +371,60 @@ def load_lba_data(csv_path: str) -> tuple[dict, list[int]]:
             "u_2":     np.column_stack([d_low, d_vlo]),            # (num_obs, 2)
             "u_3":     lex,
             "u_1:u_2": np.column_stack([d_low * cond, d_vlo * cond]),
+        }
+    return data, sorted(data.keys())
+
+
+def load_stroop_data(csv_path: str, min_trials: int = 60) -> tuple[dict, list[int]]:
+    """
+    Load Stroop colour-word data for a 3-accumulator race model.
+
+    Regressors:
+      u_1 : congruency, effect coded +/-0.5 (incongruent -0.5, congruent +0.5)
+
+    WHAT THIS DESIGN CAN AND CANNOT MEASURE. The simulator gives every accumulator
+    drift ``v`` and the single ``favored_idx`` accumulator ``v + v_diff``, so a trial
+    has exactly TWO distinct drifts. Stroop's natural parameterisation
+    (v ~ ink_match + word_match) needs THREE: the ink colour, the word-named colour,
+    and the irrelevant third. The encoder cannot express it either -- its per-trial
+    input carries ``favored_idx`` as one scalar, with no per-accumulator channel.
+
+    So this fits the REDUCED design: favored = the ink colour (the correct response),
+    and v_diff regressed on congruency, which measures interference as a reduction in
+    the target's drift advantage. It captures the RT and accuracy Stroop effect
+    (measured here: 0.673 -> 0.794 s, 0.983 -> 0.941 accuracy) but NOT the error
+    asymmetry -- 71.4% of incongruent errors go to the word-named colour, and with both
+    distractors sharing one drift that direction is unmodellable. Do not describe
+    output from this as a full three-drift Stroop model.
+
+    Choices are accumulator INDICES (0=blue, 1=green, 2=red), not accuracy codes: with
+    K > 2 the favored accumulator is named explicitly by favored_idx, so the response
+    can stay in its natural coding.
+
+    SHORT SEQUENCES. Median 96 trials per participant (range 15-96) against a trained
+    num_obs range of 200-1000 -- under half the minimum, so every dataset is out of
+    distribution on length. ``min_trials`` drops the shortest participants; it does not
+    fix the problem, it only bounds how bad it gets.
+    """
+    import pandas as pd
+    df = pd.read_csv(csv_path)
+
+    # Fixed ordering so accumulator index means the same thing for every participant.
+    colours = ["blue", "green", "red"]
+    idx = {c: i for i, c in enumerate(colours)}
+
+    counts = df.groupby("participant")["participant"].transform("size")
+    df = df[counts >= min_trials]
+
+    data = {}
+    for k, (pid, sdf) in enumerate(df.groupby("participant", sort=True)):
+        sdf = sdf.reset_index(drop=True)
+        congruent = (sdf["ink"].values == sdf["word"].values)
+        data[k] = {
+            "rts":          sdf["rt"].values.astype(np.float32),
+            "choices":      sdf["response"].map(idx).values.astype(np.float32),
+            "favored_idx":  sdf["ink"].map(idx).values.astype(np.float32),
+            "u_1":          np.where(congruent, 0.5, -0.5).astype(np.float32),
+            "participant":  pid,
         }
     return data, sorted(data.keys())
