@@ -10,7 +10,7 @@
 #     2. bf_validate      BF posterior draws -> npz       (~1m)
 #     3. cf_validate      PAIRED CogFormer arm            (~1m)
 #     4. c2st             rebuild that model's summary    (~1m)
-#     5. finalize         refresh outputs/finals/experiment-1
+#     5. finalize         refresh outputs/finals/experiment_1
 #
 # WHY THE EVAL IS PER CASE. bf_validate is seeded per (model, case) as of
 # 2026-09-10, so each case's npz is reproducible and pairing is stable. c2st and

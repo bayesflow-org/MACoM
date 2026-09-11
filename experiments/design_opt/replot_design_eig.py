@@ -5,7 +5,7 @@ LOOKS must not require running it again. Everything the figure draws is either i
 ``design_eig.csv`` or derivable from ``design_draws.npz``.
 
     python -m experiments.design_opt.replot_design_eig \\
-        --datadir outputs/finals/experiment-1/information_gain
+        --datadir outputs/finals/experiment_1/information_gain
 
 ``nrmse_se`` is bootstrapped from the saved draws when the CSV predates it, so runs
 made before the SE column existed still get a shaded band. The plotting function is

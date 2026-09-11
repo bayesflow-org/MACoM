@@ -5,7 +5,7 @@ Source is the canonical three-arm paired validation at
 
 ALLOWLIST, NOT SWEEP
 --------------------
-Unlike the experiment-1/2 assemblers, this one copies only files whose stem is in
+Unlike the experiment_1/2 assemblers, this one copies only files whose stem is in
 KEEP. The source validate script emits 10 posterior pairplots per case by default
 (`--skip_posteriors` defaults to False), and a sweep-everything copier would pull
 them in silently whenever someone re-runs without the flag. Naming the four wanted
