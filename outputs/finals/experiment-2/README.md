@@ -1,8 +1,8 @@
 # Experiment 2 — real data (posterior predictive checks)
 
 Frozen snapshot, organised by model family. Assembled
-2026-09-11 21:51:07Z by
-`experiments/finalize_experiment_2.py` — 29 files. Git commit `675154b89ed6bfb949ab32b9755ebed45a93e3fd`.
+2026-09-12 05:06:32Z by
+`experiments/finalize_experiment_2.py` — 64 files. Git commit `6a30c182965add2c5fd63abe52a748fe7933690f`.
 Per-file sources and original mtimes: `MANIFEST.csv`.
 
 ## Contents
@@ -19,9 +19,86 @@ Each family folder holds, per grouping variable:
 
 `posteriors/{ddm,rdm,cdm}.npz` holds the posterior draws every figure was simulated
 from, so the plots can be regenerated without re-running inference.
+`posteriors/ddm_sv_fixed.npz` is the separate fit behind `ddm/sv_fixed/`; the
+simulation-only variants have no npz of their own because they reuse their family's.
 
 Grouping variables: DDM `stim_type`/`truth`, RDM `congruency`/`session`,
 CDM `difficulty`/`speed`.
+
+## Constrained variants
+
+A family folder's ROOT is always the model's own fit, simulated as-is. Subfolders hold
+PPCs run from the **same posterior draws** with something pinned during the forward
+simulation. They are not separate fits, which is why there is deliberately no second
+`posteriors/*.npz` for them.
+
+| folder | pinned | produced by |
+|---|---|---|
+| folder | `s_v` | kind |
+|---|---|---|
+| `ddm/sv0/` | 0 at simulation | constrained **PPC** (`--fix_natural s_v=0.0`) |
+| `ddm/sv_fixed/` | 0 at fitting | constrained **REFIT** (`--fix_s_v`) |
+| `cdm/sv0/` | 0 at simulation | constrained PPC (`--fix_natural s_v=0.0`) |
+| `rdm/nocontam/` | `pi`=0 at simulation | constrained PPC (`--no_contamination`) |
+
+### A constrained PPC is not a constrained fit
+
+`ddm/sv0/` and `ddm/sv_fixed/` both set `s_v` to zero, and they are NOT the same thing.
+
+- **`sv0/`** overrides at SIMULATION time. The posterior draws still come from a fit
+  where `s_v` was free, so `v`, `a` and `tau` carry the compensation they acquired
+  while it was estimated. This answers "what does this fit predict with drift
+  variability switched off".
+- **`sv_fixed/`** is a genuine REFIT. `s_v` is dropped from the design, so it is never
+  an estimation target and the simulator injects 0.0 directly, bypassing the link.
+  Every other parameter is re-estimated under that constraint. This is the one that
+  matches the original specification (Stump et al., 2026).
+
+`s_v` is a substantial component -- natural-scale median 0.456 against a median |v| of
+1.243, a ratio of 0.37 -- so neither is a formality. Measured over RT quantiles
+0.1/0.3/0.5/0.7/0.9, both conditions, 72 subjects:
+
+| run | mean abs quantile error | predictive SD (truth=True) |
+|---|---|---|
+| observed | — | 1.173 |
+| canonical | 0.0869 | 1.503 |
+| `sv0/` (simulation-only) | 0.0695 | 1.581 |
+| `sv_fixed/` (refit) | 0.0784 | 1.533 |
+
+Read the aggregate with care: it is sensitive to which quantiles you score. On a coarse
+0.1/0.5/0.9 grid the canonical run wins; adding 0.3 and 0.7 reverses it, because the
+canonical fit's largest miss sits at q0.7 (-0.146). What is STABLE across grids is the
+shape, not the ranking:
+
+- `sv0/` fits the BODY better but overshoots the right tail badly (q0.9: +0.112 and
+  +0.161 against observed), and is the most over-dispersed of the three. Switching off
+  drift variability without re-estimating leaves `v`, `a` and `tau` compensating for a
+  component that is no longer there.
+- `sv_fixed/` tracks the canonical fit closely everywhere and slightly improves the
+  right tail (q0.9 +0.019 vs -0.049 on truth=True). Re-estimating under the constraint
+  re-absorbs what `s_v` was doing, so the predictive barely moves. **That similarity is
+  the result**: for this dataset, dropping across-trial drift variability properly costs
+  almost nothing.
+
+All three under-predict RT through the body and are over-dispersed relative to observed
+(SD ~1.5 against 1.17), which is a pre-existing property of the lapse model, not
+something these variants introduce.
+
+`cdm/sv0/` asks the simulation-time question of CDM;
+
+Note that `sv_fixed/`'s PPC must still pass `--fix_natural s_v=0.0`: a parameter absent
+from the design has its coefficients masked to zero, and the link is still applied --
+`shifted_softplus(0) = 0.693`, not 0, because that function never implemented the
+-log(2) shift its name implies.
+
+`cdm/sv0/` asks the simulation-time question of CDM;
+`rdm/nocontam/` isolates the distributional fit from lapse contamination. Which one
+belongs in the paper is a modelling decision and has NOT been made here -- both are
+kept labelled so the constraint stays recoverable from the tree, the same rule
+`experiment-3/ppc/` follows.
+
+`rdm/nocontam/` is on the CORRECTED lineage: it was produced after the 2026-09-11
+`favored_idx` refit, not before it.
 
 ## Why choice quantiles are CDM-only
 

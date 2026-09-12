@@ -1,11 +1,39 @@
 # Experiment 3 — LBA zero-shot inference and finetuning
 
 Frozen snapshot of the three-arm paired validation. Assembled
-2026-09-11 21:58:26Z by
-`experiments/finalize_experiment_3.py` — 563 files. Git commit `675154b89ed6bfb949ab32b9755ebed45a93e3fd`.
+2026-09-12 02:58:25Z by
+`experiments/finalize_experiment_3.py` — 588 files. Git commit `6a30c182965add2c5fd63abe52a748fe7933690f`.
 
 `paired_validation_notes.md` is the original run's write-up and carries the headline
 tables; `MANIFEST.csv` records per-file provenance.
+
+## ppc/ — LBA on empirical data
+
+Posterior predictive checks for the finetuned checkpoint applied to the empirical
+lexical-decision dataset (17 subjects, 500 stored draws each). It sits in experiment 3
+rather than experiment 2 because experiment 2 is the DDM/RDM/CDM real-data tree — the
+three families the model class was trained on — while LBA is the held-out family this
+experiment exists to study. Same checkpoint as `finetuned/`.
+
+**Two variants, same posterior draws.** They differ only in what the forward
+simulation holds fixed:
+
+| folder | s_v | s_tau | what it is |
+|---|---|---|---|
+| `ppc/free/` | estimated | estimated | the model's own fit, simulated as-is |
+| `ppc/conventional/` | 1.0 | 0.0 | the standard LBA identifiability constraint |
+
+`posteriors.npz` is stored ONCE, at `ppc/`, not per variant: both PPCs read the same
+draws, so duplicating it would imply two fits where there is one.
+
+Which variant belongs in the paper is a modelling decision and has NOT been made here.
+Both are kept in labelled subtrees precisely so that decision stays visible — a single
+unlabelled `ppc/` would make the constraint unrecoverable from the tree.
+
+Plot names follow experiment 2 exactly, so the same check is called the same thing in
+both real-data trees: `rt_ppc_*` (RT distribution), `choice_ppc_*` (choice
+proportions), `rt_qq_*`, `rt_quantiles_*`, `choice_quantiles_*`, suffixed by condition
+(`condition`, `frequency`, `lexicality`).
 
 ## trajectory/ — finetuning path, NOT just its endpoints
 

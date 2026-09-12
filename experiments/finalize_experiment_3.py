@@ -31,6 +31,22 @@ SRC = Path("outputs/figures/model_class/cf/paired_lba_20260816")
 # result from the three-arm paired validation -- the arms are endpoints, this is the
 # path between them -- and is produced by its own script.
 TRAJ_SRC = Path("outputs/figures/model_class/cf/lba_trajectory")
+# LBA applied to the empirical lexical-decision data (17 subjects). It lives HERE
+# rather than in experiment-2 because experiment-2 is the DDM/RDM/CDM real-data tree
+# -- the three families the model class was trained on -- while LBA is the held-out
+# family this experiment is about. Same checkpoint as the finetuned arm above.
+PPC_SRC = Path("outputs/figures/real_data/ppc")
+PPC_DATA = Path("outputs/data/real_data/lba/mc/lba_mc_posteriors.npz")
+# variant -> destination subdirectory under ppc/. Two PPCs were run from the SAME
+# posterior draws, differing only in what the forward simulation holds fixed:
+#   free          -- s_v and s_tau as the model estimated them
+#   conventional  -- s_v=1.0, s_tau=0.0, the standard LBA identifiability constraint
+# Both are kept, in labelled subtrees, because which one belongs in the paper is a
+# modelling decision and a single unlabelled `ppc/` would make it unrecoverable.
+PPC_VARIANTS = {"lba": "free", "lba_conventional": "conventional"}
+# Same allowlist and rename as finalize_experiment_2, so the two real-data trees
+# name the same plot the same way.
+PPC_KEEP = ("ppc", "choice_ppc", "rt_quantiles", "rt_qq", "choice_quantiles")
 
 # arm -> (families, filename infix). zeroshot covers LBA only.
 ARMS = {"zeroshot": (["lba"], "mid1"),
@@ -48,6 +64,39 @@ def tidy(rest: str) -> str:
 def kept(rest: str) -> bool:
     """Allowlist on the plot-type stem: recovery/coverage/ecdf/metrics, +_global."""
     return rest.split(".")[0].replace("_global", "") in KEEP
+
+
+def ppc_kept(rest: str) -> bool:
+    return any(rest.startswith(k + "_") for k in PPC_KEEP)
+
+
+def ppc_tidy(rest: str) -> str:
+    """Rename the bare ``ppc_`` plot to ``rt_ppc_``, as experiment-2 does.
+
+    In the source the RT-distribution plot is just ``ppc_``, which is ambiguous
+    sitting next to ``choice_ppc_`` -- nothing in the name says which dimension it
+    checks. The other types already say so.
+    """
+    return f"rt_{rest}" if rest.startswith("ppc_") else rest
+
+
+def plan_ppc() -> tuple[list[tuple[Path, Path]], list[Path]]:
+    """Real-data PPC jobs: (source, destination) pairs plus allowlist rejects."""
+    jobs, skipped = [], []
+    for variant, dest_name in PPC_VARIANTS.items():
+        d = PPC_SRC / variant
+        if not d.is_dir():
+            continue
+        for src in sorted(d.glob("*.pdf")):
+            rest = src.name.replace("lba_mc_", "")
+            if not ppc_kept(rest):
+                skipped.append(src); continue
+            jobs.append((src, FINALS / "ppc" / dest_name / ppc_tidy(rest)))
+    # One posteriors file, not one per variant: both PPCs were simulated from the
+    # same draws, so duplicating it would imply two fits where there is one.
+    if PPC_DATA.exists():
+        jobs.append((PPC_DATA, FINALS / "ppc" / "posteriors.npz"))
+    return jobs, skipped
 
 
 def plan():
@@ -93,6 +142,10 @@ def plan():
     readme = SRC / "README.md"
     if readme.exists():
         jobs.append((readme, FINALS / "paired_validation_notes.md"))
+
+    ppc_jobs, ppc_skipped = plan_ppc()
+    jobs += ppc_jobs
+    skipped += ppc_skipped
     return jobs, skipped
 
 
@@ -162,6 +215,34 @@ Frozen snapshot of the three-arm paired validation. Assembled
 
 `paired_validation_notes.md` is the original run's write-up and carries the headline
 tables; `MANIFEST.csv` records per-file provenance.
+
+## ppc/ — LBA on empirical data
+
+Posterior predictive checks for the finetuned checkpoint applied to the empirical
+lexical-decision dataset (17 subjects, 500 stored draws each). It sits in experiment 3
+rather than experiment 2 because experiment 2 is the DDM/RDM/CDM real-data tree — the
+three families the model class was trained on — while LBA is the held-out family this
+experiment exists to study. Same checkpoint as `finetuned/`.
+
+**Two variants, same posterior draws.** They differ only in what the forward
+simulation holds fixed:
+
+| folder | s_v | s_tau | what it is |
+|---|---|---|---|
+| `ppc/free/` | estimated | estimated | the model's own fit, simulated as-is |
+| `ppc/conventional/` | 1.0 | 0.0 | the standard LBA identifiability constraint |
+
+`posteriors.npz` is stored ONCE, at `ppc/`, not per variant: both PPCs read the same
+draws, so duplicating it would imply two fits where there is one.
+
+Which variant belongs in the paper is a modelling decision and has NOT been made here.
+Both are kept in labelled subtrees precisely so that decision stays visible — a single
+unlabelled `ppc/` would make the constraint unrecoverable from the tree.
+
+Plot names follow experiment 2 exactly, so the same check is called the same thing in
+both real-data trees: `rt_ppc_*` (RT distribution), `choice_ppc_*` (choice
+proportions), `rt_qq_*`, `rt_quantiles_*`, `choice_quantiles_*`, suffixed by condition
+(`condition`, `frequency`, `lexicality`).
 
 ## trajectory/ — finetuning path, NOT just its endpoints
 

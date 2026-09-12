@@ -34,7 +34,18 @@ def parse_args():
     p = argparse.ArgumentParser()
     p.add_argument("--data", type=str, default="./data/data_application_ddm.csv")
     p.add_argument("--checkpoint", type=str, required=True)
-    p.add_argument("--outdir", type=str, default="./outputs/data/real_data/ddm/mc/")
+    p.add_argument("--outdir", type=str, default=None,
+                   help="Default: ./outputs/data/real_data/ddm/mc/, or .../mc_sv_fixed/ "
+                        "when --fix_s_v is set.")
+    p.add_argument("--fix_s_v", action="store_true",
+                   help="Refit WITHOUT across-trial drift variability, matching the "
+                        "original DDM specification (Stump et al., 2026). Drops s_v "
+                        "from the design so it is never an estimation target; the "
+                        "simulator then injects default_fixed_values['s_v']=0.0, "
+                        "bypassing the link. This is a genuine constrained FIT -- "
+                        "unlike ppc.py's --fix_natural, which overrides at simulation "
+                        "time only and leaves the other parameters still carrying the "
+                        "compensation they acquired while s_v was free.")
 
     # Design
     p.add_argument("--max_num_regressors", type=int, default=5)
@@ -121,8 +132,19 @@ def main():
 
     # stim_type, truth, and interaction are all regressed on v, a, z, tau, s_tau;
     # s_v is intercept-only (Stump et al., 2026)
+    intercept_params = ["v", "a", "z", "tau", "s_v", "s_tau", "pi"]
+    if args.fix_s_v:
+        # Removing s_v from the design is what FIXES it: infer_free_fixed_intrinsics
+        # partitions on design membership, so s_v becomes a fixed intrinsic and
+        # ModelFamily.sample() injects default_fixed_values["s_v"] = 0.0 directly,
+        # bypassing the link. That bypass is the only way to reach exactly 0 --
+        # shifted_softplus never implemented its -log(2) shift, so link(0) = 0.693
+        # and s_v = 0 is unreachable through the link at any finite input.
+        intercept_params = [p for p in intercept_params if p != "s_v"]
+        logging.info("[fix_s_v] s_v dropped from the design -> fixed at 0.0 "
+                     "(original Stump et al. 2026 specification)")
     design_config = {
-        "1":       ["v", "a", "z", "tau", "s_v", "s_tau", "pi"],
+        "1":       intercept_params,
         "u_1":     ["v", "a", "z", "tau", "s_tau"],
         "u_2":     ["v", "a", "z", "tau", "s_tau"],
         "u_1:u_2": ["v", "a", "z", "tau", "s_tau"],
@@ -217,7 +239,9 @@ def main():
 
     posteriors = np.stack(all_posteriors, axis=0)
 
-    outdir = Path(args.outdir)
+    outdir = Path(args.outdir) if args.outdir else Path(
+        "./outputs/data/real_data/ddm/mc_sv_fixed/" if args.fix_s_v
+        else "./outputs/data/real_data/ddm/mc/")
     outdir.mkdir(parents=True, exist_ok=True)
     out_path = outdir / "ddm_mc_posteriors.npz"
     np.savez(

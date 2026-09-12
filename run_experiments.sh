@@ -355,7 +355,31 @@ stage_e2_apply() {
     done
 }
 
-marker_e2_ppc() { echo "./outputs/figures/real_data/ppc/cdm"; }
+# Marker is the LAST variant produced, not ppc/cdm: the canonical loop and the
+# constrained variants are one stage, so a marker satisfied halfway through would
+# report the stage done with the variants missing.
+marker_e2_refit_svfix() { echo "./outputs/data/real_data/ddm/mc_sv_fixed/ddm_mc_posteriors.npz"; }
+stage_e2_refit_svfix() {
+    need "$MC_CKPT" "stage e1_train" || return 1
+    need "./data/data_application_ddm.csv" "the empirical DDM dataset (not produced here)" || return 1
+    # A genuine constrained FIT, not a simulation-time override: --fix_s_v drops s_v
+    # from the design so it is never an estimation target, and every other parameter is
+    # re-estimated under that constraint. This is what matches the original DDM
+    # specification (Stump et al., 2026); ppc.py's --fix_natural does NOT, because it
+    # leaves the other parameters carrying the compensation they acquired while s_v was
+    # free. Writes to .../ddm/mc_sv_fixed/ rather than overwriting the canonical fit.
+    run "DDM refit with s_v fixed at 0 (original specification)" -- \
+        "$PY" -m experiments.experiment_2.ddm_mc_cf_apply \
+            --fix_s_v \
+            --checkpoint "$MC_CKPT" \
+            --encoder_num_layers "$ENC_LAYERS" --decoder_num_layers "$DEC_LAYERS" \
+            --encoder_num_heads "$HEADS" --decoder_num_heads "$HEADS" \
+            --proj_dim "$PROJ" --num_seeds "$SEEDS" --seed_dim "$MC_DIM" \
+            --model_embed_dim 8 \
+            --max_num_regressors "$MC_MAX_REG" --max_num_categories "$MC_MAX_CAT"
+}
+
+marker_e2_ppc() { echo "./outputs/figures/real_data/ppc/ddm_sv0"; }
 stage_e2_ppc() {
     need "./outputs/data/real_data" "stage e2_apply" || return 1
     for fam in "${FAMILIES[@]}"; do
@@ -365,6 +389,50 @@ stage_e2_ppc() {
                 --max_num_regressors "$MC_MAX_REG" \
                 --max_num_categories "$MC_MAX_CAT" || return 1
     done
+    # Constrained variants: same posterior draws, something pinned during the forward
+    # simulation. finalize_experiment_2 files these under <family>/<variant>/ so the
+    # family root keeps meaning "the model's own fit, simulated as-is".
+    run "PPC — cdm, s_v pinned to 0" -- \
+        "$PY" -m experiments.experiment_2.ppc \
+            --model cdm --variant mc \
+            --fix_natural "s_v=0.0" \
+            --outdir ./outputs/figures/real_data/ppc/cdm_sv0 \
+            --max_num_regressors "$MC_MAX_REG" \
+            --max_num_categories "$MC_MAX_CAT" || return 1
+    # pi=0 isolates the distributional fit from lapse contamination.
+    run "PPC — rdm, no contamination (pi=0)" -- \
+        "$PY" -m experiments.experiment_2.ppc \
+            --model rdm --variant mc \
+            --no_contamination \
+            --outdir ./outputs/figures/real_data/ppc/rdm_nocontam \
+            --max_num_regressors "$MC_MAX_REG" \
+            --max_num_categories "$MC_MAX_CAT" || return 1
+    # Matches the ORIGINAL DDM specification: Stump et al. (2026) has no across-trial
+    # drift variability, but this checkpoint estimates s_v intercept-only. Last in the
+    # stage, and the stage marker, so a partial run cannot report itself complete.
+    run "PPC — ddm, s_v pinned at simulation only" -- \
+        "$PY" -m experiments.experiment_2.ppc \
+            --model ddm --variant mc \
+            --fix_natural "s_v=0.0" \
+            --outdir ./outputs/figures/real_data/ppc/ddm_sv0 \
+            --max_num_regressors "$MC_MAX_REG" \
+            --max_num_categories "$MC_MAX_CAT" || return 1
+    # The REFIT's PPC. --fix_natural is REQUIRED here even though s_v was fixed at
+    # fitting time: a parameter absent from the design has its coefficients masked to
+    # zero, and ppc.py still applies the link -- shifted_softplus(0) = 0.693, not 0.
+    # Without it this would silently simulate s_v at 0.693.
+    if [[ -f ./outputs/data/real_data/ddm/mc_sv_fixed/ddm_mc_posteriors.npz ]]; then
+        run "PPC — ddm refit, s_v fixed at fitting (original specification)" -- \
+            "$PY" -m experiments.experiment_2.ppc \
+                --model ddm --variant mc \
+                --posteriors ./outputs/data/real_data/ddm/mc_sv_fixed/ddm_mc_posteriors.npz \
+                --fix_natural "s_v=0.0" \
+                --outdir ./outputs/figures/real_data/ppc/ddm_sv_fixed \
+                --max_num_regressors "$MC_MAX_REG" \
+                --max_num_categories "$MC_MAX_CAT"
+    else
+        echo "    · skipped: ddm s_v-fixed refit absent (run stage e2_refit_svfix)"
+    fi
 }
 
 marker_e2_finalize() { echo ""; }
@@ -459,6 +527,51 @@ stage_e3_trajectory() {
             --outdir "${FIG_MC}/lba_trajectory"
 }
 
+marker_e3_ppc_apply() { echo "./outputs/data/real_data/lba/mc/lba_mc_posteriors.npz"; }
+stage_e3_ppc_apply() {
+    need "$LBA_FT_CKPT" "stage e3_finetune" || return 1
+    need "./data/data_application_lba.csv" "the empirical LBA dataset (not produced here)" || return 1
+    # The producing scripts stay in experiment_2/: ppc.py and data_utils.py are shared
+    # real-data machinery serving all four families, and lba_mc_cf_apply imports
+    # data_utils as a sibling. Only the RESULTS belong to experiment 3, which is what
+    # finalize_experiment_3's ppc/ section collects.
+    #
+    # The FINETUNED checkpoint, not MC_CKPT: this is LBA on empirical data, and only
+    # the finetuned model has an LBA decoder worth applying. Its defaults already carry
+    # num_models=4, r4c4 and lba_fixed_A=0.5, which must match the finetune.
+    run "LBA real-data apply (17 subjects, finetuned checkpoint)" -- \
+        "$PY" -m experiments.experiment_2.lba_mc_cf_apply \
+            --checkpoint "$LBA_FT_CKPT" \
+            --lba_fixed_A "$LBA_FIXED_A" \
+            --encoder_num_layers "$ENC_LAYERS" --decoder_num_layers "$DEC_LAYERS" \
+            --encoder_num_heads "$HEADS" --decoder_num_heads "$HEADS" \
+            --proj_dim "$PROJ" --num_seeds "$SEEDS" --seed_dim "$MC_DIM" \
+            --model_embed_dim 8 --num_models 4 \
+            --max_num_regressors "$MC_MAX_REG" --max_num_categories "$MC_MAX_CAT"
+}
+
+marker_e3_ppc() { echo "./outputs/figures/real_data/ppc/lba_conventional"; }
+stage_e3_ppc() {
+    need "./outputs/data/real_data/lba/mc/lba_mc_posteriors.npz" "stage e3_ppc_apply" || return 1
+    # TWO variants from the SAME posterior draws, differing only in what the forward
+    # simulation holds fixed. Which belongs in the paper is a modelling decision that
+    # has not been made, so both are produced and finalize_experiment_3 files them
+    # under ppc/free/ and ppc/conventional/ rather than picking silently.
+    run "LBA PPC — free (s_v, s_tau as estimated)" -- \
+        "$PY" -m experiments.experiment_2.ppc \
+            --model lba --variant mc \
+            --max_num_regressors "$MC_MAX_REG" \
+            --max_num_categories "$MC_MAX_CAT" || return 1
+    # s_v=1, s_tau=0 is the standard LBA identifiability constraint.
+    run "LBA PPC — conventional (s_v=1.0, s_tau=0.0)" -- \
+        "$PY" -m experiments.experiment_2.ppc \
+            --model lba --variant mc \
+            --fix_natural "s_v=1.0,s_tau=0.0" \
+            --outdir ./outputs/figures/real_data/ppc/lba_conventional \
+            --max_num_regressors "$MC_MAX_REG" \
+            --max_num_categories "$MC_MAX_CAT"
+}
+
 marker_e3_finalize() { echo ""; }
 stage_e3_finalize() {
     run "assemble outputs/finals/experiment-3" -- \
@@ -529,15 +642,15 @@ stage_e4_finalize() {
 ALL_STAGES=(
     e1_train e1_validate e1_ensemble e1_benchmark e1_design_eig e1_finalize
     e1a_bf e1a_paired e1a_c2st e1a_finalize
-    e2_apply e2_ppc e2_finalize
+    e2_apply e2_refit_svfix e2_ppc e2_finalize
     e3_zeroshot e3_finetune e3_ft_validate e3_original e3_paired_c2st
-    e3_trajectory e3_finalize
+    e3_trajectory e3_ppc_apply e3_ppc e3_finalize
     e4_probe e4_representation e4_finalize
 )
 GROUP_exp1="e1_train e1_validate e1_ensemble e1_benchmark e1_design_eig e1_finalize"
 GROUP_exp1a="e1a_bf e1a_paired e1a_c2st e1a_finalize"
-GROUP_exp2="e2_apply e2_ppc e2_finalize"
-GROUP_exp3="e3_zeroshot e3_finetune e3_ft_validate e3_original e3_paired_c2st e3_trajectory e3_finalize"
+GROUP_exp2="e2_apply e2_refit_svfix e2_ppc e2_finalize"
+GROUP_exp3="e3_zeroshot e3_finetune e3_ft_validate e3_original e3_paired_c2st e3_trajectory e3_ppc_apply e3_ppc e3_finalize"
 GROUP_exp4="e4_probe e4_representation e4_finalize"
 GROUP_finalize="e1_finalize e1a_finalize e2_finalize e3_finalize e4_finalize"
 

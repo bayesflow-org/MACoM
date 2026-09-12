@@ -221,7 +221,7 @@ def _simulate_subject(model, link_funs, intrinsic_params, design_matrix, posteri
 
 def collect_ppc(
     model_name, variant, n_ppc_samples=None, seed=0, no_contamination=False,
-    fixed_natural=None,
+    fixed_natural=None, posteriors_path=None,
 ):
     rng = np.random.default_rng(seed)
     cfg = MODEL_REGISTRY[model_name]
@@ -231,7 +231,12 @@ def collect_ppc(
     logging.info(f"Loaded {len(subject_ids)} subjects")
 
     # Load posteriors
-    post_file = DATA_DIR / model_name / variant / f"{model_name}_{variant}_posteriors.npz"
+    # posteriors_path lets a CONSTRAINED REFIT be scored without inventing a new
+    # --variant: the refit writes its own npz (e.g. .../ddm/mc_sv_fixed/) but is still
+    # the `mc` lineage, and the figure filenames should stay `ddm_mc_*` so the
+    # finalizer's rename rules keep working.
+    post_file = (Path(posteriors_path) if posteriors_path else
+                 DATA_DIR / model_name / variant / f"{model_name}_{variant}_posteriors.npz")
     post_npz = np.load(post_file, allow_pickle=True)
     posteriors = post_npz["posteriors"]   # (n_subjects, n_samples, n_rows, n_params_or_global)
     n_samples_available = posteriors.shape[1]
@@ -388,7 +393,8 @@ def _cache_key(**kw):
 
 
 def collect_ppc_cached(model_name, variant, n_ppc_samples, seed, no_contamination,
-                       cache_dir=CACHE_DIR, refresh=False, fixed_natural=None):
+                       cache_dir=CACHE_DIR, refresh=False, fixed_natural=None,
+                       posteriors_path=None):
     """collect_ppc with an on-disk cache of its simulated draws.
 
     Simulating 72 subjects x 500 draws takes minutes; re-plotting the same draws
@@ -398,6 +404,13 @@ def collect_ppc_cached(model_name, variant, n_ppc_samples, seed, no_contaminatio
     key = _cache_key(model=model_name, variant=variant, n_ppc_samples=n_ppc_samples,
                      seed=seed, no_contamination=no_contamination,
                      fixed_natural=fixed_natural,
+                     # ADDITIVE: only present when set. A constrained REFIT has the
+                     # same model, variant and flags as the canonical run but
+                     # different posteriors, so it must not share the key -- while
+                     # omitting the field entirely when unset keeps every existing
+                     # canonical cache valid instead of invalidating all of them.
+                     **({"posteriors_path": str(posteriors_path)}
+                        if posteriors_path else {}),
                      num_alternatives=MODEL_REGISTRY[model_name].get("num_alternatives"),
                      max_num_regressors=MAX_NUM_REGRESSORS,
                      max_num_categories=MAX_NUM_CATEGORIES,
@@ -412,6 +425,7 @@ def collect_ppc_cached(model_name, variant, n_ppc_samples, seed, no_contaminatio
     result = collect_ppc(
         model_name=model_name, variant=variant, n_ppc_samples=n_ppc_samples,
         seed=seed, no_contamination=no_contamination, fixed_natural=fixed_natural,
+        posteriors_path=posteriors_path,
     )
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("wb") as fh:
@@ -924,6 +938,15 @@ def parse_args():
     p.add_argument("--refresh_cache", action="store_true",
                    help="Re-simulate and overwrite the cached draws for this configuration.")
     p.add_argument("--cache_dir", type=str, default=str(CACHE_DIR))
+    p.add_argument("--posteriors", type=str, default=None,
+                   help="Explicit posteriors .npz, overriding the default "
+                        "outputs/data/real_data/<model>/<variant>/ path. Use this to "
+                        "score a CONSTRAINED REFIT (e.g. ddm/mc_sv_fixed/) without "
+                        "inventing a new --variant. NOTE: if the refit fixes a "
+                        "parameter by dropping it from the design, its coefficients "
+                        "are masked to 0 and the link still applies -- "
+                        "shifted_softplus(0)=0.693, not 0 -- so pass --fix_natural "
+                        "for that parameter too.")
     return p.parse_args()
 
 
@@ -955,6 +978,7 @@ def main():
             seed=args.seed,
             no_contamination=args.no_contamination,
             fixed_natural=fixed_natural,
+            posteriors_path=args.posteriors,
         )
     else:
         obs_pooled, ppc_pooled, conditions, obs_ch, ppc_ch = collect_ppc_cached(
@@ -966,6 +990,7 @@ def main():
             cache_dir=args.cache_dir,
             refresh=args.refresh_cache,
             fixed_natural=fixed_natural,
+            posteriors_path=args.posteriors,
         )
     plot_ppc(obs_pooled, ppc_pooled, conditions, args.model, args.variant, outdir,
              draw_lines=not args.no_ppc_lines, max_lines=args.ppc_max_lines,
