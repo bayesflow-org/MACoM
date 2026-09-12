@@ -892,6 +892,255 @@ def plot_choice_ppc(obs_ch, ppc_ch, conditions, model_name, variant, outdir,
         logging.info(f"[saved] {savepath}")
 
 
+# ── combined figures ──────────────────────────────────────────────────────────
+# The per-condition figures above stay as they are. These put a family's whole PPC
+# on one page: every condition group's quantile panels in a row, then the
+# response-dimension check on the right, with the groups kept apart by dividers
+# rather than by being separate files.
+#
+# Group order is the FIGURE's, not the registry's. CDM_CONDITIONS lists speed
+# before difficulty; the combined figure reads difficulty first, so the order is
+# declared here instead of reordering the registry, which the per-condition
+# figures and the cache key both depend on.
+COMBINED_COND_ORDER = {
+    "ddm": ["stim_type", "truth"],
+    "rdm": ["congruency", "session"],
+    "cdm": ["difficulty", "speed"],
+}
+
+# A condition-group boundary and a change of MEASURE are not the same kind of
+# break, so they are not drawn the same way: dashed for "different levels of a
+# different factor", solid for "the y axis now means something else entirely".
+_DIV_LIGHT = dict(color=GUIDE_COLOR, lw=1.0, ls=(0, (4, 3)))
+_DIV_HEAVY = dict(color="#5a5a66", lw=1.5, ls="-")
+
+
+def _ordered_conditions(conditions, model_name):
+    want = COMBINED_COND_ORDER.get(model_name)
+    if not want:
+        return list(conditions)
+    by_name = {c[0]: c for c in conditions}
+    return [by_name[n] for n in want if n in by_name]
+
+
+def _levels_with_data(pool_obs, pool_ppc, cond_name, label_map):
+    return [l for l in label_map.values()
+            if len(pool_obs.get(cond_name, {}).get(l, []))
+            and len(pool_ppc.get(cond_name, {}).get(l, []))]
+
+
+def _draw_quantile_panel(ax, obs, ppc_samples, quantiles, xs, ppc_color, ppc_fill,
+                         xlabel, ylabel, zero_guide=False):
+    """One quantile panel, identical in construction to plot_rt_quantiles'."""
+    obs_q, med, lo, hi = _quantile_stats(obs, ppc_samples, quantiles)
+    if med is not None:
+        ax.fill_between(xs, lo, hi, color=ppc_fill, alpha=0.40,
+                        label=f"PPC {PPC_CI:g}% CI", zorder=1)
+        ax.plot(xs, med, "o-", color=ppc_color, lw=1.4, ms=4,
+                label="PPC median", zorder=2)
+    ax.plot(xs, obs_q, "s--", color=OBS_COLOR, lw=1.6, ms=4,
+            label="Observed", zorder=3)
+    if zero_guide:
+        ax.axhline(0.0, color=GUIDE_COLOR, ls=":", lw=0.8, zorder=0)
+    ax.set_xticks(xs)
+    ax.set_xticklabels([f"{q:g}" for q in quantiles])
+    ax.set_xlabel(xlabel, fontsize=8)
+    ax.set_ylabel(ylabel, fontsize=8)
+    ax.tick_params(labelsize=7)
+    ax.spines[["top", "right"]].set_visible(False)
+
+
+def _draw_choice_bars(ax, obs_ch, ppc_ch, ordered, ppc_color):
+    """Every level of every condition group as ONE proportion panel.
+
+    The per-condition version spends a whole axes on two or three bars, so DDM's
+    choice check costs four panels to show eight numbers. Collapsed here: bars run
+    left to right level by level, condition groups are separated by a wider gap
+    with a divider in it, and each level is named above its own cluster since the
+    x axis is spent on the choice values.
+    """
+    GAP_LEVEL, GAP_GROUP = 1.4, 3.0
+    x, ticks, ticklabels, boundaries, first = 0.0, [], [], [], True
+    for gi, (cond_name, _, label_map) in enumerate(ordered):
+        levels_here = _levels_with_data(obs_ch, ppc_ch, cond_name, label_map)
+        if not levels_here:
+            continue
+        if gi and ticks:
+            boundaries.append(x - GAP_GROUP / 2)
+        for lbl in levels_here:
+            o = np.asarray(obs_ch[cond_name][lbl], dtype=float)
+            P = ppc_ch[cond_name][lbl]
+            choices = np.unique(o)
+            obs_p = np.array([np.mean(o == v) for v in choices])
+            ppc_p = np.array([[np.mean(np.asarray(p) == v) for v in choices] for p in P])
+            lo, hi = np.percentile(ppc_p, [_CI_LO, _CI_HI], axis=0)
+            med = np.median(ppc_p, axis=0)
+            xb = x + np.arange(len(choices), dtype=float)
+            ax.bar(xb, obs_p, width=0.6, color=OBS_COLOR, alpha=0.85,
+                   label="Observed proportion" if first else None, zorder=1)
+            ax.errorbar(xb, med, yerr=[med - lo, hi - med], fmt="o", color=ppc_color,
+                        capsize=3, lw=1.2, ms=4, zorder=2,
+                        label=f"PPC median + {PPC_CI:g}% CI" if first else None)
+            ax.text(xb.mean(), 1.02, lbl, transform=ax.get_xaxis_transform(),
+                    ha="center", va="bottom", fontsize=9)
+            ticks.extend(xb.tolist())
+            ticklabels.extend(f"{int(v)}" for v in choices)
+            x += len(choices) - 1 + GAP_LEVEL
+            first = False
+        x += GAP_GROUP - GAP_LEVEL
+    for b in boundaries:
+        ax.axvline(b, ymin=0, ymax=1.0, clip_on=False, zorder=0, **_DIV_LIGHT)
+    ax.set_xticks(ticks)
+    ax.set_xticklabels(ticklabels)
+    ax.set_xlim(ticks[0] - 0.85, ticks[-1] + 0.85)
+    ax.set_xlabel("Choice", fontsize=8)
+    ax.set_ylabel("Proportion", fontsize=8)
+    ax.tick_params(labelsize=7)
+    ax.spines[["top", "right"]].set_visible(False)
+
+
+def _axes_divider(fig, ax_left, ax_right, heavy=False):
+    """Vertical rule in the gutter between two axes, in figure coordinates.
+
+    Drawn on the FIGURE rather than inside an axes so it can span the full height
+    of a multi-row grid and sit in the whitespace, where an axvline cannot reach.
+    """
+    bl, br = ax_left.get_position(), ax_right.get_position()
+    x = (bl.x1 + br.x0) / 2
+    y0, y1 = min(bl.y0, br.y0), max(bl.y1, br.y1)
+    pad = 0.05 * (y1 - y0)
+    style = dict(_DIV_HEAVY if heavy else _DIV_LIGHT)
+    fig.add_artist(Line2D([x, x], [y0 - pad, y1 + pad], transform=fig.transFigure,
+                          zorder=5, **style))
+
+
+def _combined_legend(primary, extra_axes=()):
+    """One legend, on the first subplot, covering every series in the FIGURE.
+
+    "Only the first panel gets a legend" and "the choice panel uses marks the
+    quantile panels never draw" pull against each other; taking the handles from
+    the other axes too satisfies both, so nothing in the figure goes unlabelled.
+    """
+    H, L, seen = [], [], set()
+    for ax in (primary,) + tuple(extra_axes):
+        for h, l in zip(*ax.get_legend_handles_labels()):
+            if l and l not in seen:
+                seen.add(l); H.append(h); L.append(l)
+    primary.legend(H, L, fontsize=7, frameon=False)
+
+
+def plot_combined(obs_pooled, ppc_pooled, obs_ch, ppc_ch, conditions, model_name,
+                  variant, outdir, quantiles=DEFAULT_RT_QUANTILES, ppc_color=None):
+    """The family's whole PPC as one figure. Written alongside the per-condition set.
+
+    DDM / RDM -- one row: an RT-quantile panel per level of each condition group,
+    then a single collapsed choice-proportion panel. Dashed divider between the
+    condition groups, solid divider where quantiles give way to proportions.
+
+    CDM -- two rows of one panel per level: RT quantiles on top, response-angle
+    quantiles beneath, difficulty then speed across. CDM's response is a continuous
+    angle, so its response check is a quantile plot like the RT one rather than a
+    bar panel, and it shares the column layout instead of collapsing.
+
+    No titles anywhere: the level name above each panel is the only label, and the
+    rest belongs in the caption.
+    """
+    if ppc_color is None:
+        ppc_color, ppc_fill = _ppc_colors(model_name)
+    else:
+        ppc_fill = ppc_color
+    ordered = _ordered_conditions(conditions, model_name)
+    if not ordered:
+        return
+    tag = _quantile_tag(quantiles)
+    quantiles = np.asarray(quantiles, dtype=float)
+    xs = np.arange(len(quantiles))
+    outdir.mkdir(parents=True, exist_ok=True)
+
+    # (cond_name, level) in reading order, with the index of each group boundary.
+    cols, breaks = [], []
+    for cond_name, _, label_map in ordered:
+        levels_here = _levels_with_data(obs_pooled, ppc_pooled, cond_name, label_map)
+        if not levels_here:
+            continue
+        if cols:
+            breaks.append(len(cols))
+        cols += [(cond_name, l) for l in levels_here]
+    if not cols:
+        logging.info(f"[combined] skipped for {model_name}: no condition has data")
+        return
+
+    two_row = model_name == "cdm"
+
+    # Grid plan: a narrow BLANK column at every break, not just a wider gutter.
+    # tight_layout normalises wspace across the whole row, so without a real column
+    # a divider sits hard against the next panel's spine and reads as a second axis
+    # frame rather than as a break.
+    SPACER = 0.26
+    plan, ratios = [], []
+    for i, col in enumerate(cols):
+        if i in breaks:
+            plan.append(None); ratios.append(SPACER)
+        plan.append(col); ratios.append(1.0)
+    if not two_row:
+        plan.append(None); ratios.append(SPACER)
+        plan.append("choice"); ratios.append(1.5)
+
+    n_grid = len(plan)
+    width = 3.1 * sum(ratios) + 1.4
+    n_rows = 2 if two_row else 1
+    fig, axes = plt.subplots(n_rows, n_grid, squeeze=False,
+                             figsize=(width, 6.2 if two_row else 3.4),
+                             gridspec_kw={"width_ratios": ratios})
+    for g, entry in enumerate(plan):
+        if entry is None:
+            for r in range(n_rows):
+                axes[r, g].set_visible(False)
+
+    panel_cols = [g for g, e in enumerate(plan) if e is not None and e != "choice"]
+    gaps = [g for g, e in enumerate(plan) if e is None]
+
+    for j, (cond_name, lbl) in enumerate(cols):
+        ax = axes[0, panel_cols[j]]
+        _draw_quantile_panel(
+            ax, obs_pooled[cond_name][lbl], ppc_pooled[cond_name].get(lbl, []),
+            quantiles, xs, ppc_color, ppc_fill, "RT quantile", "RT (s)")
+        ax.set_title(lbl, fontsize=9)
+        if two_row:
+            ax2 = axes[1, panel_cols[j]]
+            o = np.asarray(obs_ch.get(cond_name, {}).get(lbl, []), dtype=float)
+            draws = [np.asarray(d, dtype=float)
+                     for d in ppc_ch.get(cond_name, {}).get(lbl, [])]
+            if len(o) and draws:
+                _draw_quantile_panel(ax2, o, draws, quantiles, xs, ppc_color, ppc_fill,
+                                     "Response quantile",
+                                     r"Response deviation $\theta$ (rad)",
+                                     zero_guide=True)
+            else:
+                ax2.set_visible(False)
+
+    extra = ()
+    if not two_row:
+        ax_ch = axes[0, plan.index("choice")]
+        _draw_choice_bars(ax_ch, obs_ch, ppc_ch, ordered, ppc_color)
+        extra = (ax_ch,)
+    _combined_legend(axes[0, panel_cols[0]], extra)
+
+    fig.tight_layout()
+    # Positions are only final after layout, so the dividers go in last. The last gap
+    # of a one-row figure is the quantiles/choice break -- a change of MEASURE, drawn
+    # solid; every other gap separates condition groups and is drawn dashed.
+    last_row = n_rows - 1
+    for k, g in enumerate(gaps):
+        heavy = (not two_row) and k == len(gaps) - 1
+        _axes_divider(fig, axes[0, g - 1], axes[last_row, g + 1], heavy=heavy)
+
+    savepath = outdir / f"{model_name}_{variant}_combined_ppc{tag}.pdf"
+    fig.savefig(savepath, bbox_inches="tight")
+    plt.close(fig)
+    logging.info(f"[saved] {savepath}")
+
+
 def parse_args():
     p = argparse.ArgumentParser()
     p.add_argument("--model", type=str, required=True,
@@ -1004,6 +1253,8 @@ def main():
     plot_choice_ppc(obs_ch, ppc_ch, conditions, args.model, args.variant, outdir,
                     draw_lines=not args.no_ppc_lines, max_lines=args.ppc_max_lines,
                     line_alpha=args.ppc_line_alpha, line_width=args.ppc_line_width)
+    plot_combined(obs_pooled, ppc_pooled, obs_ch, ppc_ch, conditions, args.model,
+                  args.variant, outdir, quantiles=args.rt_quantiles)
     logging.info("Done.")
 
 

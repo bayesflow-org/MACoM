@@ -1,8 +1,8 @@
 # Experiment 2 — real data (posterior predictive checks)
 
 Frozen snapshot, organised by model family. Assembled
-2026-09-12 05:06:32Z by
-`experiments/finalize_experiment_2.py` — 64 files. Git commit `6a30c182965add2c5fd63abe52a748fe7933690f`.
+2026-09-12 23:49:58Z by
+`experiments/finalize_experiment_2.py` — 71 files. Git commit `f8ea1218356e7c1caa1e5448903d3298d02d3d9e`.
 Per-file sources and original mtimes: `MANIFEST.csv`.
 
 ## Contents
@@ -16,11 +16,26 @@ Each family folder holds, per grouping variable:
 | `rt_quantiles_<cond>.pdf` | RT quantiles with predictive intervals |
 | `rt_qq_<cond>.pdf` | RT quantile–quantile |
 | `choice_quantiles_<cond>.pdf` | **CDM only** — see below |
+| `combined_ppc.pdf` | every grouping variable in ONE figure — see below |
 
 `posteriors/{ddm,rdm,cdm}.npz` holds the posterior draws every figure was simulated
 from, so the plots can be regenerated without re-running inference.
 `posteriors/ddm_sv_fixed.npz` is the separate fit behind `ddm/sv_fixed/`; the
 simulation-only variants have no npz of their own because they reuse their family's.
+
+### combined_ppc.pdf
+
+The family's whole check on one page, for the per-condition figures above are the same
+data split across files. Condition groups are separated by a dashed vertical divider.
+
+- **DDM / RDM** — one row: an RT-quantile panel per level of each grouping variable,
+  then a solid divider and a single collapsed choice-proportion panel carrying every
+  level of both groups. The solid rule marks a change of MEASURE, not of grouping.
+- **CDM** — two rows of five: RT quantiles on top, response-angle quantiles beneath,
+  difficulty then speed across.
+
+No titles: each panel is labelled only by its condition level, and one legend on the
+first panel covers every series in the figure.
 
 Grouping variables: DDM `stim_type`/`truth`, RDM `congruency`/`session`,
 CDM `difficulty`/`speed`.

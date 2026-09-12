@@ -50,11 +50,18 @@ PPC_VARIANTS = {
 # Matched as PREFIXES because these names carry a condition suffix
 # (`rt_quantiles_difficulty`). Order-safe: "choice_ppc_speed" does not start with
 # "ppc_", so the two never collide.
-KEEP = ("ppc", "choice_ppc", "rt_quantiles", "rt_qq", "choice_quantiles")
+KEEP = ("ppc", "choice_ppc", "rt_quantiles", "rt_qq", "choice_quantiles",
+        "combined_ppc")
 
 
 def kept(rest: str) -> bool:
-    return any(rest.startswith(k + "_") for k in KEEP)
+    """Prefix match, plus an exact one for types that carry NO condition suffix.
+
+    `combined_ppc` holds every condition in one figure, so unlike the five per-condition
+    types its name ends at the type. A prefix-only test would silently drop it.
+    """
+    stem = rest[:-4] if rest.endswith(".pdf") else rest
+    return any(stem == k or stem.startswith(k + "_") for k in KEEP)
 
 
 def tidy(rest: str) -> str:
@@ -206,11 +213,26 @@ Each family folder holds, per grouping variable:
 | `rt_quantiles_<cond>.pdf` | RT quantiles with predictive intervals |
 | `rt_qq_<cond>.pdf` | RT quantile–quantile |
 | `choice_quantiles_<cond>.pdf` | **CDM only** — see below |
+| `combined_ppc.pdf` | every grouping variable in ONE figure — see below |
 
 `posteriors/{{ddm,rdm,cdm}}.npz` holds the posterior draws every figure was simulated
 from, so the plots can be regenerated without re-running inference.
 `posteriors/ddm_sv_fixed.npz` is the separate fit behind `ddm/sv_fixed/`; the
 simulation-only variants have no npz of their own because they reuse their family's.
+
+### combined_ppc.pdf
+
+The family's whole check on one page, for the per-condition figures above are the same
+data split across files. Condition groups are separated by a dashed vertical divider.
+
+- **DDM / RDM** — one row: an RT-quantile panel per level of each grouping variable,
+  then a solid divider and a single collapsed choice-proportion panel carrying every
+  level of both groups. The solid rule marks a change of MEASURE, not of grouping.
+- **CDM** — two rows of five: RT quantiles on top, response-angle quantiles beneath,
+  difficulty then speed across.
+
+No titles: each panel is labelled only by its condition level, and one legend on the
+first panel covers every series in the figure.
 
 Grouping variables: DDM `stim_type`/`truth`, RDM `congruency`/`session`,
 CDM `difficulty`/`speed`.
