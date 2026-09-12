@@ -15,6 +15,13 @@ by `experiments/finalize_experiment_4.py` — 135 files. Commit `675154b89ed6bfb
 Variants: `intercept_only_7d` (original 7-cell target), `vfixed` (6 cells, v pinned),
 `varying_values` (9 cells, trial-varying item values).
 
+`representation/crossfamily` is the pooled cross-family case. `app3_pooled_geometry.pdf`
+carries all five families (DDM/RDM/CDM trained, aDDM and LBA held out) in two panels —
+the encoder before and after the LBA finetune — from ONE shared MDS fit, so the panels
+are in the same frame and comparable. `app3_summaries.npz` stores both encoders, the
+finetuned ones under `<family>__finetuned`. The per-family RSA table and the CKA matrix
+stay on the ORIGINAL encoder and the original four families.
+
 ## Headline results
 
 **The arms differ at BOTH levels.** Posteriors: C2ST excess over an empirical null of
@@ -23,7 +30,7 @@ better on log-density and CRPS. Geometry: RSA 0.80-0.81 against a
 dimensionality-matched null of 0.85-0.87 — at or BELOW the null. Not "same
 representation, different decoder".
 
-**Model families occupy orthogonal subspaces.** Between-family CKA is -0.011..0.000 for
+**Model families occupy orthogonal subspaces.** Between-family CKA is -0.008..0.007 for
 every pair, including DDM-RDM which were trained together, against split-half noise
 ceilings of 0.96-0.98. This argues against a single universal code.
 
@@ -34,9 +41,17 @@ zero-shot encoder already carried the information (weight drift: encoder 3.3%,
 decoder 6.8%). This answers experiment 3's forgetting question at a level aggregate
 NRMSE cannot reach.
 
-**Held-out aDDM transfers fine.** encoder-vs-shared-parameter RSA: ddm 0.217, rdm 0.478,
-cdm 0.377, aDDM 0.223 — above trained DDM, and the spread across trained families
-dwarfs the trained/held-out gap.
+**Held-out aDDM transfers fine.** encoder-vs-shared-parameter RSA: ddm 0.245, rdm 0.448,
+cdm 0.514, aDDM 0.216 — the spread across trained families (0.245-0.514) dwarfs the
+trained/held-out gap (0.03 to the nearest trained family).
+
+These four scores are RE-ROLLED BY EVERY RUN and should not be quoted to three
+decimals. `simulate_family` draws through numba's RNG, which `np.random.seed` does not
+control, so a rerun at the same seed gets different datasets: the 2026-09-03 run read
+ddm 0.217 / rdm 0.478 / cdm 0.377 / aDDM 0.223, and cdm moved 0.377 -> 0.514 on the
+rerun. What is stable across runs is the ORDERING claim above and the noise ceilings.
+An earlier wording had aDDM "above trained DDM"; that was within this re-roll and does
+not hold on the current numbers.
 
 ## Reading the numbers
 

@@ -609,9 +609,14 @@ stage_e4_representation() {
     # dimensionality-matched null. The frozen summary is 128-d and the learned one
     # 16-d, so no posterior metric can compare them — this is the only level at
     # which the universal-representation claim is testable.
+    # Needs BOTH encoders: the pooled-geometry figure draws one panel per encoder,
+    # before and after the LBA finetune, so this stage now depends on e3_finetune.
+    need "$LBA_FT_CKPT" "stage e3_finetune" || return 1
     run "cross-family representation (RSA / CKA)" -- \
         "$PY" -m experiments.experiment_4.crossfamily_representation \
-            --cogformer_checkpoint "$MC_CKPT" --num_models 3 || return 1
+            --cogformer_checkpoint "$MC_CKPT" --num_models 3 \
+            --finetuned_checkpoint "$LBA_FT_CKPT" --finetuned_num_models 4 \
+            --fixed_A "$LBA_FIXED_A" || return 1
     run "aDDM representation — varying_values" -- \
         "$PY" -m experiments.experiment_4.addm_representation \
             --case varying_values --tag varying_e500 \

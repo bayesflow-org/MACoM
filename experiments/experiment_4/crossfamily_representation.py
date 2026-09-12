@@ -1,9 +1,9 @@
 """Application 3: cross-family representational geometry of a frozen CogFormer encoder.
 
-The encoder was trained on DDM + RDM + CDM. aDDM it never saw. If the encoder learned a
-UNIVERSAL representation of evidence-accumulation data rather than three memorised
-family-specific schemes, its geometry on the held-out family should look like its
-geometry on the trained ones.
+The encoder was trained on DDM + RDM + CDM. aDDM and LBA it never saw. If the encoder
+learned a UNIVERSAL representation of evidence-accumulation data rather than three
+memorised family-specific schemes, its geometry on the held-out families should look
+like its geometry on the trained ones.
 
 TWO ANALYSES, BECAUSE RSA NEEDS SHARED CONDITIONS
 -------------------------------------------------
@@ -19,7 +19,13 @@ correlated across families. Instead:
 
   (b) POOLED EMBEDDING. Put every family's datasets in ONE RDM and ask what the
       geometry organises by -- family identity, or parameters -- and crucially where
-      aDDM falls: inside the manifold spanned by the trained three, or off it.
+      the held-out families fall: inside the manifold spanned by the trained three,
+      or off it. Drawn twice, side by side, for the encoder before and after LBA
+      finetuning, from a single shared MDS fit so the panels are comparable.
+
+The per-family score (a) and the between-family CKA table stay on the ORIGINAL encoder
+and the original four families, so their numbers remain comparable with earlier runs;
+LBA enters the pooled embedding only.
 
 MATCHED DESIGNS
 ---------------
@@ -48,19 +54,35 @@ from cogformer.simulator import ModelFamily, ModelClass
 from cogformer.simulator.benchmarks.ssms import DDM, RDM
 from cogformer.simulator.benchmarks.ssms.cdm import CDM
 from cogformer.simulator.benchmarks.ssms.addm import ADDM
+from cogformer.simulator.benchmarks.ssms.lba import LBA
 from cogformer.simulator.benchmarks.ssms.priors import (ddm_priors, rdm_priors,
-                                                        cdm_priors, addm_priors)
+                                                        cdm_priors, addm_priors,
+                                                        lba_priors)
 from cogformer.simulator.benchmarks.ssms.link_funs import (ddm_link_fun, rdm_link_fun,
-                                                           cdm_link_fun, addm_link_fun)
+                                                           cdm_link_fun, addm_link_fun,
+                                                           lba_link_fun)
+from cogformer.utils.plot_utils import FAMILY_PALETTES
 from experiments.configs import MODELS as _BASE
 from experiments.utils import add_global_params
 from .representation import simulate_repeats, assemble_input, cka
 from .addm_representation import rdm_of, parameter_rdm, build_dataset
 from .addm_bf_apply import CogFormerEncoderSummary, _load_cogformer
 
-SHARED = ["v", "a", "tau", "s_v", "s_tau"]      # present in all four families
+SHARED = ["v", "a", "tau", "s_v", "s_tau"]      # present in all five families
 TRAINED = ["ddm", "rdm", "cdm"]
-COLORS = {"ddm": "#1b6ca8", "rdm": "#e08214", "cdm": "#2b8a3e", "addm": "#b2182b"}
+HELD_OUT = ["addm", "lba"]                      # neither was in the encoder's training mix
+POOLED = TRAINED + HELD_OUT
+LBA_PARAMS = ["v", "v_diff", "a", "tau", "s_v", "s_tau"]
+
+# Family hues come from the project-wide registry so that "orange is LBA" means the
+# same thing here as in every other figure. aDDM has no registry entry; teal is the
+# only hue the four registered families leave unclaimed. Held-out families also take
+# a different MARKER, so the trained/held-out split survives greyscale printing and
+# does not rest on hue alone.
+COLORS = {f: FAMILY_PALETTES[f]()["main_effect"] for f in ("ddm", "rdm", "cdm", "lba")}
+COLORS["addm"] = "#0E7C86"
+MARKERS = {f: ("D" if f in HELD_OUT else "o") for f in POOLED}
+
 OUT = Path("./outputs/data/encoder_rep/representation/crossfamily")
 FIG = Path("./outputs/figures/encoder_rep/representation/crossfamily")
 
@@ -69,14 +91,22 @@ SPECS = {
     "rdm":  (RDM,  rdm_priors,  rdm_link_fun),
     "cdm":  (CDM,  cdm_priors,  cdm_link_fun),
     "addm": (ADDM, addm_priors, addm_link_fun),
+    "lba":  (LBA,  lba_priors,  lba_link_fun),
 }
 
 
-def family_setup(key):
+def family_setup(key, fixed_A=0.5):
     cls, prior_fn, link_fn = SPECS[key]
     if key == "addm":
         params = ["v", "v_diff", "omega", "a", "tau", "s_v", "s_tau"]
         model = cls(first_fixation="item0")
+    elif key == "lba":
+        # fixed_A pins the start-point range so that `a` is the THRESHOLD, which is
+        # what the finetuned checkpoint was trained against. Leaving A free makes `a`
+        # the start-point range instead -- the bug that held zero-shot recovery at
+        # 0.24 until it was found (0.86 once fixed).
+        params = LBA_PARAMS
+        model = cls(fixed_A=fixed_A)
     else:
         params = add_global_params(_BASE[key], ["pi"], [r"$\pi$"])["intrinsic_params"]
         model = cls()
@@ -85,7 +115,7 @@ def family_setup(key):
     return mf, params, link
 
 
-def simulate_family(key, n_cond, n_rep, num_obs, seed):
+def simulate_family(key, n_cond, n_rep, num_obs, seed, fixed_A=0.5):
     """Simulate repeats for one family and return the RAW per-trial tensors.
 
     Separated from encoding so that several encoders can be applied to the SAME data.
@@ -94,7 +124,7 @@ def simulate_family(key, n_cond, n_rep, num_obs, seed):
     produce different datasets. Comparing encoder A on dataset X against encoder B on
     dataset Y drives every similarity to ~0 regardless of the encoders.
     """
-    mf, params, link = family_setup(key)
+    mf, params, link = family_setup(key, fixed_A)
     dc = {"1": params}
     mk = {"free_intrinsics": params, "fixed_intrinsics": [], "fixed_values": {}}
     samples, reps = simulate_repeats(
@@ -121,9 +151,9 @@ def simulate_family(key, n_cond, n_rep, num_obs, seed):
     return raw, theta
 
 
-def encode_family(key, enc, n_cond, n_rep, num_obs, seed):
+def encode_family(key, enc, n_cond, n_rep, num_obs, seed, fixed_A=0.5):
     """Convenience wrapper: simulate one family and encode with a single encoder."""
-    raw, theta = simulate_family(key, n_cond, n_rep, num_obs, seed)
+    raw, theta = simulate_family(key, n_cond, n_rep, num_obs, seed, fixed_A)
     return enc.summarize_raw(raw).reshape(n_cond, n_rep, -1), theta
 
 
@@ -181,56 +211,121 @@ def noise_ceiling(summ):
     return rsa, cka(a.mean(1), b.mean(1))
 
 
-def plot_pooled(summ_by_fam, outpath, seed=0):
-    """MDS of the pooled condition means: where does the held-out family sit?"""
-    X, lab = [], []
-    for fam, s in summ_by_fam.items():
-        X.append(s.mean(1)); lab += [fam] * s.shape[0]
-    X = np.concatenate(X); lab = np.array(lab)
-    Xs = (X - X.mean(0)) / (X.std(0) + 1e-12)
-    emb = MDS(n_components=2, random_state=seed, n_init=4,
-              normalized_stress="auto").fit_transform(Xs)
-    fig, ax = plt.subplots(1, 2, figsize=(11, 4.5))
-    for fam in summ_by_fam:
-        m = lab == fam
-        ax[0].scatter(emb[m, 0], emb[m, 1], s=14, alpha=.65, color=COLORS[fam],
-                      label=f"{fam}{' (held out)' if fam == 'addm' else ''}")
-    ax[0].set_title("Pooled encoder geometry (MDS)", fontsize=10)
-    ax[0].set_xlabel("MDS 1"); ax[0].set_ylabel("MDS 2"); ax[0].legend(fontsize=8)
-    # between-family CKA: is the held-out family's geometry like the trained ones'?
+def between_family_cka(summ_by_fam):
+    """CKA between every pair of families, diagonal replaced by the noise ceiling.
+
+    No longer plotted -- the matrix panel was dropped from the pooled figure -- but
+    still computed and written to CSV, because it is what the orthogonality claim
+    rests on. Diagonal = split-half ceiling, not the trivial CKA(x, x) = 1.
+    """
     fams = list(summ_by_fam)
     M = np.zeros((len(fams), len(fams)))
     for i, a in enumerate(fams):
         for j, b in enumerate(fams):
             M[i, j] = cka(summ_by_fam[a].mean(1), summ_by_fam[b].mean(1))
-    # Diagonal = split-half noise ceiling, not the trivial CKA(x,x)=1.
     for i, f in enumerate(fams):
         M[i, i] = noise_ceiling(summ_by_fam[f])[1]
-    im = ax[1].imshow(M, cmap="magma", vmin=0, vmax=1)
-    ax[1].set_xticks(range(len(fams))); ax[1].set_xticklabels(fams)
-    ax[1].set_yticks(range(len(fams))); ax[1].set_yticklabels(fams)
-    for i in range(len(fams)):
-        for j in range(len(fams)):
-            ax[1].text(j, i, f"{M[i,j]:.2f}", ha="center", va="center",
-                       color="w" if M[i, j] < .6 else "k", fontsize=8)
-    ax[1].set_title("CKA of encoder geometry\n(diagonal = split-half noise ceiling)",
-                    fontsize=10)
-    fig.colorbar(im, ax=ax[1], fraction=.046)
-    fig.tight_layout(); fig.savefig(outpath, bbox_inches="tight"); plt.close(fig)
     return fams, M
+
+
+DISPLAY = {"ddm": "DDM", "rdm": "RDM", "cdm": "CDM", "addm": "aDDM", "lba": "LBA"}
+
+
+def _fam_label(fam):
+    return f"{DISPLAY.get(fam, fam.upper())}{' (held out)' if fam in HELD_OUT else ''}"
+
+
+def plot_pooled(summ_by_enc, outpath, seed=0):
+    """MDS of the pooled condition means, one panel per encoder.
+
+    Left is the encoder as trained on DDM + RDM + CDM; right is the same encoder
+    after LBA finetuning. Both panels carry every family, so the question the figure
+    answers is where the two HELD-OUT families (aDDM, LBA) sit relative to the
+    trained three, and whether finetuning moved them.
+
+    ONE MDS FIT, BOTH PANELS. An MDS embedding is arbitrary up to rotation and
+    reflection, so fitting each panel separately would put the two in unrelated
+    frames and any apparent movement between them would be an artefact of the fit.
+    The two encoders' points are embedded together and then split, which makes the
+    panels share axes -- and the standardisation is likewise computed once, over the
+    pooled matrix, so neither encoder gets its own scaling.
+    """
+    encs = list(summ_by_enc)
+    fams = list(summ_by_enc[encs[0]])
+    blocks, fam_lab, enc_lab = [], [], []
+    for e in encs:
+        for fam in fams:
+            s = summ_by_enc[e][fam]
+            blocks.append(s.mean(1))
+            fam_lab += [fam] * s.shape[0]
+            enc_lab += [e] * s.shape[0]
+    X = np.concatenate(blocks)
+    fam_lab, enc_lab = np.array(fam_lab), np.array(enc_lab)
+
+    Xs = (X - X.mean(0)) / (X.std(0) + 1e-12)
+    emb = MDS(n_components=2, random_state=seed, n_init=4,
+              normalized_stress="auto").fit_transform(Xs)
+
+    fig, ax = plt.subplots(1, 2, figsize=(9.5, 5.2))
+    titles = {"original": "Before LBA finetuning", "finetuned": "After LBA finetuning"}
+    # MDS output is centred, so symmetric limits give both axes the same span; with a
+    # square box that makes the DATA aspect equal too, which a distance embedding
+    # needs -- a stretched axis misreports how far apart two families are.
+    lim = float(np.abs(emb).max()) * 1.08
+    for k, e in enumerate(encs):
+        for fam in fams:
+            m = (fam_lab == fam) & (enc_lab == e)
+            ax[k].scatter(emb[m, 0], emb[m, 1], s=14, alpha=.65, color=COLORS[fam],
+                          marker=MARKERS[fam], linewidths=0, label=_fam_label(fam))
+        ax[k].set_title(titles.get(e, e), fontsize=10)
+        ax[k].set_xlabel("MDS 1")
+        ax[k].set_xlim(-lim, lim); ax[k].set_ylim(-lim, lim)
+        ax[k].set_box_aspect(1)
+        for side in ("top", "right"):
+            ax[k].spines[side].set_visible(False)
+    ax[0].set_ylabel("MDS 2")
+
+    handles, labels = ax[0].get_legend_handles_labels()
+    fig.tight_layout(rect=[0, 0.12, 1, 0.95])
+    fig.suptitle("Pooled encoder geometry (MDS)", fontsize=11)
+    fig.legend(handles, labels, loc="lower center", bbox_to_anchor=(0.5, 0.01),
+               ncol=len(fams), fontsize=8, frameon=False, markerscale=1.8)
+    fig.savefig(outpath, bbox_inches="tight"); plt.close(fig)
 
 
 def main():
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
     a = parse_args()
     OUT.mkdir(parents=True, exist_ok=True); FIG.mkdir(parents=True, exist_ok=True)
-    enc = CogFormerEncoderSummary(_load_cogformer(a, torch.device(a.encoder_device)),
-                                  torch.device(a.encoder_device))
-    summ_by_fam, rows = {}, []
-    for fam in TRAINED + ["addm"]:
+    dev = torch.device(a.encoder_device)
+
+    # Two encoders, same architecture, both 128-d out. `model_embedding` is the only
+    # thing the finetune resized (3 -> 4) and the encoder never touches it, so the
+    # summaries are directly comparable.
+    orig_num_models = a.num_models
+    enc_orig = CogFormerEncoderSummary(_load_cogformer(a, dev), dev)
+    a.num_models = a.finetuned_num_models
+    a.cogformer_checkpoint = a.finetuned_checkpoint
+    enc_ft = CogFormerEncoderSummary(_load_cogformer(a, dev), dev)
+    a.num_models = orig_num_models
+    logging.info(f"loaded both encoders (original num_models={orig_num_models}, "
+                 f"finetuned={a.finetuned_num_models})")
+
+    shp = (a.n_conditions, a.n_repeats, -1)
+    summ = {"original": {}, "finetuned": {}}
+    rows = []
+    for fam in POOLED:
         logging.info(f"[{fam}] simulating {a.n_conditions}x{a.n_repeats} and encoding")
-        s, th = encode_family(fam, enc, a.n_conditions, a.n_repeats, a.num_obs, a.seed)
-        summ_by_fam[fam] = s
+        # Simulated ONCE and encoded twice. Re-simulating per encoder does not work
+        # even at a fixed seed -- the numba kernels use their own RNG -- and comparing
+        # two encoders on two different datasets drives every similarity to ~0.
+        raw, th = simulate_family(fam, a.n_conditions, a.n_repeats, a.num_obs,
+                                  a.seed, a.fixed_A)
+        s = enc_orig.summarize_raw(raw).reshape(shp)
+        summ["original"][fam] = s
+        summ["finetuned"][fam] = enc_ft.summarize_raw(raw).reshape(shp)
+        if fam == "lba":
+            continue                        # per-family transfer table is unchanged
         score = float(compare(rdm_of(s), shared_parameter_rdm(th), method="corr")[0, 0])
         nc_rsa, nc_cka = noise_ceiling(s)
         rows.append({"family": fam, "trained": fam in TRAINED,
@@ -245,11 +340,16 @@ def main():
                  f"| held-out aDDM: {held:.4f}")
     df.to_csv(OUT / "app3_per_family_rsa.csv", index=False, float_format="%.4f")
     plot_scores(df, FIG / "app3_transfer_scores.pdf")
-    fams, M = plot_pooled(summ_by_fam, FIG / "app3_pooled_geometry.pdf", a.seed)
+    plot_pooled(summ, FIG / "app3_pooled_geometry.pdf", a.seed)
+    # CKA matrix keeps the original encoder and the original four families, so the
+    # CSV stays comparable with the runs that produced the orthogonality claim.
+    fams, M = between_family_cka({f: summ["original"][f] for f in TRAINED + ["addm"]})
     pd.DataFrame(M, index=fams, columns=fams).to_csv(OUT / "app3_between_family_cka.csv",
                                                      float_format="%.4f")
-    np.savez_compressed(OUT / "app3_summaries.npz",
-                        **{f: v for f, v in summ_by_fam.items()})
+    np.savez_compressed(
+        OUT / "app3_summaries.npz",
+        **{f: v for f, v in summ["original"].items()},
+        **{f"{f}__finetuned": v for f, v in summ["finetuned"].items()})
     logging.info(f"[saved] {OUT} | {FIG}")
 
 
@@ -259,9 +359,16 @@ def parse_args():
     p.add_argument("--n_repeats", type=int, default=4)
     p.add_argument("--num_obs", type=int, default=500)
     p.add_argument("--seed", type=int, default=0)
-    p.add_argument("--cogformer_checkpoint", type=str, required=True)
+    p.add_argument("--cogformer_checkpoint", type=str, required=True,
+                   help="Encoder as trained on DDM + RDM + CDM (left panel).")
+    p.add_argument("--finetuned_checkpoint", type=str, required=True,
+                   help="LBA-finetuned encoder (right panel).")
+    p.add_argument("--fixed_A", type=float, default=0.5,
+                   help="LBA start-point range, pinned to match the finetuned "
+                        "checkpoint. See family_setup.")
     p.add_argument("--encoder_device", type=str, default="cuda")
     p.add_argument("--num_models", type=int, default=3)
+    p.add_argument("--finetuned_num_models", type=int, default=4)
     for k, v in [("encoder_num_layers", 8), ("decoder_num_layers", 8),
                  ("encoder_num_heads", 8), ("decoder_num_heads", 8), ("num_seeds", 32),
                  ("seed_dim", 128), ("proj_dim", 256), ("model_embed_dim", 8),
