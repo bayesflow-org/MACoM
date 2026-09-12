@@ -18,6 +18,7 @@ from pathlib import Path
 
 import numpy as np
 import matplotlib.pyplot as plt
+from matplotlib.colors import to_rgb
 from matplotlib.lines import Line2D
 from scipy.stats import gaussian_kde
 
@@ -914,6 +915,11 @@ COMBINED_COND_ORDER = {
 _DIV_LIGHT = dict(color=GUIDE_COLOR, lw=1.0, ls=(0, (4, 3)))
 _DIV_HEAVY = dict(color="#5a5a66", lw=1.5, ls="-")
 
+# Gutter width, as matplotlib's fraction of the mean axes width. Applied uniformly
+# after tight_layout so every pair of neighbouring panels is spaced identically,
+# whether or not a divider falls between them.
+WSPACE = 0.46
+
 
 def _ordered_conditions(conditions, model_name):
     want = COMBINED_COND_ORDER.get(model_name)
@@ -950,53 +956,100 @@ def _draw_quantile_panel(ax, obs, ppc_samples, quantiles, xs, ppc_color, ppc_fil
     ax.spines[["top", "right"]].set_visible(False)
 
 
-def _draw_choice_bars(ax, obs_ch, ppc_ch, ordered, ppc_color):
-    """Every level of every condition group as ONE proportion panel.
+def _level_shades(n):
+    """`n` steps of the observed neutral, dark to light.
 
-    The per-condition version spends a whole axes on two or three bars, so DDM's
-    choice check costs four panels to show eight numbers. Collapsed here: bars run
-    left to right level by level, condition groups are separated by a wider gap
-    with a divider in it, and each level is named above its own cluster since the
-    x axis is spent on the choice values.
+    Observed data keeps ONE neutral identity in every figure in this experiment --
+    giving it a hue would imply the data changes with the model (see
+    plot_utils.OBSERVED_COLOR). Levels are therefore told apart by lightness within
+    that neutral, not by colour.
     """
-    GAP_LEVEL, GAP_GROUP = 1.4, 3.0
-    x, ticks, ticklabels, boundaries, first = 0.0, [], [], [], True
+    base = np.array(to_rgb(OBS_COLOR))
+    return [tuple(base + (1.0 - base) * f) for f in np.linspace(0.0, 0.62, max(n, 1))]
+
+
+def _draw_choice_bars(ax, obs_ch, ppc_ch, ordered, ppc_color):
+    """Every condition level's choice proportions in ONE panel, bundled by CHOICE.
+
+    One cluster per choice value, one bar per condition level inside it. The
+    question the panel exists to answer -- does this choice's proportion move
+    across conditions -- is then a comparison between neighbouring bars rather than
+    one made across the width of the figure. The condition groups stay separated by
+    a divider INSIDE each cluster, so the grouping structure survives the regrouping.
+
+    The level names can no longer sit above their bars, so this panel carries its
+    own legend naming them; the quantile panels' legend does not describe any of it.
+    """
+    levels = []                      # (cond_name, label) in reading order
+    gsplit = None                    # index where the second condition group starts
     for gi, (cond_name, _, label_map) in enumerate(ordered):
-        levels_here = _levels_with_data(obs_ch, ppc_ch, cond_name, label_map)
-        if not levels_here:
+        here = _levels_with_data(obs_ch, ppc_ch, cond_name, label_map)
+        if not here:
             continue
-        if gi and ticks:
-            boundaries.append(x - GAP_GROUP / 2)
-        for lbl in levels_here:
-            o = np.asarray(obs_ch[cond_name][lbl], dtype=float)
-            P = ppc_ch[cond_name][lbl]
-            choices = np.unique(o)
-            obs_p = np.array([np.mean(o == v) for v in choices])
-            ppc_p = np.array([[np.mean(np.asarray(p) == v) for v in choices] for p in P])
-            lo, hi = np.percentile(ppc_p, [_CI_LO, _CI_HI], axis=0)
-            med = np.median(ppc_p, axis=0)
-            xb = x + np.arange(len(choices), dtype=float)
-            ax.bar(xb, obs_p, width=0.6, color=OBS_COLOR, alpha=0.85,
-                   label="Observed proportion" if first else None, zorder=1)
-            ax.errorbar(xb, med, yerr=[med - lo, hi - med], fmt="o", color=ppc_color,
-                        capsize=3, lw=1.2, ms=4, zorder=2,
-                        label=f"PPC median + {PPC_CI:g}% CI" if first else None)
-            ax.text(xb.mean(), 1.02, lbl, transform=ax.get_xaxis_transform(),
-                    ha="center", va="bottom", fontsize=9)
-            ticks.extend(xb.tolist())
-            ticklabels.extend(f"{int(v)}" for v in choices)
-            x += len(choices) - 1 + GAP_LEVEL
-            first = False
-        x += GAP_GROUP - GAP_LEVEL
-    for b in boundaries:
-        ax.axvline(b, ymin=0, ymax=1.0, clip_on=False, zorder=0, **_DIV_LIGHT)
+        if levels and gsplit is None:
+            gsplit = len(levels)
+        levels += [(cond_name, l) for l in here]
+    if not levels:
+        return
+    n_lev = len(levels)
+    shades = _level_shades(n_lev)
+
+    # Proportions per (level, choice). The choice values are the union across levels
+    # so a level that never emits some response still leaves a gap in its cluster
+    # rather than silently shifting every bar to its left.
+    stats, choices = {}, set()
+    for cond_name, lbl in levels:
+        o = np.asarray(obs_ch[cond_name][lbl], dtype=float)
+        P = ppc_ch[cond_name][lbl]
+        vals = np.unique(o)
+        obs_p = {v: float(np.mean(o == v)) for v in vals}
+        ppc_p = {v: np.array([np.mean(np.asarray(p) == v) for p in P]) for v in vals}
+        stats[(cond_name, lbl)] = (obs_p, ppc_p)
+        choices.update(vals.tolist())
+    choices = sorted(choices)
+
+    GAP_GROUP_IN, GAP_BUNDLE, BARW = 0.5, 1.5, 0.84
+    offs = [j + (GAP_GROUP_IN if gsplit is not None and j >= gsplit else 0.0)
+            for j in range(n_lev)]
+    span = offs[-1] - offs[0]
+    pitch = span + 1.0 + GAP_BUNDLE
+    handles, ticks = [], []
+    for i, c in enumerate(choices):
+        base = i * pitch
+        for j, key in enumerate(levels):
+            obs_p, ppc_p = stats[key]
+            if c not in obs_p:
+                continue
+            x = base + offs[j]
+            b = ax.bar(x, obs_p[c], width=BARW, color=shades[j], zorder=1,
+                       edgecolor=OBS_COLOR, linewidth=0.4)
+            if i == 0:
+                handles.append((b, key[1]))
+            draws = ppc_p[c]
+            lo, hi = np.percentile(draws, [_CI_LO, _CI_HI])
+            med = float(np.median(draws))
+            ax.errorbar(x, med, yerr=[[med - lo], [hi - med]], fmt="o",
+                        color=ppc_color, capsize=3, lw=1.2, ms=4, zorder=3,
+                        label=f"PPC median + {PPC_CI:g}% CI"
+                              if (i == 0 and j == 0) else None)
+        if gsplit is not None:
+            ax.axvline(base + (offs[gsplit - 1] + offs[gsplit]) / 2,
+                       zorder=0, **_DIV_LIGHT)
+        ticks.append(base + (offs[0] + offs[-1]) / 2)
+
     ax.set_xticks(ticks)
-    ax.set_xticklabels(ticklabels)
-    ax.set_xlim(ticks[0] - 0.85, ticks[-1] + 0.85)
+    ax.set_xticklabels([f"{int(c)}" for c in choices])
+    ax.set_xlim(-0.5 - BARW / 2, (len(choices) - 1) * pitch + span + 0.5 + BARW / 2)
     ax.set_xlabel("Choice", fontsize=8)
     ax.set_ylabel("Proportion", fontsize=8)
     ax.tick_params(labelsize=7)
     ax.spines[["top", "right"]].set_visible(False)
+
+    hh, ll = ax.get_legend_handles_labels()          # the PPC marker
+    H = [h for h, _ in handles] + hh
+    L = [l for _, l in handles] + ll
+    ax.legend(H, L, fontsize=6.5, frameon=False, ncol=2,
+              title="Observed proportion by condition", title_fontsize=6.5)
 
 
 def _axes_divider(fig, ax_left, ax_right, heavy=False):
@@ -1004,9 +1057,20 @@ def _axes_divider(fig, ax_left, ax_right, heavy=False):
 
     Drawn on the FIGURE rather than inside an axes so it can span the full height
     of a multi-row grid and sit in the whitespace, where an axvline cannot reach.
+
+    Centred on the CLEAR space rather than on the gap between the two axes
+    rectangles: the right panel's tick labels and y label live inside that gap, so
+    the rectangles' midpoint lands on top of them. Every gutter is the same width
+    now, so measuring the clear space is what keeps the rules consistently placed
+    instead of letting one collide.
     """
     bl, br = ax_left.get_position(), ax_right.get_position()
-    x = (bl.x1 + br.x0) / 2
+    try:
+        tb = ax_right.get_tightbbox(fig.canvas.get_renderer()).transformed(
+            fig.transFigure.inverted())
+        x = (bl.x1 + tb.x0) / 2 if tb.x0 > bl.x1 else (bl.x1 + br.x0) / 2
+    except Exception:
+        x = (bl.x1 + br.x0) / 2
     y0, y1 = min(bl.y0, br.y0), max(bl.y1, br.y1)
     pad = 0.05 * (y1 - y0)
     style = dict(_DIV_HEAVY if heavy else _DIV_LIGHT)
@@ -1072,33 +1136,21 @@ def plot_combined(obs_pooled, ppc_pooled, obs_ch, ppc_ch, conditions, model_name
 
     two_row = model_name == "cdm"
 
-    # Grid plan: a narrow BLANK column at every break, not just a wider gutter.
-    # tight_layout normalises wspace across the whole row, so without a real column
-    # a divider sits hard against the next panel's spine and reads as a second axis
-    # frame rather than as a break.
-    SPACER = 0.26
-    plan, ratios = [], []
-    for i, col in enumerate(cols):
-        if i in breaks:
-            plan.append(None); ratios.append(SPACER)
-        plan.append(col); ratios.append(1.0)
-    if not two_row:
-        plan.append(None); ratios.append(SPACER)
-        plan.append("choice"); ratios.append(1.5)
+    # EVERY gutter the same width, dividers included. An earlier version inserted a
+    # blank spacer column at each break, which bought room for the rule but left the
+    # panels either side of a divider further apart than the rest -- the grouping then
+    # read as much from the spacing as from the rule. One uniform wspace instead,
+    # widened enough to hold a divider clear of the next panel's labels.
+    ratios = [1.0] * len(cols) + ([1.5] if not two_row else [])
+    breaks_grid = list(breaks) + ([len(cols)] if not two_row else [])
 
-    n_grid = len(plan)
-    width = 3.1 * sum(ratios) + 1.4
     n_rows = 2 if two_row else 1
+    n_grid = len(ratios)
+    width = 3.1 * sum(ratios) + 1.4
     fig, axes = plt.subplots(n_rows, n_grid, squeeze=False,
                              figsize=(width, 6.2 if two_row else 3.4),
                              gridspec_kw={"width_ratios": ratios})
-    for g, entry in enumerate(plan):
-        if entry is None:
-            for r in range(n_rows):
-                axes[r, g].set_visible(False)
-
-    panel_cols = [g for g, e in enumerate(plan) if e is not None and e != "choice"]
-    gaps = [g for g, e in enumerate(plan) if e is None]
+    panel_cols = list(range(len(cols)))
 
     for j, (cond_name, lbl) in enumerate(cols):
         ax = axes[0, panel_cols[j]]
@@ -1119,21 +1171,25 @@ def plot_combined(obs_pooled, ppc_pooled, obs_ch, ppc_ch, conditions, model_name
             else:
                 ax2.set_visible(False)
 
-    extra = ()
     if not two_row:
-        ax_ch = axes[0, plan.index("choice")]
-        _draw_choice_bars(ax_ch, obs_ch, ppc_ch, ordered, ppc_color)
-        extra = (ax_ch,)
-    _combined_legend(axes[0, panel_cols[0]], extra)
+        # Carries its OWN legend: after the regrouping the level names no longer sit
+        # above their bars, and nothing in the quantile legend explains them.
+        _draw_choice_bars(axes[0, len(cols)], obs_ch, ppc_ch, ordered, ppc_color)
+    _combined_legend(axes[0, panel_cols[0]])
 
     fig.tight_layout()
-    # Positions are only final after layout, so the dividers go in last. The last gap
-    # of a one-row figure is the quantiles/choice break -- a change of MEASURE, drawn
-    # solid; every other gap separates condition groups and is drawn dashed.
+    # WSPACE LAST: tight_layout computes its own, so setting it up front has no
+    # effect. This widens every gutter by the same amount, which is what keeps the
+    # panels equally spaced while leaving the rules somewhere to go.
+    fig.subplots_adjust(wspace=WSPACE)
+    fig.canvas.draw()
+    # Positions are only final after layout, so the dividers go in last. The last
+    # break of a one-row figure is the quantiles/choice one -- a change of MEASURE,
+    # drawn solid; every other separates condition groups and is drawn dashed.
     last_row = n_rows - 1
-    for k, g in enumerate(gaps):
-        heavy = (not two_row) and k == len(gaps) - 1
-        _axes_divider(fig, axes[0, g - 1], axes[last_row, g + 1], heavy=heavy)
+    for k, g in enumerate(breaks_grid):
+        heavy = (not two_row) and k == len(breaks_grid) - 1
+        _axes_divider(fig, axes[0, g - 1], axes[last_row, g], heavy=heavy)
 
     savepath = outdir / f"{model_name}_{variant}_combined_ppc{tag}.pdf"
     fig.savefig(savepath, bbox_inches="tight")
