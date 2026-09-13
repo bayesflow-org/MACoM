@@ -1141,9 +1141,17 @@ def _draw_choice_grid(fig, pos, obs_ch, ppc_ch, ordered, ppc_color, bar_color):
     #
     # x0.86 on the budget: two titles centred one pitch apart and each exactly one
     # pitch wide meet edge to edge. The budget is the pitch MINUS a gap, not the pitch.
+    #
+    # The pitch is MEASURED from the placed axes, not recomputed from `pos`: _fit_block
+    # has already narrowed the block by the left overhang, so a budget derived from the
+    # original footprint is too generous and the titles come out still touching.
     fig.canvas.draw()
     rend = fig.canvas.get_renderer()
-    avail = pos.width / (ncol + CHOICE_GW * (ncol - 1)) * (1 + CHOICE_GW) * 0.86
+    if ncol > 1:
+        pitch = abs(axes[0][1].get_position().x0 - axes[0][0].get_position().x0)
+    else:
+        pitch = axes[0][0].get_position().width
+    avail = pitch * 0.86
     worst = 0.0
     for row in axes:
         for ax in row:
