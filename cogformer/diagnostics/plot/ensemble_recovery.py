@@ -36,6 +36,7 @@ def ensemble_recovery(
     max_ticks: int = None,
     fit_labels: bool = False,
     fit_delta: float = 0.0,
+    equal_gaps: bool = False,
     wspace: float = None,
     hspace: float = None,
     thumb_scale: float = 1.0,
@@ -285,7 +286,7 @@ def ensemble_recovery(
         # the neighbouring one. Done after the spacing below, since the cell size is
         # what is being measured.
         fitted_label_size = _fit_grid_labels(fig, axarr, row_idx.size, num_cols,
-                                             wspace, hspace, fit_delta)
+                                             wspace, hspace, fit_delta, equal_gaps)
 
     if shared_xlabel:
         # ONE x label for the grid. Every column shares the same x quantity, and at a
@@ -307,7 +308,38 @@ def ensemble_recovery(
     return fig
 
 
-def _fit_grid_labels(fig, axarr, n_rows, n_cols, wspace, hspace, fit_delta=0.0):
+def _equalize_row_gaps(fig, axarr, n_rows, n_cols, iters=6):
+    """Shrink the figure HEIGHT until the gap between rows matches the gap between
+    columns, both measured between TIGHT bounding boxes.
+
+    Between ink, not between axes boxes: the column gap carries each panel's y tick
+    labels and the row gap its x tick labels, so two gaps with identical box-to-box
+    numbers can look nothing alike. tightbbox is what the eye is judging.
+
+    Height rather than hspace, for the same reason the pi grid needs width rather
+    than wspace: the panels are square by box_aspect, so once they are width-limited
+    their height is fixed and closing hspace only pads the cell around them.
+    """
+    if n_rows < 2 or n_cols < 2:
+        return
+    for _ in range(iters):
+        fig.canvas.draw()
+        rend = fig.canvas.get_renderer()
+        t00 = axarr[0, 0].get_tightbbox(rend)
+        t01 = axarr[0, 1].get_tightbbox(rend)
+        t10 = axarr[1, 0].get_tightbbox(rend)
+        gap_x, gap_y = t01.x0 - t00.x1, t00.y0 - t10.y1
+        if gap_y <= 0 or abs(gap_y - gap_x) < 2.0:
+            break
+        w_in, h_in = fig.get_size_inches()
+        new_h = max(1.0, h_in - (gap_y - gap_x) * (n_rows - 1) / fig.dpi)
+        if abs(new_h - h_in) < 0.01:
+            break
+        fig.set_size_inches(w_in, new_h)
+
+
+def _fit_grid_labels(fig, axarr, n_rows, n_cols, wspace, hspace, fit_delta=0.0,
+                     equal_gaps=False):
     """Tighten the grid, then size the axis labels to the cell they sit in.
 
     ONE size for both axes, set by the x label against the cell WIDTH, and returned
@@ -324,6 +356,10 @@ def _fit_grid_labels(fig, axarr, n_rows, n_cols, wspace, hspace, fit_delta=0.0):
         adj["hspace"] = hspace
     if adj:
         fig.subplots_adjust(**adj)
+    if equal_gaps:
+        # BEFORE the labels are fitted: this resizes the figure, so the panel width
+        # the labels are measured against is only final once it has run.
+        _equalize_row_gaps(fig, axarr, n_rows, n_cols)
     fig.canvas.draw()
 
     figW, figH = fig.get_size_inches()
@@ -517,24 +553,33 @@ def global_ensemble_recovery(
     if equal_gaps and n_rows > 1 and n_cols_grid > 1:
         # MATCH THE COLUMN GAP TO THE ROW GAP, measured rather than guessed.
         #
-        # wspace alone cannot do it. The axes are square by box_aspect and here they
-        # are HEIGHT-limited, so their width is fixed by the row height and the
-        # leftover cell width shows up as gap. Closing wspace to zero still leaves
-        # cell_width - axes_width between them, and on this grid that floor is wider
-        # than the row gap. So: close wspace first, then take the remaining excess out
-        # of the FIGURE WIDTH, which is the only thing that narrows the cells.
+        # MEASURED BETWEEN INK, NOT BETWEEN AXES BOXES. The row gap is full of tick
+        # labels and titles while the column gap is empty, so matching the axes-box
+        # gaps leaves the columns looking far further apart than the rows even though
+        # the numbers agree. tightbbox includes each panel's decorations, which is
+        # what the eye is actually judging.
+        #
+        # wspace alone cannot close it either: the axes are square by box_aspect and
+        # HEIGHT-limited here, so their width is fixed by the row height and the
+        # leftover cell width shows up as gap even at wspace=0. The excess comes out
+        # of the FIGURE WIDTH, the only thing that narrows the cells.
         fig.subplots_adjust(wspace=0.0)
-        for _ in range(3):
+        inv = fig.transFigure.inverted()
+        for _ in range(6):
             fig.canvas.draw()
-            a00 = axarr[0, 0].get_window_extent()
-            a01 = axarr[0, 1].get_window_extent()
-            a10 = axarr[1, 0].get_window_extent()
-            gap_x, gap_y = a01.x0 - a00.x1, a00.y0 - a10.y1
-            if gap_x <= 0 or gap_y <= 0 or abs(gap_x - gap_y) < 1.5:
+            rend = fig.canvas.get_renderer()
+            t00 = axarr[0, 0].get_tightbbox(rend)
+            t01 = axarr[0, 1].get_tightbbox(rend)
+            t10 = axarr[1, 0].get_tightbbox(rend)
+            gap_x, gap_y = t01.x0 - t00.x1, t00.y0 - t10.y1
+            if gap_x <= 0 or abs(gap_x - gap_y) < 2.0:
                 break
             shrink_px = (gap_x - gap_y) * (n_cols_grid - 1)
             w_in, h_in = fig.get_size_inches()
-            fig.set_size_inches(max(1.0, w_in - shrink_px / fig.dpi), h_in)
+            new_w = max(1.0, w_in - shrink_px / fig.dpi)
+            if abs(new_w - w_in) < 0.01:
+                break
+            fig.set_size_inches(new_w, h_in)
     return fig
 
 
