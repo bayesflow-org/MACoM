@@ -921,7 +921,7 @@ _DIV_HEAVY = dict(color="#5a5a66", lw=1.5, ls="-")
 # whether or not a divider falls between them. Kept to what the widened tick labels
 # and a divider actually need -- the dividers are placed against the labels' real
 # extent, so the gutter does not have to be padded for them.
-WSPACE = 0.42
+WSPACE = 0.26
 
 # SIZED FOR THE PAGE, NOT FOR THE SCREEN. The target is a LaTeX \textwidth of 5.5 in
 # (US Letter, 1.5 in margins). The figure is drawn at FIG_SCALE times that, so
@@ -938,8 +938,8 @@ FIG_SCALE = 2.0
 FIG_W = TEXT_WIDTH_IN * FIG_SCALE
 
 # Nominal sizes; divide by FIG_SCALE for what the reader gets.
-FS_TITLE, FS_LABEL, FS_TICK, FS_LEG = 16, 14, 10, 10          # 8 / 7 / 5 / 5 pt
-FS_MINI_TITLE, FS_MINI_LABEL, FS_MINI_TICK, FS_MINI_LEG = 14, 12, 9, 8.5
+FS_TITLE, FS_LABEL, FS_TICK, FS_LEG = 16, 14, 10, 8           # 8 / 7 / 5 / 4 pt
+FS_MINI_TITLE, FS_MINI_LABEL, FS_MINI_TICK, FS_MINI_LEG = 11, 9.5, 7.5, 8
 
 # Gaps inside the 2x2, as fractions of a mini axes. Module level because the
 # title-fitting pass has to use the same numbers the layout used.
@@ -1049,9 +1049,9 @@ def _draw_choice_grid(fig, pos, obs_ch, ppc_ch, ordered, ppc_color, bar_color):
         top = max(top, float(np.max([np.mean(o == v) for v in vals])))
         ppc_p = np.array([[np.mean(np.asarray(p) == v) for v in vals] for p in P])
         top = max(top, float(np.max(np.percentile(ppc_p, _CI_HI, axis=0))))
-    # Headroom for the legend, which sits inside the top-left panel: at quarter
-    # size there is no corner big enough to hold it over the bars.
-    top *= 1.95
+    # The legend sits under the block now, not in the top-left panel, so the bars
+    # get the height back: just enough headroom to keep the tallest CI off the spine.
+    top *= 1.12
 
     for k, (cond_name, lbl) in enumerate(levels):
         r, c = divmod(k, ncol)
@@ -1123,18 +1123,22 @@ def _draw_choice_grid(fig, pos, obs_ch, ppc_ch, ordered, ppc_color, bar_color):
 
     # Short labels, not the quantile panels' wording: a quarter-size panel is not
     # wide enough for "PPC median + 95% CI" and the text runs into its neighbour.
-    # The legend is wider than the shrunken axes it belongs to, so it overhangs into
-    # the gap. Raise that axes above its neighbours and drop its opaque background,
-    # or the panel drawn after it paints over the overhanging half.
-    axes[0][0].set_zorder(10)
-    axes[0][0].patch.set_visible(False)
-    axes[0][0].legend(
+    # ONE ROW, UNDER THE BLOCK. Inside a quarter-size panel the legend was wider than
+    # its own axes and had to overhang a neighbour; below the grid it has the block's
+    # full width and costs the bars no headroom. Placed against the bottom row's
+    # measured extent so it clears the "Choice" label rather than a guessed offset.
+    fig.canvas.draw()
+    rend = fig.canvas.get_renderer()
+    inv = fig.transFigure.inverted()
+    bot = min(ax.get_tightbbox(rend).transformed(inv).y0
+              for ax in axes[nrow - 1] if ax.get_visible())
+    fig.legend(
         [Patch(facecolor=bar_color, edgecolor=ppc_color, lw=0.6),
-         Line2D([], [], color=ppc_color, marker="o", ms=3.2, lw=1.1)],
+         Line2D([], [], color=ppc_color, marker="o", ms=3.0, lw=1.1)],
         ["Observed", f"PPC {PPC_CI:g}% CI"],
-        fontsize=FS_MINI_LEG, frameon=False, loc="upper left",
-        handlelength=0.9, handletextpad=0.4, labelspacing=0.2,
-        borderpad=0.1, borderaxespad=0.15)
+        loc="upper center", bbox_to_anchor=(pos.x0 + pos.width / 2, bot - 0.012),
+        ncol=2, fontsize=FS_MINI_LEG, frameon=False,
+        handlelength=1.0, handletextpad=0.4, columnspacing=1.4, borderaxespad=0.0)
     return axes
 
 
