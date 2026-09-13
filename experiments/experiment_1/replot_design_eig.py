@@ -47,11 +47,12 @@ def parse_args():
     p.add_argument("--label_fs", type=float, default=16)
     p.add_argument("--legend_fs", type=float, default=13)
     p.add_argument("--tick_fs", type=float, default=12)
-    p.add_argument("--stack_legend", action=argparse.BooleanOptionalAction, default=True,
-                   help="Put the decoder text above the legend entries rather than\n"
-                        "beside them. Beside, the two widths ADD and that sum sets the\n"
-                        "saved figure width, which caps every font once the page\n"
-                        "scales it down.")
+    # One row across the full width. It does make the saved figure wider than the
+    # panels alone -- the decoder text and the entries sit side by side and their
+    # widths add -- and that width is what the page scale is computed against.
+    p.add_argument("--stack_legend", action=argparse.BooleanOptionalAction, default=False,
+                   help="Stack the decoder text above the entries instead of beside "
+                        "them. Narrower, but two rows.")
     p.add_argument("--n_boot", type=int, default=200)
     p.add_argument("--seed", type=int, default=0)
     p.add_argument("--write_csv", action="store_true",

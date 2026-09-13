@@ -9,7 +9,8 @@ from cogformer.simulator.design_utils import (
     build_parameter_mask, build_design_matrix, build_random_design_config,
     build_ensemble_row_labels,
 )
-from cogformer.utils.plot_utils import credible_interval, _add_mask_legend, _add_config_legend
+from cogformer.utils.plot_utils import (credible_interval, _add_mask_legend,
+                                        _add_config_legend, fit_text)
 
 
 def ensemble_recovery(
@@ -33,6 +34,9 @@ def ensemble_recovery(
     annot_fontsize: float = 12,
     shared_xlabel: bool = False,
     max_ticks: int = None,
+    fit_labels: bool = False,
+    wspace: float = None,
+    hspace: float = None,
     thumb_scale: float = 1.0,
     thumb_per_row: int | None = None,
     alpha: float = 0.5,
@@ -272,6 +276,14 @@ def ensemble_recovery(
                 ax.set_xlabel("Ground Truth" if r_i == n_kept - 1 else "",
                               fontsize=label_fontsize)
 
+    if fit_labels:
+        # THE PANELS ARE THE FIGURE. Labels are sized to the cell they belong to --
+        # x labels to a cell's width, row labels to its height -- rather than to an
+        # absolute point size, so they fill their cell exactly and never spill into
+        # the neighbouring one. Done after the spacing below, since the cell size is
+        # what is being measured.
+        _fit_grid_labels(fig, axarr, row_idx.size, num_cols, wspace, hspace)
+
     if shared_xlabel:
         # ONE x label for the grid. Every column shares the same x quantity, and at a
         # page-sized figure "Ground Truth" is wider than a panel, so per-panel labels
@@ -286,8 +298,39 @@ def ensemble_recovery(
         compact_masks = [m[row_idx] for m in parameter_masks]
         _add_mask_legend(fig, compact_masks, colors, labels, n_kept, num_cols,
                          label_fontsize=legend_fontsize, pixel_alphas=pixel_alpha_maps,
-                         thumb_scale=thumb_scale, per_row=thumb_per_row)
+                         thumb_scale=thumb_scale, per_row=thumb_per_row,
+                         fit_labels=fit_labels)
     return fig
+
+
+def _fit_grid_labels(fig, axarr, n_rows, n_cols, wspace, hspace):
+    """Tighten the grid, then size each axis label to the cell it sits in."""
+    fig.tight_layout()
+    adj = {}
+    if wspace is not None:
+        adj["wspace"] = wspace
+    if hspace is not None:
+        adj["hspace"] = hspace
+    if adj:
+        fig.subplots_adjust(**adj)
+    fig.canvas.draw()
+
+    figW, figH = fig.get_size_inches()
+    pos = axarr[0, 0].get_position()
+    cell_w_in, cell_h_in = pos.width * figW, pos.height * figH
+
+    xlabels, ylabels = [], []
+    for r in range(n_rows):
+        for c in range(n_cols):
+            ax = axarr[r, c]
+            if ax.get_xlabel():
+                xlabels.append(ax.xaxis.label)
+            if ax.get_ylabel():
+                ylabels.append(ax.yaxis.label)
+    # Rotated, a y label's extent along the page is its HEIGHT, so it is matched
+    # against the cell's height rather than its width.
+    fit_text(fig, xlabels, cell_w_in, axis="x")
+    fit_text(fig, ylabels, cell_h_in, axis="y")
 
 
 def global_ensemble_recovery(

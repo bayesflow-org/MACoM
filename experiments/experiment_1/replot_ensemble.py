@@ -65,25 +65,25 @@ def parse_args():
 
 # width_in, title, label, legend, tick, annot -- drawn at 2x the intended page width.
 #
-# The pi grid also gets FEWER COLUMNS. Twelve panels across a half-text-width figure
-# leaves each one 0.23 in on the page, at which point nothing in it is legible however
-# the fonts are set; three columns give 0.9 in, which the text fits. The trade is a
-# tall narrow figure instead of a wide flat one, which is the right shape for a
-# half-column slot anyway.
+# The pi grid stays 2 rows of 6, which is the shape the figure is meant to have. That
+# does mean each panel is narrow once the page scales it down, so its text is sized to
+# the panel rather than to a legibility target -- the panels are the point.
 PAGE_SPEC = {
-    "recovery":        dict(width=11.0, title=17, label=15, legend=13, tick=9,  annot=12),
-    "recovery_global": dict(width=5.6,  title=15, label=14, legend=9,  tick=11, annot=11),
+    # label/legend here are only STARTING sizes for recovery: fit_labels rescales
+    # each one to its cell, so what matters is the cell, not this number.
+    "recovery":        dict(width=11.0, title=15, label=12, legend=10, tick=8,  annot=10),
+    "recovery_global": dict(width=11.0, title=12, label=11, legend=9,  tick=8,  annot=9),
 }
 DEFAULT_SPEC = dict(width=None, title=None, label=None, legend=None, tick=None,
                     annot=None)
-GLOBAL_PER_ROW = 3
+GLOBAL_PER_ROW = 6
 
 # The design-cell names ("1", "u_1(:c_1)") are what the mask is indexed by, and are
 # unreadable as row labels on a figure. Same four rows, named for what they are.
 # Wrapped: rotated, a row label's length is measured against the panel's HEIGHT, and
 # "Main Effect 1" on one line is longer than a page-sized panel is tall, so the four
 # labels overprint each other. The words are unchanged.
-ROW_LABELS = ["Intercept", "Main\nEffect 1", "Main\nEffect 2", "Interaction"]
+ROW_LABELS = ["Intercept", "Main Effect 1", "Main Effect 2", "Interaction"]
 
 
 def main():
@@ -175,8 +175,10 @@ def main():
     for name in wanted:
         fn, global_fn, extra, main_only = registry[name]
         logging.info(f"drawing {name}")
-        row_kw = {"row_labels": ROW_LABELS, "shared_xlabel": True, "max_ticks": 3} \
-            if name == "recovery" else {}
+        # Labels fitted to their cell and the gutters pulled in as far as they go:
+        # the panels are what the figure is for, so nothing else gets to claim space.
+        row_kw = {"row_labels": ROW_LABELS, "max_ticks": 3, "fit_labels": True,
+                  "wspace": 0.08, "hspace": 0.08} if name == "recovery" else {}
         fig = sized(fn, name, n_rows_grid, n_cols_main,
                     **shared, **extra, **main_only, **row_kw)
         if fig is not None:

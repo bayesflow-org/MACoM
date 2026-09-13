@@ -80,6 +80,38 @@ def credible_interval(x: np.ndarray, prob: float = 0.95, axis: int = None, **kwa
     # Compute quantiles
     return np.quantile(x, q=(lower_q, upper_q), axis=axis, **kwargs)
 
+# margin < 1: a label sized to exactly its cell touches its neighbour, and the
+# outermost one lands on the figure edge. The few percent held back is the gap.
+def fit_text(fig, artists, target_in, axis="x", margin=0.90, min_size=3.0,
+             max_size=None):
+    """Scale each text artist so its extent along `axis` fills `target_in` inches.
+
+    Used where a label's job is to sit inside a cell rather than to hit an absolute
+    point size: the cell is the unit the reader compares against, so a label wider
+    than its cell has to shrink and one much narrower is wasting the space. Measured
+    per artist, so a long label and a short one in the same figure end up at
+    different sizes -- which is the point, since it is the extent that is being
+    matched, not the type size.
+    """
+    if not artists:
+        return
+    fig.canvas.draw()
+    rend = fig.canvas.get_renderer()
+    dpi = fig.dpi
+    for art in artists:
+        txt = art.get_text() if hasattr(art, "get_text") else ""
+        if not txt:
+            continue
+        bb = art.get_window_extent(renderer=rend)
+        cur_in = (bb.width if axis == "x" else bb.height) / dpi
+        if cur_in <= 0:
+            continue
+        size = art.get_fontsize() * (target_in * margin) / cur_in
+        if max_size is not None:
+            size = min(size, max_size)
+        art.set_fontsize(max(min_size, size))
+
+
 def _add_mask_legend(
     fig: plt.Figure,
     parameter_masks: list,
@@ -94,6 +126,7 @@ def _add_mask_legend(
     thumb_scale: float = 1.0,
     max_per_column: int = 6,
     per_row: int | None = None,
+    fit_labels: bool = False,
 ):
     """
     Add parameter mask thumbnails as a visual legend in a strip on the LEFT
@@ -136,6 +169,7 @@ def _add_mask_legend(
     """
     figW, figH = fig.get_size_inches()
     n = len(parameter_masks)
+    thumb_label_artists = []
     if per_row is not None and per_row > 0:
         # Row-major: per_row thumbnails across, as many rows as needed.
         n_cols_leg = min(per_row, n)
@@ -268,6 +302,13 @@ def _add_mask_legend(
         for sp in ax_t.spines.values():
             sp.set_visible(False)
         ax_t.set_xlabel(labels[k], fontsize=label_fontsize, labelpad=3)
+        thumb_label_artists.append(ax_t.xaxis.label)
+
+    # Thumbnail captions sized to their own thumbnail, for the same reason the grid's
+    # axis labels are sized to a cell: the thumbnail is the unit, and a caption wider
+    # than it runs into the next one.
+    if fit_labels and thumb_label_artists:
+        fit_text(fig, thumb_label_artists, thumb_w_fig * figW, axis="x")
 
     return strip_w_fig
 

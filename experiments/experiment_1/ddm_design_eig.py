@@ -501,18 +501,14 @@ def _plot(df, outdir, figsize=(9.0, 5.0), label_fs=14, legend_fs=12, tick_fs=Non
         handles.append(line); labels.append(label)
 
     LABEL_FS, LEGEND_FS = label_fs, legend_fs
-    # THREE lines, not one. Rotated, this label's length is measured against the
-    # panel's HEIGHT, and the panels are square: on one line it is longer than the
-    # panel is tall, and even two lines only just fits at the sizes a half-text-width
-    # figure needs. Three keeps the longest line comfortably inside.
-    axes[0].set_ylabel("Expected\ninformation\ngain (nats)", fontsize=LABEL_FS)
+    axes[0].set_ylabel("EIG (nats)", fontsize=LABEL_FS)
     axes[1].set_ylabel("Mean NRMSE", fontsize=LABEL_FS)
     # Ticks only at the trial counts actually swept. Matplotlib's default locator
     # adds 300/500/700/900, which invites reading a value off the curve at a trial
     # count that was never run.
     ticks = sorted(df.num_obs.unique())
     for ax in axes:
-        ax.set_xlabel("Trials per dataset", fontsize=LABEL_FS)
+        ax.set_xlabel("Number of trials", fontsize=LABEL_FS)
         ax.set_xticks(ticks)
         ax.set_xticklabels([str(int(t)) for t in ticks])
         ax.grid(alpha=0.25)
