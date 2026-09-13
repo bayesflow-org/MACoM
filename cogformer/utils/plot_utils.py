@@ -1,68 +1,15 @@
-import logging
 import random
-from pathlib import Path
 
 import numpy as np
 import matplotlib.pyplot as plt
 import matplotlib.colors as mcolors
-from matplotlib import font_manager
 from matplotlib.lines import Line2D
 
 
-# --------------------------------------------------------------------------- #
-# Typography. Set HERE rather than per script: every figure module in the
-# project imports this one, and a per-script rcParams block is how half the
-# figures end up in one face and half in another.
-#
-# The font is VENDORED under cogformer/utils/fonts and registered at import,
-# not installed on the machine: a system font would make the figures depend on
-# whoever set that machine up. The TTFs are not in git, though -- run
-# ./fetch_fonts.sh to pull the pinned release. Absent them, everything still
-# draws in matplotlib's default sans and says so ONCE, because the failure mode
-# worth guarding against is not a crash but a silent one: figures that differ
-# from outputs/finals in a way nobody notices until the paper is typeset.
-#
-# MATH STAYS COMPUTER MODERN. Text is Inter; anything inside $...$ -- the theta
-# and pi in the CDM response-angle labels -- renders in matplotlib's built-in
-# "cm" fontset, which is the face LaTeX uses by default, so the symbols match a
-# LaTeX document instead of matching the surrounding sans text. mathtext.fontset
-# is independent of font.family, so the two can differ on purpose like this.
-_FONT_DIR = Path(__file__).resolve().parent / "fonts"
-
-
-def _register_vendored_fonts():
-    """Add the vendored faces to matplotlib's font list. Idempotent."""
-    if not _FONT_DIR.is_dir():
-        return []
-    known = {f.name for f in font_manager.fontManager.ttflist}
-    added = []
-    for ttf in sorted(_FONT_DIR.glob("*.ttf")):
-        try:
-            name = font_manager.FontProperties(fname=str(ttf)).get_name()
-        except Exception:
-            continue
-        if name not in known or not any(
-                Path(f.fname) == ttf for f in font_manager.fontManager.ttflist):
-            font_manager.fontManager.addfont(str(ttf))
-            added.append(ttf.name)
-    return added
-
-
-_register_vendored_fonts()
-INTER_AVAILABLE = any(f.name == "Inter" for f in font_manager.fontManager.ttflist)
-
-if INTER_AVAILABLE:
-    # Inter FIRST, the previous default kept behind it: a machine missing the
-    # vendored files then degrades to the old look instead of erroring.
-    plt.rcParams["font.family"] = "sans-serif"
-    plt.rcParams["font.sans-serif"] = (
-        ["Inter"] + [f for f in plt.rcParams["font.sans-serif"] if f != "Inter"])
-    plt.rcParams["mathtext.fontset"] = "cm"
-else:
-    logging.warning(
-        "Inter not found in %s -- figures will use matplotlib's default sans "
-        "and will NOT match outputs/finals. Run ./fetch_fonts.sh to install it.",
-        _FONT_DIR)
+# Typography lives in cogformer.utils.style, applied at package import so that
+# scripts which never touch this module still get it. Re-exported here because
+# callers already read plot_utils.INTER_AVAILABLE.
+from .style import INTER_AVAILABLE  # noqa: F401
 
 
 def make_quadratic(ax: plt.Axes, x: np.ndarray, y: np.ndarray, color: str = "black"):

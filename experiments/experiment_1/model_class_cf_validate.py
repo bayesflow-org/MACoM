@@ -164,6 +164,209 @@ def parse_args():
 
 
 @torch.no_grad()
+def plot_case(case, colors, max_num_categories, max_num_regressors,
+              skip_posteriors=True, skip_log_gamma=True):
+    """Every figure for one (family, case), from arrays that are already in hand.
+
+    Split out of main's phase 3 so ``replot_per_case`` can redraw these from the
+    saved ``*_cf_pred.npz`` without a checkpoint or a GPU. It touches nothing but
+    ``case``'s arrays and metadata, which is why it can be driven either by a live
+    validation run or by what that run persisted.
+
+    The defaults MATCH parse_args': --skip_log_gamma and --skip_posteriors are both
+    on there, and a different default here would make a replot silently produce a
+    different set of columns from the run whose numbers it is redrawing.
+    """
+    model_name    = case["model_name"]
+    cfg_name      = case["cfg_name"]
+    design_config = case["design_config"]
+    intrinsic_params = case["intrinsic_params"]
+    variable_names   = case["variable_names"]
+    true_set      = case["true_set"]
+    pred_set      = case["pred_set"]
+    params_mask   = case["params_mask"]
+    outdir        = case["outdir"]
+    categorical_regressors = case["categorical_regressors"]
+    tag = f"{model_name.lower()}_{cfg_name}"
+    # Shared row-labeling kwargs: the mask layout is padded to the training
+    # regressor budget, and mixed cases carry contrast-coded regressors.
+    label_kwargs = {
+        "max_num_regressors": max_num_regressors,
+        "categorical_regressors": categorical_regressors,
+    }
+
+    fig = adaptive_recovery(
+        true=true_set, pred=pred_set,
+        design_config=design_config,
+        intrinsic_params=intrinsic_params,
+        max_num_categories=max_num_categories,
+        parameter_mask=params_mask,
+        variable_names=variable_names,
+        intercept_color=colors["intercept"],
+        main_effect_color=colors["main_effect"],
+        interaction_color=colors["interaction"],
+        global_params=GLOBAL_PARAMS,
+        **label_kwargs,
+    )
+    fig_path = outdir / f"{tag}_fm_recovery.pdf"
+    fig.savefig(fig_path, bbox_inches="tight")
+    plt.close(fig)
+    logging.info(f"[saved] {fig_path}")
+
+    # Global parameters (e.g. pi) are estimated jointly but plotted separately.
+    glob_fig = global_recovery(
+        true=true_set, pred=pred_set,
+        design_config=design_config,
+        intrinsic_params=intrinsic_params,
+        max_num_categories=max_num_categories,
+        global_params=GLOBAL_PARAMS,
+        parameter_mask=params_mask,
+        variable_names=variable_names,
+        global_color=colors["intercept"],
+        **label_kwargs,
+    )
+    if glob_fig is not None:
+        glob_path = outdir / f"{tag}_fm_recovery_global.pdf"
+        glob_fig.savefig(glob_path, bbox_inches="tight")
+        plt.close(glob_fig)
+        logging.info(f"[saved] {glob_path}")
+
+    coverage_fig = adaptive_coverage(
+        true=true_set, pred=pred_set,
+        design_config=design_config,
+        intrinsic_params=intrinsic_params,
+        max_num_categories=max_num_categories,
+        parameter_mask=params_mask,
+        variable_names=variable_names,
+        intercept_color=colors["intercept"],
+        main_effect_color=colors["main_effect"],
+        interaction_color=colors["interaction"],
+        global_params=GLOBAL_PARAMS,
+        **label_kwargs,
+    )
+    coverage_path = outdir / f"{tag}_fm_coverage.pdf"
+    coverage_fig.savefig(coverage_path, bbox_inches="tight")
+    plt.close(coverage_fig)
+    logging.info(f"[saved] {coverage_path}")
+
+    # Global parameters (e.g. pi): separate coverage panel.
+    cov_glob = global_coverage(
+        true=true_set, pred=pred_set, design_config=design_config,
+        variable_names=variable_names, global_params=GLOBAL_PARAMS,
+        intrinsic_params=intrinsic_params, parameter_mask=params_mask,
+        max_num_categories=max_num_categories,
+        **label_kwargs,
+    )
+    if cov_glob is not None:
+        cov_glob.savefig(outdir / f"{tag}_fm_coverage_global.pdf", bbox_inches="tight")
+        plt.close(cov_glob)
+
+    ecdf_fig = adaptive_ecdf(
+        true=true_set, pred=pred_set,
+        design_config=design_config,
+        intrinsic_params=intrinsic_params,
+        max_num_categories=max_num_categories,
+        parameter_mask=params_mask,
+        variable_names=variable_names,
+        intercept_color=colors["intercept"],
+        main_effect_color=colors["main_effect"],
+        interaction_color=colors["interaction"],
+        difference=True,
+        global_params=GLOBAL_PARAMS,
+        **label_kwargs,
+    )
+    ecdf_path = outdir / f"{tag}_fm_ecdf.pdf"
+    ecdf_fig.savefig(ecdf_path, bbox_inches="tight")
+    plt.close(ecdf_fig)
+    logging.info(f"[saved] {ecdf_path}")
+
+    # Global parameters (e.g. pi): separate ECDF panel.
+    ecdf_glob = global_ecdf(
+        true=true_set, pred=pred_set, design_config=design_config,
+        variable_names=variable_names, global_params=GLOBAL_PARAMS,
+        intrinsic_params=intrinsic_params, parameter_mask=params_mask,
+        max_num_categories=max_num_categories, difference=True,
+        **label_kwargs,
+    )
+    if ecdf_glob is not None:
+        ecdf_glob.savefig(outdir / f"{tag}_fm_ecdf_global.pdf", bbox_inches="tight")
+        plt.close(ecdf_glob)
+
+    metrics_fig = plot_adaptive_metrics(
+        true=true_set, pred=pred_set,
+        design_config=design_config,
+        intrinsic_params=intrinsic_params,
+        max_num_categories=max_num_categories,
+        parameter_mask=params_mask,
+        variable_names=variable_names,
+        intercept_color=colors["intercept"],
+        main_effect_color=colors["main_effect"],
+        interaction_color=colors["interaction"],
+        skip_log_gamma=skip_log_gamma,
+        global_params=GLOBAL_PARAMS,
+        **label_kwargs,
+    )
+    metrics_fig_path = outdir / f"{tag}_fm_metrics.pdf"
+    metrics_fig.savefig(metrics_fig_path, bbox_inches="tight")
+    plt.close(metrics_fig)
+    logging.info(f"[saved] {metrics_fig_path}")
+
+    # Global parameters (e.g. pi): separate metric heatmap.
+    metrics_glob = plot_global_metrics(
+        true=true_set, pred=pred_set, design_config=design_config,
+        intrinsic_params=intrinsic_params, max_num_categories=max_num_categories,
+        global_params=GLOBAL_PARAMS, parameter_mask=params_mask,
+        variable_names=variable_names, skip_log_gamma=skip_log_gamma,
+        **label_kwargs,
+    )
+    if metrics_glob is not None:
+        metrics_glob.savefig(outdir / f"{tag}_fm_metrics_global.pdf", bbox_inches="tight")
+        plt.close(metrics_glob)
+
+    metrics_df = compute_adaptive_metrics(
+        true=true_set, pred=pred_set,
+        design_config=design_config,
+        intrinsic_params=intrinsic_params,
+        max_num_categories=max_num_categories,
+        parameter_mask=params_mask,
+        variable_names=variable_names,
+        skip_log_gamma=skip_log_gamma,
+        global_params=GLOBAL_PARAMS,
+        **label_kwargs,
+    )
+    metrics_csv_path = outdir / f"{tag}_fm_metrics.csv"
+    metrics_df.to_csv(metrics_csv_path)
+    logging.info(f"[saved] {metrics_csv_path}")
+
+    # Global parameters (e.g. pi): separate metrics CSV.
+    metrics_glob_df = compute_global_metrics(
+        true=true_set, pred=pred_set, design_config=design_config,
+        intrinsic_params=intrinsic_params, max_num_categories=max_num_categories,
+        global_params=GLOBAL_PARAMS, parameter_mask=params_mask,
+        variable_names=variable_names, skip_log_gamma=skip_log_gamma,
+        **label_kwargs,
+    )
+    if not metrics_glob_df.empty:
+        metrics_glob_df.to_csv(outdir / f"{tag}_fm_metrics_global.csv")
+
+    if not skip_posteriors:
+        for i in range(10):
+            posterior_fig = adaptive_posterior(
+                samples=pred_set[i],
+                targets=true_set[i],
+                design_config=design_config,
+                intrinsic_params=intrinsic_params,
+                max_num_categories=max_num_categories,
+                parameter_mask=params_mask,
+                intercept_color=colors["intercept"],
+                main_effect_color=colors["main_effect"],
+                interaction_color=colors["interaction"],
+                **label_kwargs,
+            )
+            posterior_path = outdir / f"{tag}_fm_posterior_{i}.pdf"
+            posterior_fig.savefig(posterior_path, bbox_inches="tight")
+            plt.close(posterior_fig)
+
 def main():
     args = parse_args()
     torch.set_float32_matmul_precision("high")
@@ -390,195 +593,9 @@ def main():
 
     # Phase 3: generate figures (predictions are already written in phase 2)
     for case in cases:
-        model_name    = case["model_name"]
-        cfg_name      = case["cfg_name"]
-        design_config = case["design_config"]
-        intrinsic_params = case["intrinsic_params"]
-        variable_names   = case["variable_names"]
-        true_set      = case["true_set"]
-        pred_set      = case["pred_set"]
-        params_mask   = case["params_mask"]
-        outdir        = case["outdir"]
-        categorical_regressors = case["categorical_regressors"]
-        tag = f"{model_name.lower()}_{cfg_name}"
-        # Shared row-labeling kwargs: the mask layout is padded to the training
-        # regressor budget, and mixed cases carry contrast-coded regressors.
-        label_kwargs = {
-            "max_num_regressors": args.max_num_regressors,
-            "categorical_regressors": categorical_regressors,
-        }
-
-        fig = adaptive_recovery(
-            true=true_set, pred=pred_set,
-            design_config=design_config,
-            intrinsic_params=intrinsic_params,
-            max_num_categories=args.max_num_categories,
-            parameter_mask=params_mask,
-            variable_names=variable_names,
-            intercept_color=colors["intercept"],
-            main_effect_color=colors["main_effect"],
-            interaction_color=colors["interaction"],
-            global_params=GLOBAL_PARAMS,
-            **label_kwargs,
-        )
-        fig_path = outdir / f"{tag}_fm_recovery.pdf"
-        fig.savefig(fig_path, bbox_inches="tight")
-        plt.close(fig)
-        logging.info(f"[saved] {fig_path}")
-
-        # Global parameters (e.g. pi) are estimated jointly but plotted separately.
-        glob_fig = global_recovery(
-            true=true_set, pred=pred_set,
-            design_config=design_config,
-            intrinsic_params=intrinsic_params,
-            max_num_categories=args.max_num_categories,
-            global_params=GLOBAL_PARAMS,
-            parameter_mask=params_mask,
-            variable_names=variable_names,
-            global_color=colors["intercept"],
-            **label_kwargs,
-        )
-        if glob_fig is not None:
-            glob_path = outdir / f"{tag}_fm_recovery_global.pdf"
-            glob_fig.savefig(glob_path, bbox_inches="tight")
-            plt.close(glob_fig)
-            logging.info(f"[saved] {glob_path}")
-
-        coverage_fig = adaptive_coverage(
-            true=true_set, pred=pred_set,
-            design_config=design_config,
-            intrinsic_params=intrinsic_params,
-            max_num_categories=args.max_num_categories,
-            parameter_mask=params_mask,
-            variable_names=variable_names,
-            intercept_color=colors["intercept"],
-            main_effect_color=colors["main_effect"],
-            interaction_color=colors["interaction"],
-            global_params=GLOBAL_PARAMS,
-            **label_kwargs,
-        )
-        coverage_path = outdir / f"{tag}_fm_coverage.pdf"
-        coverage_fig.savefig(coverage_path, bbox_inches="tight")
-        plt.close(coverage_fig)
-        logging.info(f"[saved] {coverage_path}")
-
-        # Global parameters (e.g. pi): separate coverage panel.
-        cov_glob = global_coverage(
-            true=true_set, pred=pred_set, design_config=design_config,
-            variable_names=variable_names, global_params=GLOBAL_PARAMS,
-            intrinsic_params=intrinsic_params, parameter_mask=params_mask,
-            max_num_categories=args.max_num_categories,
-            **label_kwargs,
-        )
-        if cov_glob is not None:
-            cov_glob.savefig(outdir / f"{tag}_fm_coverage_global.pdf", bbox_inches="tight")
-            plt.close(cov_glob)
-
-        ecdf_fig = adaptive_ecdf(
-            true=true_set, pred=pred_set,
-            design_config=design_config,
-            intrinsic_params=intrinsic_params,
-            max_num_categories=args.max_num_categories,
-            parameter_mask=params_mask,
-            variable_names=variable_names,
-            intercept_color=colors["intercept"],
-            main_effect_color=colors["main_effect"],
-            interaction_color=colors["interaction"],
-            difference=True,
-            global_params=GLOBAL_PARAMS,
-            **label_kwargs,
-        )
-        ecdf_path = outdir / f"{tag}_fm_ecdf.pdf"
-        ecdf_fig.savefig(ecdf_path, bbox_inches="tight")
-        plt.close(ecdf_fig)
-        logging.info(f"[saved] {ecdf_path}")
-
-        # Global parameters (e.g. pi): separate ECDF panel.
-        ecdf_glob = global_ecdf(
-            true=true_set, pred=pred_set, design_config=design_config,
-            variable_names=variable_names, global_params=GLOBAL_PARAMS,
-            intrinsic_params=intrinsic_params, parameter_mask=params_mask,
-            max_num_categories=args.max_num_categories, difference=True,
-            **label_kwargs,
-        )
-        if ecdf_glob is not None:
-            ecdf_glob.savefig(outdir / f"{tag}_fm_ecdf_global.pdf", bbox_inches="tight")
-            plt.close(ecdf_glob)
-
-        metrics_fig = plot_adaptive_metrics(
-            true=true_set, pred=pred_set,
-            design_config=design_config,
-            intrinsic_params=intrinsic_params,
-            max_num_categories=args.max_num_categories,
-            parameter_mask=params_mask,
-            variable_names=variable_names,
-            intercept_color=colors["intercept"],
-            main_effect_color=colors["main_effect"],
-            interaction_color=colors["interaction"],
-            skip_log_gamma=args.skip_log_gamma,
-            global_params=GLOBAL_PARAMS,
-            **label_kwargs,
-        )
-        metrics_fig_path = outdir / f"{tag}_fm_metrics.pdf"
-        metrics_fig.savefig(metrics_fig_path, bbox_inches="tight")
-        plt.close(metrics_fig)
-        logging.info(f"[saved] {metrics_fig_path}")
-
-        # Global parameters (e.g. pi): separate metric heatmap.
-        metrics_glob = plot_global_metrics(
-            true=true_set, pred=pred_set, design_config=design_config,
-            intrinsic_params=intrinsic_params, max_num_categories=args.max_num_categories,
-            global_params=GLOBAL_PARAMS, parameter_mask=params_mask,
-            variable_names=variable_names, skip_log_gamma=args.skip_log_gamma,
-            **label_kwargs,
-        )
-        if metrics_glob is not None:
-            metrics_glob.savefig(outdir / f"{tag}_fm_metrics_global.pdf", bbox_inches="tight")
-            plt.close(metrics_glob)
-
-        metrics_df = compute_adaptive_metrics(
-            true=true_set, pred=pred_set,
-            design_config=design_config,
-            intrinsic_params=intrinsic_params,
-            max_num_categories=args.max_num_categories,
-            parameter_mask=params_mask,
-            variable_names=variable_names,
-            skip_log_gamma=args.skip_log_gamma,
-            global_params=GLOBAL_PARAMS,
-            **label_kwargs,
-        )
-        metrics_csv_path = outdir / f"{tag}_fm_metrics.csv"
-        metrics_df.to_csv(metrics_csv_path)
-        logging.info(f"[saved] {metrics_csv_path}")
-
-        # Global parameters (e.g. pi): separate metrics CSV.
-        metrics_glob_df = compute_global_metrics(
-            true=true_set, pred=pred_set, design_config=design_config,
-            intrinsic_params=intrinsic_params, max_num_categories=args.max_num_categories,
-            global_params=GLOBAL_PARAMS, parameter_mask=params_mask,
-            variable_names=variable_names, skip_log_gamma=args.skip_log_gamma,
-            **label_kwargs,
-        )
-        if not metrics_glob_df.empty:
-            metrics_glob_df.to_csv(outdir / f"{tag}_fm_metrics_global.csv")
-
-        if not args.skip_posteriors:
-            for i in range(10):
-                posterior_fig = adaptive_posterior(
-                    samples=pred_set[i],
-                    targets=true_set[i],
-                    design_config=design_config,
-                    intrinsic_params=intrinsic_params,
-                    max_num_categories=args.max_num_categories,
-                    parameter_mask=params_mask,
-                    intercept_color=colors["intercept"],
-                    main_effect_color=colors["main_effect"],
-                    interaction_color=colors["interaction"],
-                    **label_kwargs,
-                )
-                posterior_path = outdir / f"{tag}_fm_posterior_{i}.pdf"
-                posterior_fig.savefig(posterior_path, bbox_inches="tight")
-                plt.close(posterior_fig)
+        plot_case(case, colors, args.max_num_categories, args.max_num_regressors,
+                  skip_posteriors=args.skip_posteriors,
+                  skip_log_gamma=args.skip_log_gamma)
 
     logging.info("Done.")
 

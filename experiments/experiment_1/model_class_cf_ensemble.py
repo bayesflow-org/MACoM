@@ -102,12 +102,14 @@ def parse_args():
     return p.parse_args()
 
 
-@torch.no_grad()
-def main():
-    args = parse_args()
-    rng = np.random.default_rng(args.seed)
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+def build_model_class():
+    """The ModelClass the ensemble is defined over. No checkpoint, no GPU.
 
+    Factored out of main so ``replot_ensemble`` can rebuild the parameter space the
+    saved arrays are indexed by without repeating the construction -- a second copy
+    is how a replot silently ends up labelling columns differently from the run that
+    produced them.
+    """
     model_families = {
         "DDM": ModelFamily(model=DDM(), name="DDM", prior=ddm_priors(),
                            intrinsic_params=_MODELS_WITH_PI["ddm"]["intrinsic_params"]),
@@ -121,7 +123,22 @@ def main():
         "RDM": rdm_link_fun(),
         "CDM": cdm_link_fun(),
     }
-    model_class = ModelClass(model_families=model_families, link_funs=link_funs)
+    return model_families, ModelClass(model_families=model_families,
+                                      link_funs=link_funs)
+
+
+def ensemble_colors(n_configs):
+    """Per-config palette. Deterministic in n_configs, so a replot reproduces it."""
+    return sns.husl_palette(n_configs, h=0.05, l=0.82)
+
+
+@torch.no_grad()
+def main():
+    args = parse_args()
+    rng = np.random.default_rng(args.seed)
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
+    model_families, model_class = build_model_class()
     adapter = Adapter()
 
     n_global_params = model_class.n_global_params  # 9 (8 intrinsics + pi)
@@ -199,7 +216,7 @@ def main():
 
     true_list, pred_list, masks = [], [], []
     design_configs_out, labels, categorical_regressors_list = [], [], []
-    colors = sns.husl_palette(args.n_configs, h=0.05, l=0.82)
+    colors = ensemble_colors(args.n_configs)
 
     # Per-model counter for label numbering: "DDM | 1", "RDM | 1", "DDM | 2", ...
     model_counters = {name: 0 for name in model_names_ordered}

@@ -41,6 +41,17 @@ def parse_args():
                    help="Directory holding the sweep CSV and, optionally, the draws npz.")
     p.add_argument("--outdir", type=str, default=None,
                    help="Where to write design_eig.pdf. Defaults to --datadir.")
+    p.add_argument("--width", type=float, default=5.5,
+                   help="Figure width in inches. The default is 2x a half-text-width "
+                        "target, so the page scales it by 0.5.")
+    p.add_argument("--label_fs", type=float, default=16)
+    p.add_argument("--legend_fs", type=float, default=13)
+    p.add_argument("--tick_fs", type=float, default=12)
+    p.add_argument("--stack_legend", action=argparse.BooleanOptionalAction, default=True,
+                   help="Put the decoder text above the legend entries rather than\n"
+                        "beside them. Beside, the two widths ADD and that sum sets the\n"
+                        "saved figure width, which caps every font once the page\n"
+                        "scales it down.")
     p.add_argument("--n_boot", type=int, default=200)
     p.add_argument("--seed", type=int, default=0)
     p.add_argument("--write_csv", action="store_true",
@@ -74,7 +85,15 @@ def main():
             df.to_csv(csv_path, index=False, float_format="%.4f")
             logging.info(f"[updated] {csv_path} (+nrmse_se)")
 
-    _plot(df, outdir)
+    # SIZED FOR HALF A TEXT COLUMN. Target is 2.75 in (half of a 5.5 in \textwidth),
+    # drawn at 2x so the page scales it by 0.5 and every size below lands at half its
+    # nominal value. MEASURED on the saved PDF, which is what matters: bbox_inches
+    # ='tight' sets the final width from the widest artist, so the requested figsize
+    # is not the scale factor. At these sizes the page gets 8.3 / 6.8 / 6.2 pt; the
+    # sweep's own 9x5 default would put the labels at 4.3 pt.
+    _plot(df, outdir, figsize=(a.width, a.width * 0.56),
+          label_fs=a.label_fs, legend_fs=a.legend_fs, tick_fs=a.tick_fs,
+          stack_legend=a.stack_legend)
     logging.info(f"[saved] {outdir / 'design_eig.pdf'}")
 
 

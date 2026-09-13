@@ -1,6 +1,7 @@
 import numpy as np
 import seaborn as sns
 import matplotlib.pyplot as plt
+from matplotlib.ticker import MaxNLocator
 
 from collections.abc import Callable
 
@@ -28,6 +29,10 @@ def ensemble_recovery(
     title_fontsize: int = 24,
     label_fontsize: int = 12,
     legend_fontsize: int = 17,
+    row_labels: list = None,
+    annot_fontsize: float = 12,
+    shared_xlabel: bool = False,
+    max_ticks: int = None,
     thumb_scale: float = 1.0,
     thumb_per_row: int | None = None,
     alpha: float = 0.5,
@@ -155,8 +160,19 @@ def ensemble_recovery(
     # Per-config r-value maps (compact-row space) for mask legend pixel alphas
     r_maps = [np.zeros((n_kept, num_cols)) for _ in range(n_configs)]
 
+    # An explicit override replaces the design-cell names ("1", "u_1(:c_1)") with
+    # whatever the caller wants down the left edge. Indexed in COMPACT row order --
+    # the order the rows are drawn in -- because the caller counts the rows it sees,
+    # not the padded grid rows behind them.
+    if row_labels is not None and len(row_labels) != n_kept:
+        raise ValueError(f"row_labels has {len(row_labels)} entries but {n_kept} rows "
+                         "are drawn")
+
     for r_i, r in enumerate(row_idx):
-        ylabel = "" if global_only else row_labels_all[r]
+        if row_labels is not None:
+            ylabel = row_labels[r_i]
+        else:
+            ylabel = "" if global_only else row_labels_all[r]
 
         for c in range(num_cols):
             ax = axarr[r_i, c]
@@ -237,17 +253,30 @@ def ensemble_recovery(
                     color=color_k, alpha=cell_alpha,
                 )
             ax.text(
-                0.1, 0.95, f"r = {mean_corr:.3f}",
+                0.02, 0.95, f"r = {mean_corr:.3f}",
                 ha="left", va="center",
-                transform=ax.transAxes, size=12
+                transform=ax.transAxes, size=annot_fontsize
             )
 
             ax.set_box_aspect(1)
             ax.grid(True, color="lightgray", linestyle="--", linewidth=0.5, alpha=0.2)
             sns.despine(ax=ax)
+            if max_ticks is not None:
+                # A default locator puts five labels under a panel an inch wide and
+                # they run into the panel beside them.
+                ax.xaxis.set_major_locator(MaxNLocator(max_ticks))
+                ax.yaxis.set_major_locator(MaxNLocator(max_ticks))
             ax.set_ylabel(ylabel if c == 0 else "", fontsize=label_fontsize)
             ax.set_title(variable_names[c] if r_i == 0 else "", fontsize=title_fontsize)
-            ax.set_xlabel("Ground Truth" if r_i == n_kept - 1 else "", fontsize=label_fontsize)
+            if not shared_xlabel:
+                ax.set_xlabel("Ground Truth" if r_i == n_kept - 1 else "",
+                              fontsize=label_fontsize)
+
+    if shared_xlabel:
+        # ONE x label for the grid. Every column shares the same x quantity, and at a
+        # page-sized figure "Ground Truth" is wider than a panel, so per-panel labels
+        # simply overprint each other.
+        fig.supxlabel("Ground Truth", fontsize=label_fontsize)
 
     if global_only:
         # No coefficient-matrix structure to show — plain color legend instead.
@@ -279,6 +308,8 @@ def global_ensemble_recovery(
     title_fontsize: int = 18,
     label_fontsize: int = 14,
     figsize: tuple = None,
+    share_limits: bool = False,
+    annot_fontsize: float = 12,
     alpha: float = 0.7,
     max_per_row: int = 6,
     **kwargs,
@@ -320,6 +351,30 @@ def global_ensemble_recovery(
         figsize = (3 * n_cols_grid, 3.2 * n_rows)
     fig, axarr = plt.subplots(n_rows, n_cols_grid, figsize=figsize, squeeze=False)
 
+    # ONE scale across every panel, ticks labelled on the first column only. These
+    # panels all show the same parameter, so per-panel limits make a config whose pi
+    # happens to run to 0.08 look identical to one running to 0.15 -- the comparison
+    # the grid exists for is then invisible. Computed up front, over every config's
+    # truths and predictions together.
+    shared_lims = None
+    if share_limits:
+        vals = []
+        for k in range(n_configs):
+            for c in active_cols:
+                rows_k = np.where(parameter_masks[k][:, c] == 1.0)[0]
+                if rows_k.size == 0:
+                    continue
+                r = int(rows_k[0])
+                vals.append(np.asarray(true_list[k][:, r, c]).ravel())
+                pk = pred_list[k]
+                vals.append(np.asarray(
+                    pk[:, :, r, c].mean(axis=1) if pk.ndim == 4 else pk[:, r, c]).ravel())
+        if vals:
+            allv = np.concatenate(vals)
+            lo, hi = float(allv.min()), float(allv.max())
+            span = hi - lo if hi != lo else 1.0
+            shared_lims = (lo - span * 0.1, hi + span * 0.1)
+
     for gi, c in enumerate(active_cols):
         for k in range(n_configs):
             ax = axarr[gi * rows_per_param + k // n_cols_grid, k % n_cols_grid]
@@ -348,24 +403,29 @@ def global_ensemble_recovery(
             else:
                 y_mean = pred_k[:, r, c]
 
-            lower = min(x.min(), y_mean.min())
-            upper = max(x.max(), y_mean.max())
-            span = upper - lower if upper != lower else 1.0
-            eps = span * 0.1
-            lims = (lower - eps, upper + eps)
+            if shared_lims is not None:
+                lims = shared_lims
+            else:
+                lower = min(x.min(), y_mean.min())
+                upper = max(x.max(), y_mean.max())
+                span = upper - lower if upper != lower else 1.0
+                eps = span * 0.1
+                lims = (lower - eps, upper + eps)
             ax.set_xlim(lims); ax.set_ylim(lims)
             ax.plot(lims, lims, color="black", alpha=0.4, linestyle="dashed", linewidth=1.0)
 
             sns.scatterplot(x=x, y=y_mean, ax=ax, color=colors[k], alpha=alpha)
             corr = np.corrcoef(x, y_mean)[0, 1]
-            ax.text(0.1, 0.95, f"r = {corr:.3f}", ha="left", va="center",
-                    transform=ax.transAxes, size=12)
+            ax.text(0.02, 0.95, f"r = {corr:.3f}", ha="left", va="center",
+                    transform=ax.transAxes, size=annot_fontsize)
 
             ax.set_box_aspect(1)
             ax.grid(True, color="lightgray", linestyle="--", linewidth=0.5, alpha=0.2)
             sns.despine(ax=ax)
             ax.set_title(labels[k], fontsize=title_fontsize)
             ax.set_ylabel(variable_names[c] if is_left else "", fontsize=title_fontsize)
+            if shared_lims is not None and not is_left:
+                ax.tick_params(labelleft=False)
             ax.set_xlabel("Ground Truth" if is_bottom else "", fontsize=label_fontsize)
 
     # Hide unused trailing cells in each param block

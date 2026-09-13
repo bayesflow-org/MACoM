@@ -3,14 +3,14 @@
 Frozen snapshot. Every figure here comes from ONE checkpoint; this tree supersedes
 the scattered per-run directories under `outputs/figures/model_class/cf/`.
 
-Assembled 2026-09-11 21:51:06Z by
+Assembled 2026-09-13 20:26:03Z by
 `experiments/finalize_experiment_1.py` — 261 files.
 
 ## Provenance
 
 - checkpoint: `outputs/checkpoints/model_class/cf/r4c4_b256_e10000/cogformer_model_class_fm_l8_h8_p256_s32_d128_b256_e10000_t100.pt
   sha256: 56e997f37e1c945c4ae6d022ebe546b2010e6f257ad537cee1a9b966d7409811`
-- git commit: `675154b89ed6bfb949ab32b9755ebed45a93e3fd`
+- git commit: `2811647fb73d601df4f38fc38e95e100cab67782`
 - per-file sources, sizes and original mtimes: `MANIFEST.csv`
 
 ## Contents

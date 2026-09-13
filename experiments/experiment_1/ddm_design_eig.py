@@ -469,7 +469,8 @@ def main():
     logging.info(f"[saved] {outdir}")
 
 
-def _plot(df, outdir):
+def _plot(df, outdir, figsize=(9.0, 5.0), label_fs=14, legend_fs=12, tick_fs=None,
+          stack_legend=False):
     """EIG and NRMSE by design.
 
     The second panel used to show mean posterior contraction, which said the same
@@ -484,7 +485,7 @@ def _plot(df, outdir):
     # Sized so two SQUARE panels sit side by side without a gulf between them:
     # set_box_aspect below fixes each axes box to 1:1, and a figure much wider than
     # 2x the panel height would just pad the middle with whitespace.
-    fig, axes = plt.subplots(1, 2, figsize=(9.0, 5.0))
+    fig, axes = plt.subplots(1, 2, figsize=figsize)
     handles, labels = [], []
     for label in [d[0] for d in DESIGNS]:
         sub = df[df.design == label].sort_values("num_obs")
@@ -499,9 +500,12 @@ def _plot(df, outdir):
                 ax.fill_between(x, y - se, y + se, color=c, alpha=0.18, lw=0)
         handles.append(line); labels.append(label)
 
-    LABEL_FS = 14
-    LEGEND_FS = 12
-    axes[0].set_ylabel("Expected information gain (nats)", fontsize=LABEL_FS)
+    LABEL_FS, LEGEND_FS = label_fs, legend_fs
+    # THREE lines, not one. Rotated, this label's length is measured against the
+    # panel's HEIGHT, and the panels are square: on one line it is longer than the
+    # panel is tall, and even two lines only just fits at the sizes a half-text-width
+    # figure needs. Three keeps the longest line comfortably inside.
+    axes[0].set_ylabel("Expected\ninformation\ngain (nats)", fontsize=LABEL_FS)
     axes[1].set_ylabel("Mean NRMSE", fontsize=LABEL_FS)
     # Ticks only at the trial counts actually swept. Matplotlib's default locator
     # adds 300/500/700/900, which invites reading a value off the curve at a trial
@@ -512,6 +516,8 @@ def _plot(df, outdir):
         ax.set_xticks(ticks)
         ax.set_xticklabels([str(int(t)) for t in ticks])
         ax.grid(alpha=0.25)
+        if tick_fs is not None:
+            ax.tick_params(labelsize=tick_fs)
         ax.spines[["top", "right"]].set_visible(False)
         # Square BOX, not equal data aspect: x is trials and y is nats or NRMSE, so
         # set_aspect("equal") would be meaningless. set_box_aspect constrains the
@@ -525,11 +531,33 @@ def _plot(df, outdir):
     # matplotlib's legend `title` cannot do -- it only ever stacks the title on top.
     # So the text is a separate artist: draw once to measure both, place the pair so
     # the combined block is centred, then pin the text to the legend's left edge.
-    fig.tight_layout(rect=[0, 0.09, 1, 1])
+    # A stacked legend is two rows tall, so it needs more of the figure reserved than
+    # the single row does -- otherwise the descriptor lands on the x axis labels.
+    fig.tight_layout(rect=[0, 0.22 if stack_legend else 0.09, 1, 1])
     leg = fig.legend(handles, labels, loc="lower center", ncol=len(labels),
                      frameon=False, fontsize=LEGEND_FS, bbox_to_anchor=(0.5, 0.028))
-    desc = fig.text(0.5, 0.045, "u\u2081u\u2082   (C = Continuous, B = Binary)",
-                    ha="right", va="center", fontsize=LEGEND_FS)
+    desc_text = "u\u2081u\u2082   (C = Continuous, B = Binary)"
+
+    if stack_legend:
+        # STACKED, for a narrow target. Side by side, the text and the entries ADD
+        # their widths, and that sum -- not the panels -- ends up setting the saved
+        # figure width, which caps how large anything can be once the page scales it
+        # down. Stacked, the width is the LARGER of the two instead of their sum.
+        #
+        # The descriptor is placed against the legend's MEASURED top rather than a
+        # guessed offset: the legend's height depends on its font size, so a fixed
+        # y lands on the entries as soon as LEGEND_FS changes.
+        inv = fig.transFigure.inverted()
+        leg.set_bbox_to_anchor((0.5, 0.0), transform=fig.transFigure)
+        fig.canvas.draw()
+        lb = leg.get_window_extent().transformed(inv)
+        desc = fig.text(0.5, lb.y1 + 0.015, desc_text, ha="center", va="bottom",
+                        fontsize=LEGEND_FS)
+        fig.savefig(outdir / "design_eig.pdf", bbox_inches="tight")
+        plt.close(fig)
+        return
+
+    desc = fig.text(0.5, 0.045, desc_text, ha="right", va="center", fontsize=LEGEND_FS)
 
     gap = 0.012
     inv = fig.transFigure.inverted()
