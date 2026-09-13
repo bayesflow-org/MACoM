@@ -18,7 +18,6 @@ from pathlib import Path
 
 import numpy as np
 import matplotlib.pyplot as plt
-from matplotlib.colors import to_rgb
 from matplotlib.lines import Line2D
 from scipy.stats import gaussian_kde
 
@@ -956,106 +955,108 @@ def _draw_quantile_panel(ax, obs, ppc_samples, quantiles, xs, ppc_color, ppc_fil
     ax.spines[["top", "right"]].set_visible(False)
 
 
-def _level_shades(n):
-    """`n` steps of the observed neutral, dark to light.
+def _choice_grid_axes(fig, pos, nrow=2, ncol=2, gw=0.34, gh=0.40):
+    """`nrow` x `ncol` axes laid inside the rectangle `pos`, in figure coordinates.
 
-    Observed data keeps ONE neutral identity in every figure in this experiment --
-    giving it a hue would imply the data changes with the model (see
-    plot_utils.OBSERVED_COLOR). Levels are therefore told apart by lightness within
-    that neutral, not by colour.
+    The whole block has to occupy exactly ONE quantile panel's footprint, so the
+    axes are placed by hand inside that panel's rectangle rather than given their
+    own gridspec columns -- a nested gridspec is re-sized by tight_layout and would
+    not hold the footprint. `pos` is read AFTER layout, so it is the final rectangle.
     """
-    base = np.array(to_rgb(OBS_COLOR))
-    return [tuple(base + (1.0 - base) * f) for f in np.linspace(0.0, 0.62, max(n, 1))]
+    cw = pos.width / (ncol + gw * (ncol - 1))
+    ch = pos.height / (nrow + gh * (nrow - 1))
+    out = []
+    for r in range(nrow):
+        row = []
+        for c in range(ncol):
+            x = pos.x0 + c * (cw + gw * cw)
+            y = pos.y0 + pos.height - (r + 1) * ch - r * gh * ch
+            row.append(fig.add_axes([x, y, cw, ch]))
+        out.append(row)
+    return out
 
 
-def _draw_choice_bars(ax, obs_ch, ppc_ch, ordered, ppc_color):
-    """Every condition level's choice proportions in ONE panel, bundled by CHOICE.
+def _draw_choice_grid(fig, pos, obs_ch, ppc_ch, ordered, ppc_color):
+    """The response-dimension check as a 2x2 of per-level proportion panels.
 
-    One cluster per choice value, one bar per condition level inside it. The
-    question the panel exists to answer -- does this choice's proportion move
-    across conditions -- is then a comparison between neighbouring bars rather than
-    one made across the width of the figure. The condition groups stay separated by
-    a divider INSIDE each cluster, so the grouping structure survives the regrouping.
+    One panel per condition level, as in the standalone `choice_ppc_<cond>.pdf`
+    figures, but folded into the footprint a single quantile panel would take so the
+    row stays one row. Reading order is row-major and the condition groups are the
+    ROWS -- stimulus type above, factual truth below -- with a dashed rule between
+    them, the horizontal counterpart of the vertical rules in the quantile block.
 
-    The level names can no longer sit above their bars, so this panel carries its
-    own legend naming them; the quantile panels' legend does not describe any of it.
+    Returns the axes grid, or None when there is nothing to draw.
     """
-    levels = []                      # (cond_name, label) in reading order
-    gsplit = None                    # index where the second condition group starts
-    for gi, (cond_name, _, label_map) in enumerate(ordered):
+    levels = []
+    for cond_name, _, label_map in ordered:
         here = _levels_with_data(obs_ch, ppc_ch, cond_name, label_map)
-        if not here:
-            continue
-        if levels and gsplit is None:
-            gsplit = len(levels)
         levels += [(cond_name, l) for l in here]
     if not levels:
-        return
-    n_lev = len(levels)
-    shades = _level_shades(n_lev)
+        return None
 
-    # Proportions per (level, choice). The choice values are the union across levels
-    # so a level that never emits some response still leaves a gap in its cluster
-    # rather than silently shifting every bar to its left.
-    stats, choices = {}, set()
+    ncol = 2
+    nrow = int(np.ceil(len(levels) / ncol))
+    axes = _choice_grid_axes(fig, pos, nrow, ncol)
+
+    # One y scale across the four, or a level whose proportions happen to sit low
+    # would be drawn at the same apparent height as one that sits high.
+    top = 0.0
     for cond_name, lbl in levels:
         o = np.asarray(obs_ch[cond_name][lbl], dtype=float)
         P = ppc_ch[cond_name][lbl]
         vals = np.unique(o)
-        obs_p = {v: float(np.mean(o == v)) for v in vals}
-        ppc_p = {v: np.array([np.mean(np.asarray(p) == v) for p in P]) for v in vals}
-        stats[(cond_name, lbl)] = (obs_p, ppc_p)
-        choices.update(vals.tolist())
-    choices = sorted(choices)
+        top = max(top, float(np.max([np.mean(o == v) for v in vals])))
+        ppc_p = np.array([[np.mean(np.asarray(p) == v) for v in vals] for p in P])
+        top = max(top, float(np.max(np.percentile(ppc_p, _CI_HI, axis=0))))
+    # Headroom for the legend, which sits inside the top-left panel: at quarter
+    # size there is no corner big enough to hold it over the bars.
+    top *= 1.34
 
-    GAP_GROUP_IN, GAP_BUNDLE, BARW = 0.5, 1.5, 0.84
-    offs = [j + (GAP_GROUP_IN if gsplit is not None and j >= gsplit else 0.0)
-            for j in range(n_lev)]
-    span = offs[-1] - offs[0]
-    pitch = span + 1.0 + GAP_BUNDLE
-    handles, ticks = [], []
-    for i, c in enumerate(choices):
-        base = i * pitch
-        for j, key in enumerate(levels):
-            obs_p, ppc_p = stats[key]
-            if c not in obs_p:
-                continue
-            x = base + offs[j]
-            b = ax.bar(x, obs_p[c], width=BARW, color=shades[j], zorder=1,
-                       edgecolor=OBS_COLOR, linewidth=0.4)
-            if i == 0:
-                handles.append((b, key[1]))
-            draws = ppc_p[c]
-            lo, hi = np.percentile(draws, [_CI_LO, _CI_HI])
-            med = float(np.median(draws))
-            ax.errorbar(x, med, yerr=[[med - lo], [hi - med]], fmt="o",
-                        color=ppc_color, capsize=3, lw=1.2, ms=4, zorder=3,
-                        label=f"PPC median + {PPC_CI:g}% CI"
-                              if (i == 0 and j == 0) else None)
-        if gsplit is not None:
-            ax.axvline(base + (offs[gsplit - 1] + offs[gsplit]) / 2,
-                       zorder=0, **_DIV_LIGHT)
-        ticks.append(base + (offs[0] + offs[-1]) / 2)
+    for k, (cond_name, lbl) in enumerate(levels):
+        r, c = divmod(k, ncol)
+        ax = axes[r][c]
+        o = np.asarray(obs_ch[cond_name][lbl], dtype=float)
+        P = ppc_ch[cond_name][lbl]
+        vals = np.unique(o)
+        obs_p = np.array([np.mean(o == v) for v in vals])
+        ppc_p = np.array([[np.mean(np.asarray(p) == v) for v in vals] for p in P])
+        lo, hi = np.percentile(ppc_p, [_CI_LO, _CI_HI], axis=0)
+        med = np.median(ppc_p, axis=0)
+        x = np.arange(len(vals))
+        ax.bar(x, obs_p, width=0.55, color=OBS_COLOR, alpha=0.85, label="Observed")
+        ax.errorbar(x, med, yerr=[med - lo, hi - med], fmt="o", color=ppc_color,
+                    capsize=2.5, lw=1.1, ms=3.2,
+                    label=f"PPC median + {PPC_CI:g}% CI")
+        ax.set_xticks(x); ax.set_xticklabels([f"{int(v)}" for v in vals])
+        ax.set_ylim(0, top)
+        ax.set_title(lbl, fontsize=8)
+        ax.tick_params(labelsize=6)
+        ax.spines[["top", "right"]].set_visible(False)
+        # Axis labels only on the outer edges: at quarter size there is no room to
+        # repeat them, and repeating them says nothing a shared scale does not.
+        if c == 0:
+            ax.set_ylabel("Proportion", fontsize=7)
+        else:
+            ax.set_yticklabels([])
+        if r == nrow - 1:
+            ax.set_xlabel("Choice", fontsize=7)
 
-    ax.set_xticks(ticks)
-    ax.set_xticklabels([f"{int(c)}" for c in choices])
-    ax.set_xlim(-0.5 - BARW / 2, (len(choices) - 1) * pitch + span + 0.5 + BARW / 2)
-    ax.set_xlabel("Choice", fontsize=8)
-    ax.set_ylabel("Proportion", fontsize=8)
-    ax.tick_params(labelsize=7)
-    ax.spines[["top", "right"]].set_visible(False)
+    # Unused cells, when a family's groups do not fill the grid.
+    for k in range(len(levels), nrow * ncol):
+        r, c = divmod(k, ncol)
+        axes[r][c].set_visible(False)
 
-    hh, ll = ax.get_legend_handles_labels()          # the PPC marker
-    H = [h for h, _ in handles] + hh
-    L = [l for _, l in handles] + ll
-    # ABOVE the axes, in the band the other panels spend on their level name. Inside
-    # the axes it either sits on the bars -- the panel is nearly full-height by
-    # construction, since these are proportions -- or forces headroom that squashes
-    # them.
-    ax.legend(H, L, fontsize=6.5, frameon=False, ncol=3,
-              title="Observed proportion by condition, vs posterior predictive",
-              title_fontsize=7, loc="lower center", bbox_to_anchor=(0.5, 1.0),
-              borderaxespad=0.0, columnspacing=1.2, handlelength=1.4)
+    # Rows are condition groups, so the group break is between them.
+    if nrow > 1:
+        b0, b1 = axes[0][0].get_position(), axes[1][0].get_position()
+        y = (b1.y1 + b0.y0) / 2
+        fig.add_artist(Line2D([pos.x0, pos.x0 + pos.width], [y, y],
+                              transform=fig.transFigure, zorder=5, **_DIV_LIGHT))
+
+    _legend(axes[0][0], fontsize=5.2, frameon=False, loc="upper left",
+            handlelength=1.0, handletextpad=0.4, labelspacing=0.25,
+            borderpad=0.15, borderaxespad=0.2)
+    return axes
 
 
 def _axes_divider(fig, ax_left, ax_right, heavy=False):
@@ -1147,7 +1148,7 @@ def plot_combined(obs_pooled, ppc_pooled, obs_ch, ppc_ch, conditions, model_name
     # panels either side of a divider further apart than the rest -- the grouping then
     # read as much from the spacing as from the rule. One uniform wspace instead,
     # widened enough to hold a divider clear of the next panel's labels.
-    ratios = [1.0] * len(cols) + ([1.9] if not two_row else [])
+    ratios = [1.0] * len(cols) + ([1.0] if not two_row else [])
     breaks_grid = list(breaks) + ([len(cols)] if not two_row else [])
 
     n_rows = 2 if two_row else 1
@@ -1177,10 +1178,6 @@ def plot_combined(obs_pooled, ppc_pooled, obs_ch, ppc_ch, conditions, model_name
             else:
                 ax2.set_visible(False)
 
-    if not two_row:
-        # Carries its OWN legend: after the regrouping the level names no longer sit
-        # above their bars, and nothing in the quantile legend explains them.
-        _draw_choice_bars(axes[0, len(cols)], obs_ch, ppc_ch, ordered, ppc_color)
     _combined_legend(axes[0, panel_cols[0]])
 
     fig.tight_layout()
@@ -1189,13 +1186,25 @@ def plot_combined(obs_pooled, ppc_pooled, obs_ch, ppc_ch, conditions, model_name
     # panels equally spaced while leaving the rules somewhere to go.
     fig.subplots_adjust(wspace=WSPACE)
     fig.canvas.draw()
+
+    # The choice cell is a PLACEHOLDER: it reserves one quantile panel's footprint
+    # through layout, then hands its final rectangle to the 2x2 and steps aside.
+    grid = None
+    if not two_row:
+        holder = axes[0, len(cols)]
+        pos = holder.get_position()
+        holder.remove()
+        grid = _draw_choice_grid(fig, pos, obs_ch, ppc_ch, ordered, ppc_color)
+        fig.canvas.draw()
+
     # Positions are only final after layout, so the dividers go in last. The last
     # break of a one-row figure is the quantiles/choice one -- a change of MEASURE,
     # drawn solid; every other separates condition groups and is drawn dashed.
     last_row = n_rows - 1
     for k, g in enumerate(breaks_grid):
         heavy = (not two_row) and k == len(breaks_grid) - 1
-        _axes_divider(fig, axes[0, g - 1], axes[last_row, g], heavy=heavy)
+        right = axes[last_row, g] if not heavy else grid[0][0]
+        _axes_divider(fig, axes[0, g - 1], right, heavy=heavy)
 
     savepath = outdir / f"{model_name}_{variant}_combined_ppc{tag}.pdf"
     fig.savefig(savepath, bbox_inches="tight")

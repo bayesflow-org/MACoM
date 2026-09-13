@@ -1,8 +1,8 @@
 # Experiment 2 — real data (posterior predictive checks)
 
 Frozen snapshot, organised by model family. Assembled
-2026-09-13 00:08:25Z by
-`experiments/finalize_experiment_2.py` — 71 files. Git commit `1749a1980e0d01375b4450b6d6fe5aec345f35ee`.
+2026-09-13 04:13:38Z by
+`experiments/finalize_experiment_2.py` — 71 files. Git commit `1705ab025dd1553a92ea2d6c79101b67d58de0e6`.
 Per-file sources and original mtimes: `MANIFEST.csv`.
 
 ## Contents
@@ -29,8 +29,11 @@ The family's whole check on one page, for the per-condition figures above are th
 data split across files. Condition groups are separated by a dashed vertical divider.
 
 - **DDM / RDM** — one row: an RT-quantile panel per level of each grouping variable,
-  then a solid divider and a single collapsed choice-proportion panel carrying every
-  level of both groups. The solid rule marks a change of MEASURE, not of grouping.
+  then a solid divider and the choice-proportion check as a 2x2 of per-level panels
+  folded into the footprint ONE quantile panel would take. The solid rule marks a
+  change of MEASURE, not of grouping. Inside the 2x2 the grouping variables are the
+  rows, separated by a dashed rule; the four share a y scale, and only the top-left
+  panel carries a legend.
 - **CDM** — two rows of five: RT quantiles on top, response-angle quantiles beneath,
   difficulty then speed across.
 

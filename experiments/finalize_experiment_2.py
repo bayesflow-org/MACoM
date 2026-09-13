@@ -226,8 +226,11 @@ The family's whole check on one page, for the per-condition figures above are th
 data split across files. Condition groups are separated by a dashed vertical divider.
 
 - **DDM / RDM** — one row: an RT-quantile panel per level of each grouping variable,
-  then a solid divider and a single collapsed choice-proportion panel carrying every
-  level of both groups. The solid rule marks a change of MEASURE, not of grouping.
+  then a solid divider and the choice-proportion check as a 2x2 of per-level panels
+  folded into the footprint ONE quantile panel would take. The solid rule marks a
+  change of MEASURE, not of grouping. Inside the 2x2 the grouping variables are the
+  rows, separated by a dashed rule; the four share a y scale, and only the top-left
+  panel carries a legend.
 - **CDM** — two rows of five: RT quantiles on top, response-angle quantiles beneath,
   difficulty then speed across.
 
