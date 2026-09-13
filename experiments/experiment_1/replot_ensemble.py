@@ -178,7 +178,8 @@ def main():
         # Labels fitted to their cell and the gutters pulled in as far as they go:
         # the panels are what the figure is for, so nothing else gets to claim space.
         row_kw = {"row_labels": ROW_LABELS, "max_ticks": 3, "fit_labels": True,
-                  "wspace": 0.02, "hspace": 0.0} if name == "recovery" else {}
+                  "fit_delta": -1.0, "wspace": 0.02, "hspace": 0.0} \
+            if name == "recovery" else {}
         fig = sized(fn, name, n_rows_grid, n_cols_main,
                     **shared, **extra, **main_only, **row_kw)
         if fig is not None:
@@ -188,7 +189,7 @@ def main():
         # The pi grid wraps 12 configs into 2 rows of 6 and every panel shows the
         # same parameter, so it takes one shared scale with ticks on the first column.
         gkw = {"share_limits": True, "max_per_row": GLOBAL_PER_ROW,
-               "wspace": 0.05} if name == "recovery" else {}
+               "wspace": 0.05, "equal_gaps": True} if name == "recovery" else {}
         g_rows = int(np.ceil(n / GLOBAL_PER_ROW))
         gfig = sized(global_fn, f"{name}_global", g_rows, GLOBAL_PER_ROW,
                      **shared, **extra, **gkw)

@@ -35,6 +35,7 @@ def ensemble_recovery(
     shared_xlabel: bool = False,
     max_ticks: int = None,
     fit_labels: bool = False,
+    fit_delta: float = 0.0,
     wspace: float = None,
     hspace: float = None,
     thumb_scale: float = 1.0,
@@ -284,7 +285,7 @@ def ensemble_recovery(
         # the neighbouring one. Done after the spacing below, since the cell size is
         # what is being measured.
         fitted_label_size = _fit_grid_labels(fig, axarr, row_idx.size, num_cols,
-                                             wspace, hspace)
+                                             wspace, hspace, fit_delta)
 
     if shared_xlabel:
         # ONE x label for the grid. Every column shares the same x quantity, and at a
@@ -306,7 +307,7 @@ def ensemble_recovery(
     return fig
 
 
-def _fit_grid_labels(fig, axarr, n_rows, n_cols, wspace, hspace):
+def _fit_grid_labels(fig, axarr, n_rows, n_cols, wspace, hspace, fit_delta=0.0):
     """Tighten the grid, then size the axis labels to the cell they sit in.
 
     ONE size for both axes, set by the x label against the cell WIDTH, and returned
@@ -342,6 +343,12 @@ def _fit_grid_labels(fig, axarr, n_rows, n_cols, wspace, hspace):
                 ylabels.append(ax.yaxis.label)
     fit_text(fig, xlabels, cell_w_in, axis="x")
     size = xlabels[0].get_fontsize() if xlabels else None
+    if size is not None and fit_delta:
+        # An explicit trim on top of the fit. The fit gives the largest size that
+        # fits the panel; this is the caller saying it wants a little less than that.
+        size = max(1.0, size + fit_delta)
+        for art in xlabels:
+            art.set_fontsize(size)
     if size is not None:
         # The y labels TAKE the x size rather than being fitted to the cell height.
         # They are a little longer than "Ground Truth", so they end up a little
@@ -375,6 +382,7 @@ def global_ensemble_recovery(
     annot_fontsize: float = 12,
     wspace: float = None,
     hspace: float = None,
+    equal_gaps: bool = False,
     alpha: float = 0.7,
     max_per_row: int = 6,
     **kwargs,
@@ -505,6 +513,28 @@ def global_ensemble_recovery(
     adj = {k: v for k, v in (("wspace", wspace), ("hspace", hspace)) if v is not None}
     if adj:
         fig.subplots_adjust(**adj)
+
+    if equal_gaps and n_rows > 1 and n_cols_grid > 1:
+        # MATCH THE COLUMN GAP TO THE ROW GAP, measured rather than guessed.
+        #
+        # wspace alone cannot do it. The axes are square by box_aspect and here they
+        # are HEIGHT-limited, so their width is fixed by the row height and the
+        # leftover cell width shows up as gap. Closing wspace to zero still leaves
+        # cell_width - axes_width between them, and on this grid that floor is wider
+        # than the row gap. So: close wspace first, then take the remaining excess out
+        # of the FIGURE WIDTH, which is the only thing that narrows the cells.
+        fig.subplots_adjust(wspace=0.0)
+        for _ in range(3):
+            fig.canvas.draw()
+            a00 = axarr[0, 0].get_window_extent()
+            a01 = axarr[0, 1].get_window_extent()
+            a10 = axarr[1, 0].get_window_extent()
+            gap_x, gap_y = a01.x0 - a00.x1, a00.y0 - a10.y1
+            if gap_x <= 0 or gap_y <= 0 or abs(gap_x - gap_y) < 1.5:
+                break
+            shrink_px = (gap_x - gap_y) * (n_cols_grid - 1)
+            w_in, h_in = fig.get_size_inches()
+            fig.set_size_inches(max(1.0, w_in - shrink_px / fig.dpi), h_in)
     return fig
 
 
