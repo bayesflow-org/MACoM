@@ -1,8 +1,8 @@
 # Experiment 2 — real data (posterior predictive checks)
 
 Frozen snapshot, organised by model family. Assembled
-2026-09-13 04:13:38Z by
-`experiments/finalize_experiment_2.py` — 71 files. Git commit `1705ab025dd1553a92ea2d6c79101b67d58de0e6`.
+2026-09-13 18:38:16Z by
+`experiments/finalize_experiment_2.py` — 71 files. Git commit `1cbf830e77bdc658ff4d9e04a45a0475c2e194e0`.
 Per-file sources and original mtimes: `MANIFEST.csv`.
 
 ## Contents

@@ -921,7 +921,7 @@ _DIV_HEAVY = dict(color="#5a5a66", lw=1.5, ls="-")
 # whether or not a divider falls between them. Kept to what the widened tick labels
 # and a divider actually need -- the dividers are placed against the labels' real
 # extent, so the gutter does not have to be padded for them.
-WSPACE = 0.52
+WSPACE = 0.42
 
 # SIZED FOR THE PAGE, NOT FOR THE SCREEN. The target is a LaTeX \textwidth of 5.5 in
 # (US Letter, 1.5 in margins). The figure is drawn at FIG_SCALE times that, so
@@ -938,8 +938,8 @@ FIG_SCALE = 2.0
 FIG_W = TEXT_WIDTH_IN * FIG_SCALE
 
 # Nominal sizes; divide by FIG_SCALE for what the reader gets.
-FS_TITLE, FS_LABEL, FS_TICK, FS_LEG = 16, 14, 12, 12          # 8 / 7 / 6 / 6 pt
-FS_MINI_TITLE, FS_MINI_LABEL, FS_MINI_TICK, FS_MINI_LEG = 14, 12, 11, 10
+FS_TITLE, FS_LABEL, FS_TICK, FS_LEG = 16, 14, 10, 10          # 8 / 7 / 5 / 5 pt
+FS_MINI_TITLE, FS_MINI_LABEL, FS_MINI_TICK, FS_MINI_LEG = 14, 12, 9, 8.5
 
 # Gaps inside the 2x2, as fractions of a mini axes. Module level because the
 # title-fitting pass has to use the same numbers the layout used.
@@ -976,8 +976,10 @@ def _draw_quantile_panel(ax, obs, ppc_samples, quantiles, xs, ppc_color, ppc_fil
     ax.set_xticks(xs)
     ax.set_xticklabels([f"{q:g}" for q in quantiles])
     ax.set_xlabel(xlabel, fontsize=FS_LABEL)
-    ax.set_ylabel(ylabel, fontsize=FS_LABEL)
+    if ylabel:
+        ax.set_ylabel(ylabel, fontsize=FS_LABEL)
     ax.tick_params(labelsize=FS_TICK)
+    ax.set_box_aspect(1)
     ax.spines[["top", "right"]].set_visible(False)
 
 
@@ -1074,6 +1076,7 @@ def _draw_choice_grid(fig, pos, obs_ch, ppc_ch, ordered, ppc_color, bar_color):
         ax.yaxis.set_major_locator(MaxNLocator(3))
         ax.set_title(lbl, fontsize=FS_MINI_TITLE)
         ax.tick_params(labelsize=FS_MINI_TICK)
+        ax.set_box_aspect(1)
         ax.spines[["top", "right"]].set_visible(False)
         # Axis labels only on the outer edges: at quarter size there is no room to
         # repeat them, and repeating them says nothing a shared scale does not.
@@ -1233,7 +1236,9 @@ def plot_combined(obs_pooled, ppc_pooled, obs_ch, ppc_ch, conditions, model_name
     # condition levels a family has, plus a fixed band per row for the title, the
     # tick labels and the axis label at the sizes set above.
     cell_w = FIG_W / (sum(ratios) + WSPACE * (n_grid - 1))
-    height = n_rows * (cell_w * 1.18 + 0.60 * FIG_SCALE)
+    # Cell as tall as it is wide, so a square plot area fills it instead of
+    # leaving slack, plus a fixed band per row for title, ticks and axis label.
+    height = n_rows * (cell_w + 0.55 * FIG_SCALE)
     fig, axes = plt.subplots(n_rows, n_grid, squeeze=False,
                              figsize=(FIG_W, height),
                              gridspec_kw={"width_ratios": ratios})
@@ -1243,7 +1248,8 @@ def plot_combined(obs_pooled, ppc_pooled, obs_ch, ppc_ch, conditions, model_name
         ax = axes[0, panel_cols[j]]
         _draw_quantile_panel(
             ax, obs_pooled[cond_name][lbl], ppc_pooled[cond_name].get(lbl, []),
-            quantiles, xs, ppc_color, ppc_fill, "RT quantile", "RT (s)")
+            quantiles, xs, ppc_color, ppc_fill, "RT quantile",
+            "RT (s)" if j == 0 else "")
         ax.set_title(lbl, fontsize=FS_TITLE)
         if two_row:
             ax2 = axes[1, panel_cols[j]]
@@ -1251,9 +1257,13 @@ def plot_combined(obs_pooled, ppc_pooled, obs_ch, ppc_ch, conditions, model_name
             draws = [np.asarray(d, dtype=float)
                      for d in ppc_ch.get(cond_name, {}).get(lbl, [])]
             if len(o) and draws:
+                # Shorter than the standalone figure's "Response deviation theta
+                # (rad)": rotated, that label is taller than a panel at these font
+                # sizes and runs into the row above. The x label already says these
+                # are response quantiles.
                 _draw_quantile_panel(ax2, o, draws, quantiles, xs, ppc_color, ppc_fill,
                                      "Response quantile",
-                                     r"Response deviation $\theta$ (rad)",
+                                     r"$\theta$ (rad)" if j == 0 else "",
                                      zero_guide=True)
             else:
                 ax2.set_visible(False)
@@ -1272,6 +1282,10 @@ def plot_combined(obs_pooled, ppc_pooled, obs_ch, ppc_ch, conditions, model_name
     grid = None
     if not two_row:
         holder = axes[0, len(cols)]
+        # Square too, so the block occupies the same footprint the now-square
+        # quantile panels do rather than the full (wider) grid cell.
+        holder.set_box_aspect(1)
+        fig.canvas.draw()
         pos = holder.get_position()
         holder.remove()
         grid = _draw_choice_grid(fig, pos, obs_ch, ppc_ch, ordered,
