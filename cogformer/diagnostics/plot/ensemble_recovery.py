@@ -38,6 +38,8 @@ def ensemble_recovery(
     fit_delta: float = 0.0,
     tick_pad: float = None,
     thumb_spread: bool = False,
+    pack_rows: bool = False,
+    row_gap_px: float = 6.0,
     thumb_tight_rows: bool = False,
     marker_size: float = None,
     err_linewidth: float = 1.2,
@@ -330,6 +332,8 @@ def ensemble_recovery(
                if v is not None}
         if adj:
             fig.subplots_adjust(**adj)
+        if pack_rows:
+            _pack_rows(fig, axarr, row_idx.size, num_cols, row_gap_px)
         fitted_label_size = _fit_grid_labels(fig, axarr, row_idx.size, num_cols,
                                              wspace, hspace, fit_delta)
         if fitted_label_size:
@@ -339,6 +343,35 @@ def ensemble_recovery(
                 if id(ax) not in grid_axes and ax.get_xlabel():
                     ax.xaxis.label.set_fontsize(fitted_label_size)
     return fig
+
+
+def _pack_rows(fig, axarr, n_rows, n_cols, gap_px=6.0):
+    """Stack the rows at a fixed gap, overriding tight_layout's uniform allocation.
+
+    tight_layout gives every row the same height, and that height must accommodate
+    the tallest decoration in the grid -- row 0's column titles. Rows 1..n have no
+    title, so they carry that allowance as dead space above them, and it stays the
+    same ~38 px however wide or tall the figure is made. Nothing in wspace, hspace
+    or the figure aspect touches it, because it is an ALLOCATION, not slack.
+
+    So the rows are placed by hand: measure row 0's box and how far its decorations
+    reach below it, then stack the rest at exactly that pitch plus `gap_px`.
+    """
+    if n_rows < 2:
+        return
+    fig.canvas.draw()
+    rend = fig.canvas.get_renderer()
+    inv = fig.transFigure.inverted()
+    p0 = axarr[0, 0].get_position()
+    tb = axarr[0, 0].get_tightbbox(rend).transformed(inv)
+    below = max(0.0, p0.y0 - tb.y0)          # x tick labels under the axes
+    gap = gap_px / (fig.get_size_inches()[1] * fig.dpi)
+    pitch = p0.height + below + gap
+    for r in range(1, n_rows):
+        for c in range(n_cols):
+            pos = axarr[r, c].get_position()
+            axarr[r, c].set_position([pos.x0, p0.y0 - r * pitch,
+                                      pos.width, p0.height])
 
 
 def _tighten_grid(fig, wspace, hspace):
