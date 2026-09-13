@@ -19,6 +19,8 @@ from pathlib import Path
 import numpy as np
 import matplotlib.pyplot as plt
 from matplotlib.lines import Line2D
+from matplotlib.patches import Patch
+from matplotlib.ticker import MaxNLocator
 from scipy.stats import gaussian_kde
 
 from cogformer.simulator.benchmarks.ssms.ddm import DDM
@@ -916,8 +918,32 @@ _DIV_HEAVY = dict(color="#5a5a66", lw=1.5, ls="-")
 
 # Gutter width, as matplotlib's fraction of the mean axes width. Applied uniformly
 # after tight_layout so every pair of neighbouring panels is spaced identically,
-# whether or not a divider falls between them.
-WSPACE = 0.46
+# whether or not a divider falls between them. Kept to what the widened tick labels
+# and a divider actually need -- the dividers are placed against the labels' real
+# extent, so the gutter does not have to be padded for them.
+WSPACE = 0.52
+
+# SIZED FOR THE PAGE, NOT FOR THE SCREEN. The target is a LaTeX \textwidth of 5.5 in
+# (US Letter, 1.5 in margins). The figure is drawn at FIG_SCALE times that, so
+# \includegraphics[width=\textwidth] scales it down by 1/FIG_SCALE and every point
+# size below lands at that fraction of its nominal value on the page. Drawing at 2x
+# rather than at 1:1 leaves the panels big enough to lay out -- five panels across
+# 5.5 in is barely an inch each -- while the text still arrives at a readable size.
+#
+# A figure drawn at the old 3.1 in per panel was ~17 in wide; at \textwidth that is a
+# scale factor near 0.3, which turned 9 pt titles into under 3 pt on the page. That is
+# the reason these are absolute rather than per-panel.
+TEXT_WIDTH_IN = 5.5
+FIG_SCALE = 2.0
+FIG_W = TEXT_WIDTH_IN * FIG_SCALE
+
+# Nominal sizes; divide by FIG_SCALE for what the reader gets.
+FS_TITLE, FS_LABEL, FS_TICK, FS_LEG = 16, 14, 12, 12          # 8 / 7 / 6 / 6 pt
+FS_MINI_TITLE, FS_MINI_LABEL, FS_MINI_TICK, FS_MINI_LEG = 14, 12, 11, 10
+
+# Gaps inside the 2x2, as fractions of a mini axes. Module level because the
+# title-fitting pass has to use the same numbers the layout used.
+CHOICE_GW, CHOICE_GH = 1.20, 1.05
 
 
 def _ordered_conditions(conditions, model_name):
@@ -949,19 +975,26 @@ def _draw_quantile_panel(ax, obs, ppc_samples, quantiles, xs, ppc_color, ppc_fil
         ax.axhline(0.0, color=GUIDE_COLOR, ls=":", lw=0.8, zorder=0)
     ax.set_xticks(xs)
     ax.set_xticklabels([f"{q:g}" for q in quantiles])
-    ax.set_xlabel(xlabel, fontsize=8)
-    ax.set_ylabel(ylabel, fontsize=8)
-    ax.tick_params(labelsize=7)
+    ax.set_xlabel(xlabel, fontsize=FS_LABEL)
+    ax.set_ylabel(ylabel, fontsize=FS_LABEL)
+    ax.tick_params(labelsize=FS_TICK)
     ax.spines[["top", "right"]].set_visible(False)
 
 
-def _choice_grid_axes(fig, pos, nrow=2, ncol=2, gw=0.34, gh=0.40):
+def _choice_grid_axes(fig, pos, nrow=2, ncol=2, gw=CHOICE_GW, gh=CHOICE_GH):
     """`nrow` x `ncol` axes laid inside the rectangle `pos`, in figure coordinates.
 
     The whole block has to occupy exactly ONE quantile panel's footprint, so the
     axes are placed by hand inside that panel's rectangle rather than given their
     own gridspec columns -- a nested gridspec is re-sized by tight_layout and would
     not hold the footprint. `pos` is read AFTER layout, so it is the final rectangle.
+
+    THE GAPS ARE LARGER THAN THE USUAL GUTTER ON PURPOSE. The footprint is fixed, so
+    the only way to give this block text at the same size as the rest of the figure
+    is to spend the footprint on TEXT rather than on drawing area: the axes shrink
+    and the gaps grow, and a title or tick label wider than its own axes overhangs
+    into the gap instead of into its neighbour. The plots end up small; that is the
+    trade the fixed footprint forces, and the alternative is text no one can read.
     """
     cw = pos.width / (ncol + gw * (ncol - 1))
     ch = pos.height / (nrow + gh * (nrow - 1))
@@ -976,7 +1009,7 @@ def _choice_grid_axes(fig, pos, nrow=2, ncol=2, gw=0.34, gh=0.40):
     return out
 
 
-def _draw_choice_grid(fig, pos, obs_ch, ppc_ch, ordered, ppc_color):
+def _draw_choice_grid(fig, pos, obs_ch, ppc_ch, ordered, ppc_color, bar_color):
     """The response-dimension check as a 2x2 of per-level proportion panels.
 
     One panel per condition level, as in the standalone `choice_ppc_<cond>.pdf`
@@ -984,6 +1017,12 @@ def _draw_choice_grid(fig, pos, obs_ch, ppc_ch, ordered, ppc_color):
     row stays one row. Reading order is row-major and the condition groups are the
     ROWS -- stimulus type above, factual truth below -- with a dashed rule between
     them, the horizontal counterpart of the vertical rules in the quantile block.
+
+    The bars take the family's LIGHT stop and the predictive marker its saturated
+    one -- the same pairing the quantile panels use for band and line, so the two
+    read as one family while staying apart from each other. This departs from the
+    rule in plot_utils that observed data is always neutral; it is deliberate, and
+    it means the observed bars here carry a colour that moves between families.
 
     Returns the axes grid, or None when there is nothing to draw.
     """
@@ -1010,7 +1049,7 @@ def _draw_choice_grid(fig, pos, obs_ch, ppc_ch, ordered, ppc_color):
         top = max(top, float(np.max(np.percentile(ppc_p, _CI_HI, axis=0))))
     # Headroom for the legend, which sits inside the top-left panel: at quarter
     # size there is no corner big enough to hold it over the bars.
-    top *= 1.34
+    top *= 1.95
 
     for k, (cond_name, lbl) in enumerate(levels):
         r, c = divmod(k, ncol)
@@ -1023,28 +1062,54 @@ def _draw_choice_grid(fig, pos, obs_ch, ppc_ch, ordered, ppc_color):
         lo, hi = np.percentile(ppc_p, [_CI_LO, _CI_HI], axis=0)
         med = np.median(ppc_p, axis=0)
         x = np.arange(len(vals))
-        ax.bar(x, obs_p, width=0.55, color=OBS_COLOR, alpha=0.85, label="Observed")
+        ax.bar(x, obs_p, width=0.55, color=bar_color, edgecolor=ppc_color,
+               linewidth=0.6, label="Observed")
         ax.errorbar(x, med, yerr=[med - lo, hi - med], fmt="o", color=ppc_color,
                     capsize=2.5, lw=1.1, ms=3.2,
                     label=f"PPC median + {PPC_CI:g}% CI")
         ax.set_xticks(x); ax.set_xticklabels([f"{int(v)}" for v in vals])
         ax.set_ylim(0, top)
-        ax.set_title(lbl, fontsize=8)
-        ax.tick_params(labelsize=6)
+        # Three y ticks at most: at this size a default locator puts five labels in
+        # a space that holds two, and they collide before they are read.
+        ax.yaxis.set_major_locator(MaxNLocator(3))
+        ax.set_title(lbl, fontsize=FS_MINI_TITLE)
+        ax.tick_params(labelsize=FS_MINI_TICK)
         ax.spines[["top", "right"]].set_visible(False)
         # Axis labels only on the outer edges: at quarter size there is no room to
         # repeat them, and repeating them says nothing a shared scale does not.
         if c == 0:
-            ax.set_ylabel("Proportion", fontsize=7)
+            ax.set_ylabel("Proportion", fontsize=FS_MINI_LABEL)
         else:
             ax.set_yticklabels([])
         if r == nrow - 1:
-            ax.set_xlabel("Choice", fontsize=7)
+            ax.set_xlabel("Choice", fontsize=FS_MINI_LABEL)
 
     # Unused cells, when a family's groups do not fill the grid.
     for k in range(len(levels), nrow * ncol):
         r, c = divmod(k, ncol)
         axes[r][c].set_visible(False)
+
+    # Long level names -- RDM's "Incongruent" -- do not fit a quarter-size panel at
+    # the nominal size and run into the panel beside them. Measure the widest and
+    # shrink only as far as it requires, so a family with short names ("Novel") keeps
+    # the full size rather than every family paying for the worst case.
+    #
+    # x0.86 on the budget: two titles centred one pitch apart and each exactly one
+    # pitch wide meet edge to edge. The budget is the pitch MINUS a gap, not the pitch.
+    fig.canvas.draw()
+    rend = fig.canvas.get_renderer()
+    avail = pos.width / (ncol + CHOICE_GW * (ncol - 1)) * (1 + CHOICE_GW) * 0.86
+    worst = 0.0
+    for row in axes:
+        for ax in row:
+            if ax.title.get_text():
+                worst = max(worst, ax.title.get_window_extent(rend).transformed(
+                    fig.transFigure.inverted()).width)
+    if worst > avail:
+        fs = max(7.0, FS_MINI_TITLE * avail / worst)
+        for row in axes:
+            for ax in row:
+                ax.title.set_fontsize(fs)
 
     # Rows are condition groups, so the group break is between them.
     if nrow > 1:
@@ -1053,9 +1118,20 @@ def _draw_choice_grid(fig, pos, obs_ch, ppc_ch, ordered, ppc_color):
         fig.add_artist(Line2D([pos.x0, pos.x0 + pos.width], [y, y],
                               transform=fig.transFigure, zorder=5, **_DIV_LIGHT))
 
-    _legend(axes[0][0], fontsize=5.2, frameon=False, loc="upper left",
-            handlelength=1.0, handletextpad=0.4, labelspacing=0.25,
-            borderpad=0.15, borderaxespad=0.2)
+    # Short labels, not the quantile panels' wording: a quarter-size panel is not
+    # wide enough for "PPC median + 95% CI" and the text runs into its neighbour.
+    # The legend is wider than the shrunken axes it belongs to, so it overhangs into
+    # the gap. Raise that axes above its neighbours and drop its opaque background,
+    # or the panel drawn after it paints over the overhanging half.
+    axes[0][0].set_zorder(10)
+    axes[0][0].patch.set_visible(False)
+    axes[0][0].legend(
+        [Patch(facecolor=bar_color, edgecolor=ppc_color, lw=0.6),
+         Line2D([], [], color=ppc_color, marker="o", ms=3.2, lw=1.1)],
+        ["Observed", f"PPC {PPC_CI:g}% CI"],
+        fontsize=FS_MINI_LEG, frameon=False, loc="upper left",
+        handlelength=0.9, handletextpad=0.4, labelspacing=0.2,
+        borderpad=0.1, borderaxespad=0.15)
     return axes
 
 
@@ -1097,7 +1173,7 @@ def _combined_legend(primary, extra_axes=()):
         for h, l in zip(*ax.get_legend_handles_labels()):
             if l and l not in seen:
                 seen.add(l); H.append(h); L.append(l)
-    primary.legend(H, L, fontsize=7, frameon=False)
+    primary.legend(H, L, fontsize=FS_LEG, frameon=False)
 
 
 def plot_combined(obs_pooled, ppc_pooled, obs_ch, ppc_ch, conditions, model_name,
@@ -1153,9 +1229,13 @@ def plot_combined(obs_pooled, ppc_pooled, obs_ch, ppc_ch, conditions, model_name
 
     n_rows = 2 if two_row else 1
     n_grid = len(ratios)
-    width = 3.1 * sum(ratios) + 1.4
+    # Height from the CELL width, so panels keep their proportions however many
+    # condition levels a family has, plus a fixed band per row for the title, the
+    # tick labels and the axis label at the sizes set above.
+    cell_w = FIG_W / (sum(ratios) + WSPACE * (n_grid - 1))
+    height = n_rows * (cell_w * 1.18 + 0.60 * FIG_SCALE)
     fig, axes = plt.subplots(n_rows, n_grid, squeeze=False,
-                             figsize=(width, 6.2 if two_row else 3.4),
+                             figsize=(FIG_W, height),
                              gridspec_kw={"width_ratios": ratios})
     panel_cols = list(range(len(cols)))
 
@@ -1164,7 +1244,7 @@ def plot_combined(obs_pooled, ppc_pooled, obs_ch, ppc_ch, conditions, model_name
         _draw_quantile_panel(
             ax, obs_pooled[cond_name][lbl], ppc_pooled[cond_name].get(lbl, []),
             quantiles, xs, ppc_color, ppc_fill, "RT quantile", "RT (s)")
-        ax.set_title(lbl, fontsize=9)
+        ax.set_title(lbl, fontsize=FS_TITLE)
         if two_row:
             ax2 = axes[1, panel_cols[j]]
             o = np.asarray(obs_ch.get(cond_name, {}).get(lbl, []), dtype=float)
@@ -1194,7 +1274,8 @@ def plot_combined(obs_pooled, ppc_pooled, obs_ch, ppc_ch, conditions, model_name
         holder = axes[0, len(cols)]
         pos = holder.get_position()
         holder.remove()
-        grid = _draw_choice_grid(fig, pos, obs_ch, ppc_ch, ordered, ppc_color)
+        grid = _draw_choice_grid(fig, pos, obs_ch, ppc_ch, ordered,
+                                 ppc_color, ppc_fill)
         fig.canvas.draw()
 
     # Positions are only final after layout, so the dividers go in last. The last
