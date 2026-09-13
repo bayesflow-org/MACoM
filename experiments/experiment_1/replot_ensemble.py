@@ -71,11 +71,16 @@ def parse_args():
 PAGE_SPEC = {
     # label/legend here are only STARTING sizes for recovery: fit_labels rescales
     # each one to its cell, so what matters is the cell, not this number.
-    "recovery":        dict(width=11.0, title=15, label=12, legend=10, tick=6,  annot=7),
+    # height_ratio: rows are square and WIDTH-limited here, so the leftover cell
+    # height is what shows up as the band between rows. Only the figure height
+    # closes it, and the value is tuned against the SAVED figure -- the in-figure
+    # geometry before the thumbnail strip is added is not what gets written out.
+    "recovery":        dict(width=11.0, title=15, label=12, legend=10, tick=6,  annot=7,
+                            height_ratio=0.43),
     "recovery_global": dict(width=11.0, title=12, label=11, legend=9,  tick=8,  annot=9),
 }
 DEFAULT_SPEC = dict(width=None, title=None, label=None, legend=None, tick=None,
-                    annot=None)
+                    annot=None, height_ratio=None)
 GLOBAL_PER_ROW = 6
 
 # The design-cell names ("1", "u_1(:c_1)") are what the mask is indexed by, and are
@@ -152,7 +157,8 @@ def main():
         plotting functions expose title/label sizes but not tick size."""
         s = spec_for(key)
         if s["width"] is not None:
-            kw["figsize"] = (s["width"], s["width"] * n_rows / n_cols)
+            ratio = s.get("height_ratio") or (n_rows / n_cols)
+            kw["figsize"] = (s["width"], s["width"] * ratio)
         for field, name in (("title", "title_fontsize"), ("label", "label_fontsize"),
                             ("legend", "legend_fontsize"), ("annot", "annot_fontsize")):
             if s[field] is not None and name in fig_fn.__code__.co_varnames:
@@ -178,8 +184,8 @@ def main():
         # Labels fitted to their cell and the gutters pulled in as far as they go:
         # the panels are what the figure is for, so nothing else gets to claim space.
         row_kw = {"row_labels": ROW_LABELS, "max_ticks": 3, "fit_labels": True,
-                  "fit_delta": -1.0, "equal_gaps": True,
-                  "wspace": 0.02, "hspace": 0.0} if name == "recovery" else {}
+                  "fit_delta": -1.0, "wspace": 0.02,
+                  "hspace": 0.0} if name == "recovery" else {}
         fig = sized(fn, name, n_rows_grid, n_cols_main,
                     **shared, **extra, **main_only, **row_kw)
         if fig is not None:

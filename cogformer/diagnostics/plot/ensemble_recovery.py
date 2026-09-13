@@ -36,7 +36,6 @@ def ensemble_recovery(
     max_ticks: int = None,
     fit_labels: bool = False,
     fit_delta: float = 0.0,
-    equal_gaps: bool = False,
     wspace: float = None,
     hspace: float = None,
     thumb_scale: float = 1.0,
@@ -286,7 +285,7 @@ def ensemble_recovery(
         # the neighbouring one. Done after the spacing below, since the cell size is
         # what is being measured.
         fitted_label_size = _fit_grid_labels(fig, axarr, row_idx.size, num_cols,
-                                             wspace, hspace, fit_delta, equal_gaps)
+                                             wspace, hspace, fit_delta)
 
     if shared_xlabel:
         # ONE x label for the grid. Every column shares the same x quantity, and at a
@@ -308,69 +307,7 @@ def ensemble_recovery(
     return fig
 
 
-def _blank_bands(fig, axarr):
-    """Widths of the empty bands between panels, in pixels, as (columns, rows).
-
-    MEASURED OFF THE RENDERED PIXELS. Both the obvious alternatives are wrong here:
-    the axes boxes ignore the tick labels sitting in the gaps, and the tight bboxes
-    OVERLAP once the grid is packed -- they include each panel's decorations, which
-    reach into the neighbouring cell, so both gaps come out negative and any
-    comparison between them is meaningless. What the eye judges is the run of blank
-    pixels, so that is what this counts.
-    """
-    fig.canvas.draw()
-    buf = np.asarray(fig.canvas.buffer_rgba())[..., :3]
-    ink = buf.min(axis=2) < 245
-    H = ink.shape[0]
-    boxes = [ax.get_window_extent() for row in axarr for ax in row.flat
-             if ax.get_visible()] if hasattr(axarr[0], "flat") else \
-            [ax.get_window_extent() for ax in np.ravel(axarr) if ax.get_visible()]
-    x0 = int(min(b.x0 for b in boxes)); x1 = int(max(b.x1 for b in boxes))
-    y0 = int(min(b.y0 for b in boxes)); y1 = int(max(b.y1 for b in boxes))
-    # buffer rows run top-down, display y runs bottom-up
-    sub = ink[max(0, H - y1):max(1, H - y0), max(0, x0):max(1, x1)]
-
-    def runs(mask):
-        out, start = [], None
-        for i, v in enumerate(mask):
-            if v and start is None:
-                start = i
-            elif not v and start is not None:
-                out.append(i - start); start = None
-        if start is not None:
-            out.append(len(mask) - start)
-        # interior bands only: the outermost runs are the figure margin
-        return [r for r in out if r >= 2]
-
-    return runs(~sub.any(axis=0)), runs(~sub.any(axis=1))
-
-
-def _equalize_row_gaps(fig, axarr, n_rows, n_cols, iters=6):
-    """Shrink the figure HEIGHT until the blank bands between rows match those
-    between columns.
-
-    Height rather than hspace: the panels are square by box_aspect, so once they are
-    width-limited their height is fixed and closing hspace only pads the cell around
-    them -- the leftover shows up as blank. Figure height is the lever.
-    """
-    if n_rows < 2 or n_cols < 2:
-        return
-    for _ in range(iters):
-        cols, rows = _blank_bands(fig, axarr)
-        if not cols or not rows:
-            return
-        gap_x, gap_y = float(np.median(cols)), float(np.median(rows))
-        if gap_y - gap_x < 2.0:
-            return
-        w_in, h_in = fig.get_size_inches()
-        new_h = max(1.0, h_in - (gap_y - gap_x) * (n_rows - 1) / fig.dpi)
-        if abs(new_h - h_in) < 0.01:
-            return
-        fig.set_size_inches(w_in, new_h)
-
-
-def _fit_grid_labels(fig, axarr, n_rows, n_cols, wspace, hspace, fit_delta=0.0,
-                     equal_gaps=False):
+def _fit_grid_labels(fig, axarr, n_rows, n_cols, wspace, hspace, fit_delta=0.0):
     """Tighten the grid, then size the axis labels to the cell they sit in.
 
     ONE size for both axes, set by the x label against the cell WIDTH, and returned
@@ -387,10 +324,6 @@ def _fit_grid_labels(fig, axarr, n_rows, n_cols, wspace, hspace, fit_delta=0.0,
         adj["hspace"] = hspace
     if adj:
         fig.subplots_adjust(**adj)
-    if equal_gaps:
-        # BEFORE the labels are fitted: this resizes the figure, so the panel width
-        # the labels are measured against is only final once it has run.
-        _equalize_row_gaps(fig, axarr, n_rows, n_cols)
     fig.canvas.draw()
 
     figW, figH = fig.get_size_inches()
