@@ -1048,8 +1048,14 @@ def _draw_choice_bars(ax, obs_ch, ppc_ch, ordered, ppc_color):
     hh, ll = ax.get_legend_handles_labels()          # the PPC marker
     H = [h for h, _ in handles] + hh
     L = [l for _, l in handles] + ll
-    ax.legend(H, L, fontsize=6.5, frameon=False, ncol=2,
-              title="Observed proportion by condition", title_fontsize=6.5)
+    # ABOVE the axes, in the band the other panels spend on their level name. Inside
+    # the axes it either sits on the bars -- the panel is nearly full-height by
+    # construction, since these are proportions -- or forces headroom that squashes
+    # them.
+    ax.legend(H, L, fontsize=6.5, frameon=False, ncol=3,
+              title="Observed proportion by condition, vs posterior predictive",
+              title_fontsize=7, loc="lower center", bbox_to_anchor=(0.5, 1.0),
+              borderaxespad=0.0, columnspacing=1.2, handlelength=1.4)
 
 
 def _axes_divider(fig, ax_left, ax_right, heavy=False):
@@ -1141,7 +1147,7 @@ def plot_combined(obs_pooled, ppc_pooled, obs_ch, ppc_ch, conditions, model_name
     # panels either side of a divider further apart than the rest -- the grouping then
     # read as much from the spacing as from the rule. One uniform wspace instead,
     # widened enough to hold a divider clear of the next panel's labels.
-    ratios = [1.0] * len(cols) + ([1.5] if not two_row else [])
+    ratios = [1.0] * len(cols) + ([1.9] if not two_row else [])
     breaks_grid = list(breaks) + ([len(cols)] if not two_row else [])
 
     n_rows = 2 if two_row else 1
