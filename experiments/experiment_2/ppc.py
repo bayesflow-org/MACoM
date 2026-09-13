@@ -21,6 +21,7 @@ import matplotlib.pyplot as plt
 from matplotlib.lines import Line2D
 from matplotlib.patches import Patch
 from matplotlib.ticker import MaxNLocator
+from matplotlib.transforms import Bbox
 from scipy.stats import gaussian_kde
 
 from cogformer.simulator.benchmarks.ssms.ddm import DDM
@@ -943,7 +944,7 @@ FS_MINI_TITLE, FS_MINI_LABEL, FS_MINI_TICK, FS_MINI_LEG = 11, 9.5, 7.5, 8
 
 # Gaps inside the 2x2, as fractions of a mini axes. Module level because the
 # title-fitting pass has to use the same numbers the layout used.
-CHOICE_GW, CHOICE_GH = 1.20, 1.05
+CHOICE_GW, CHOICE_GH = 0.70, 1.05
 
 
 def _ordered_conditions(conditions, model_name):
@@ -998,17 +999,56 @@ def _choice_grid_axes(fig, pos, nrow=2, ncol=2, gw=CHOICE_GW, gh=CHOICE_GH):
     into the gap instead of into its neighbour. The plots end up small; that is the
     trade the fixed footprint forces, and the alternative is text no one can read.
     """
+    return [[fig.add_axes(r) for r in row]
+            for row in _choice_grid_rects(pos, nrow, ncol, gw, gh)]
+
+
+def _choice_grid_rects(pos, nrow, ncol, gw=CHOICE_GW, gh=CHOICE_GH):
+    """The rectangles `_choice_grid_axes` places axes in, as [row][col]."""
     cw = pos.width / (ncol + gw * (ncol - 1))
     ch = pos.height / (nrow + gh * (nrow - 1))
-    out = []
-    for r in range(nrow):
-        row = []
-        for c in range(ncol):
-            x = pos.x0 + c * (cw + gw * cw)
-            y = pos.y0 + pos.height - (r + 1) * ch - r * gh * ch
-            row.append(fig.add_axes([x, y, cw, ch]))
-        out.append(row)
-    return out
+    return [[[pos.x0 + c * (cw + gw * cw),
+              pos.y0 + pos.height - (r + 1) * ch - r * gh * ch, cw, ch]
+             for c in range(ncol)] for r in range(nrow)]
+
+
+def _fit_block(fig, axes, pos, nrow, ncol, passes=2):
+    """Pull the grid in until everything it draws sits inside `pos`.
+
+    The axes rectangles are only the DRAWING areas; the left column's tick labels
+    and y label hang off to their left, and at this size that overhang crosses the
+    divider and lands on the quantile panels. Measuring what the block actually
+    occupies and re-placing it inside the same footprint is what keeps the block
+    within its own column -- an inset guessed up front is wrong as soon as a tick
+    label gains a digit.
+
+    LEFT EDGE ONLY. The titles above and the "Choice" label below overhang too, but
+    they sit at the same heights as the quantile panels' own title and x label, so
+    they collide with nothing; the left overhang is the one that crosses the divider.
+    Correcting all four sides instead feeds back through the square aspect -- a
+    shorter rectangle gives a smaller square, whose labels are unchanged and so
+    overhang proportionally more -- and the block collapses over successive passes.
+
+    Two passes: narrowing the rectangles moves the labels, so the first correction
+    slightly overshoots and the second settles it.
+    """
+    live = [ax for row in axes for ax in row if ax.get_visible()]
+    if not live:
+        return
+    rect = Bbox.from_extents(pos.x0, pos.y0, pos.x1, pos.y1)
+    for _ in range(passes):
+        fig.canvas.draw()
+        inv = fig.transFigure.inverted()
+        rend = fig.canvas.get_renderer()
+        bb = Bbox.union([ax.get_tightbbox(rend).transformed(inv) for ax in live])
+        dx0 = max(0.0, pos.x0 - bb.x0)
+        if dx0 < 1e-4:
+            return
+        rect = Bbox.from_extents(rect.x0 + dx0, rect.y0, rect.x1, rect.y1)
+        for r, row in enumerate(_choice_grid_rects(rect, nrow, ncol)):
+            for c, xywh in enumerate(row):
+                if axes[r][c].get_visible():
+                    axes[r][c].set_position(xywh)
 
 
 def _draw_choice_grid(fig, pos, obs_ch, ppc_ch, ordered, ppc_color, bar_color):
@@ -1091,6 +1131,8 @@ def _draw_choice_grid(fig, pos, obs_ch, ppc_ch, ordered, ppc_color, bar_color):
     for k in range(len(levels), nrow * ncol):
         r, c = divmod(k, ncol)
         axes[r][c].set_visible(False)
+
+    _fit_block(fig, axes, pos, nrow, ncol)
 
     # Long level names -- RDM's "Incongruent" -- do not fit a quarter-size panel at
     # the nominal size and run into the panel beside them. Measure the widest and
@@ -1271,6 +1313,23 @@ def plot_combined(obs_pooled, ppc_pooled, obs_ch, ppc_ch, conditions, model_name
                                      zero_guide=True)
             else:
                 ax2.set_visible(False)
+
+    # ONE y SCALE PER ROW, ticks labelled on the first column only -- the same
+    # treatment the choice bars already get. Per-panel autoscaling made each panel
+    # fill its own box, so Novel running to 4.0 s and Familiar to 3.8 s drew two
+    # curves of identical height and the difference between conditions, which is
+    # what the figure is for, was scaled away.
+    for r in range(n_rows):
+        row_axes = [axes[r, panel_cols[j]] for j in range(len(cols))
+                    if axes[r, panel_cols[j]].get_visible()]
+        if not row_axes:
+            continue
+        lo = min(a.get_ylim()[0] for a in row_axes)
+        hi = max(a.get_ylim()[1] for a in row_axes)
+        for j, a in enumerate(row_axes):
+            a.set_ylim(lo, hi)
+            if j:
+                a.tick_params(labelleft=False)
 
     _combined_legend(axes[0, panel_cols[0]])
 
