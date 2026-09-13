@@ -308,33 +308,64 @@ def ensemble_recovery(
     return fig
 
 
+def _blank_bands(fig, axarr):
+    """Widths of the empty bands between panels, in pixels, as (columns, rows).
+
+    MEASURED OFF THE RENDERED PIXELS. Both the obvious alternatives are wrong here:
+    the axes boxes ignore the tick labels sitting in the gaps, and the tight bboxes
+    OVERLAP once the grid is packed -- they include each panel's decorations, which
+    reach into the neighbouring cell, so both gaps come out negative and any
+    comparison between them is meaningless. What the eye judges is the run of blank
+    pixels, so that is what this counts.
+    """
+    fig.canvas.draw()
+    buf = np.asarray(fig.canvas.buffer_rgba())[..., :3]
+    ink = buf.min(axis=2) < 245
+    H = ink.shape[0]
+    boxes = [ax.get_window_extent() for row in axarr for ax in row.flat
+             if ax.get_visible()] if hasattr(axarr[0], "flat") else \
+            [ax.get_window_extent() for ax in np.ravel(axarr) if ax.get_visible()]
+    x0 = int(min(b.x0 for b in boxes)); x1 = int(max(b.x1 for b in boxes))
+    y0 = int(min(b.y0 for b in boxes)); y1 = int(max(b.y1 for b in boxes))
+    # buffer rows run top-down, display y runs bottom-up
+    sub = ink[max(0, H - y1):max(1, H - y0), max(0, x0):max(1, x1)]
+
+    def runs(mask):
+        out, start = [], None
+        for i, v in enumerate(mask):
+            if v and start is None:
+                start = i
+            elif not v and start is not None:
+                out.append(i - start); start = None
+        if start is not None:
+            out.append(len(mask) - start)
+        # interior bands only: the outermost runs are the figure margin
+        return [r for r in out if r >= 2]
+
+    return runs(~sub.any(axis=0)), runs(~sub.any(axis=1))
+
+
 def _equalize_row_gaps(fig, axarr, n_rows, n_cols, iters=6):
-    """Shrink the figure HEIGHT until the gap between rows matches the gap between
-    columns, both measured between TIGHT bounding boxes.
+    """Shrink the figure HEIGHT until the blank bands between rows match those
+    between columns.
 
-    Between ink, not between axes boxes: the column gap carries each panel's y tick
-    labels and the row gap its x tick labels, so two gaps with identical box-to-box
-    numbers can look nothing alike. tightbbox is what the eye is judging.
-
-    Height rather than hspace, for the same reason the pi grid needs width rather
-    than wspace: the panels are square by box_aspect, so once they are width-limited
-    their height is fixed and closing hspace only pads the cell around them.
+    Height rather than hspace: the panels are square by box_aspect, so once they are
+    width-limited their height is fixed and closing hspace only pads the cell around
+    them -- the leftover shows up as blank. Figure height is the lever.
     """
     if n_rows < 2 or n_cols < 2:
         return
     for _ in range(iters):
-        fig.canvas.draw()
-        rend = fig.canvas.get_renderer()
-        t00 = axarr[0, 0].get_tightbbox(rend)
-        t01 = axarr[0, 1].get_tightbbox(rend)
-        t10 = axarr[1, 0].get_tightbbox(rend)
-        gap_x, gap_y = t01.x0 - t00.x1, t00.y0 - t10.y1
-        if gap_y <= 0 or abs(gap_y - gap_x) < 2.0:
-            break
+        cols, rows = _blank_bands(fig, axarr)
+        if not cols or not rows:
+            return
+        gap_x, gap_y = float(np.median(cols)), float(np.median(rows))
+        if gap_y - gap_x < 2.0:
+            return
         w_in, h_in = fig.get_size_inches()
         new_h = max(1.0, h_in - (gap_y - gap_x) * (n_rows - 1) / fig.dpi)
         if abs(new_h - h_in) < 0.01:
-            break
+            return
         fig.set_size_inches(w_in, new_h)
 
 
