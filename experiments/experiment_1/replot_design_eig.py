@@ -46,7 +46,7 @@ def parse_args():
                         "target, so the page scales it by 0.5.")
     p.add_argument("--label_fs", type=float, default=16)
     p.add_argument("--legend_fs", type=float, default=13)
-    p.add_argument("--tick_fs", type=float, default=12)
+    p.add_argument("--tick_fs", type=float, default=9)
     # One row across the full width. It does make the saved figure wider than the
     # panels alone -- the decoder text and the entries sit side by side and their
     # widths add -- and that width is what the page scale is computed against.

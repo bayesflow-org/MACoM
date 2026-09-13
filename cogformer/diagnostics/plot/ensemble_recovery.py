@@ -276,13 +276,15 @@ def ensemble_recovery(
                 ax.set_xlabel("Ground Truth" if r_i == n_kept - 1 else "",
                               fontsize=label_fontsize)
 
+    fitted_label_size = None
     if fit_labels:
         # THE PANELS ARE THE FIGURE. Labels are sized to the cell they belong to --
         # x labels to a cell's width, row labels to its height -- rather than to an
         # absolute point size, so they fill their cell exactly and never spill into
         # the neighbouring one. Done after the spacing below, since the cell size is
         # what is being measured.
-        _fit_grid_labels(fig, axarr, row_idx.size, num_cols, wspace, hspace)
+        fitted_label_size = _fit_grid_labels(fig, axarr, row_idx.size, num_cols,
+                                             wspace, hspace)
 
     if shared_xlabel:
         # ONE x label for the grid. Every column shares the same x quantity, and at a
@@ -297,14 +299,22 @@ def ensemble_recovery(
         pixel_alpha_maps = [np.clip(np.abs(r_maps[k]), 0.2, 1.0) for k in range(n_configs)]
         compact_masks = [m[row_idx] for m in parameter_masks]
         _add_mask_legend(fig, compact_masks, colors, labels, n_kept, num_cols,
-                         label_fontsize=legend_fontsize, pixel_alphas=pixel_alpha_maps,
+                         label_fontsize=fitted_label_size or legend_fontsize,
+                         pixel_alphas=pixel_alpha_maps,
                          thumb_scale=thumb_scale, per_row=thumb_per_row,
-                         fit_labels=fit_labels)
+                         fit_labels=fit_labels and fitted_label_size is None)
     return fig
 
 
 def _fit_grid_labels(fig, axarr, n_rows, n_cols, wspace, hspace):
-    """Tighten the grid, then size each axis label to the cell it sits in."""
+    """Tighten the grid, then size the axis labels to the cell they sit in.
+
+    ONE size for both axes, set by the x label against the cell WIDTH, and returned
+    so the thumbnail captions can take it too. Fitting each label to its own axis
+    independently -- x to the width, y to the height -- is defensible but reads
+    badly: the row labels come out visibly larger than the column labels beside
+    them, when the two are doing the same job.
+    """
     fig.tight_layout()
     adj = {}
     if wspace is not None:
@@ -327,10 +337,17 @@ def _fit_grid_labels(fig, axarr, n_rows, n_cols, wspace, hspace):
                 xlabels.append(ax.xaxis.label)
             if ax.get_ylabel():
                 ylabels.append(ax.yaxis.label)
-    # Rotated, a y label's extent along the page is its HEIGHT, so it is matched
-    # against the cell's height rather than its width.
     fit_text(fig, xlabels, cell_w_in, axis="x")
-    fit_text(fig, ylabels, cell_h_in, axis="y")
+    size = xlabels[0].get_fontsize() if xlabels else None
+    if size is not None:
+        # The y labels TAKE the x size rather than being fitted to the cell height.
+        # They are a little longer than "Ground Truth", so they end up a little
+        # longer than a cell -- still inside the gap, and matching matters more.
+        for art in ylabels:
+            art.set_fontsize(size)
+    else:
+        fit_text(fig, ylabels, cell_h_in, axis="y")
+    return size
 
 
 def global_ensemble_recovery(
@@ -459,7 +476,8 @@ def global_ensemble_recovery(
 
             sns.scatterplot(x=x, y=y_mean, ax=ax, color=colors[k], alpha=alpha)
             corr = np.corrcoef(x, y_mean)[0, 1]
-            ax.text(0.02, 0.95, f"r = {corr:.3f}", ha="left", va="center",
+            # Inset from the spine: at 0.02 the "r" sits on the y axis line.
+            ax.text(0.07, 0.95, f"r = {corr:.3f}", ha="left", va="center",
                     transform=ax.transAxes, size=annot_fontsize)
 
             ax.set_box_aspect(1)

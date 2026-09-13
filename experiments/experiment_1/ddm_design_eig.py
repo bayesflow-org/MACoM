@@ -560,6 +560,25 @@ def _plot(df, outdir, figsize=(9.0, 5.0), label_fs=14, legend_fs=12, tick_fs=Non
     fig.canvas.draw()
     lb = leg.get_window_extent().transformed(inv)
     tb = desc.get_window_extent().transformed(inv)
+
+    # NO WIDER THAN THE PANELS. The text and the entries sit side by side, so their
+    # widths add and the row easily runs past the plots it belongs to -- and since
+    # the saved width is taken from the widest artist, that also drags the whole
+    # figure out and shrinks everything else once the page scales it back. Measured
+    # against the span from the first panel's left edge to the last one's right, and
+    # rebuilt one size smaller if it does not fit.
+    span = axes[1].get_position().x1 - axes[0].get_position().x0
+    block = tb.width + gap + lb.width
+    if block > span:
+        shrunk = max(4.0, LEGEND_FS * span / block)
+        leg.remove(); desc.remove()
+        leg = fig.legend(handles, labels, loc="lower center", ncol=len(labels),
+                         frameon=False, fontsize=shrunk, bbox_to_anchor=(0.5, 0.028))
+        desc = fig.text(0.5, 0.045, desc_text, ha="right", va="center",
+                        fontsize=shrunk)
+        fig.canvas.draw()
+        lb = leg.get_window_extent().transformed(inv)
+        tb = desc.get_window_extent().transformed(inv)
     # Centre (text + gap + legend) as a unit, not the legend alone.
     leg.set_bbox_to_anchor((0.5 + (tb.width + gap) / 2, 0.015), transform=fig.transFigure)
     fig.canvas.draw()
