@@ -38,6 +38,7 @@ def ensemble_recovery(
     fit_delta: float = 0.0,
     tick_pad: float = None,
     thumb_spread: bool = False,
+    thumb_tight_rows: bool = False,
     marker_size: float = None,
     err_linewidth: float = 1.2,
     wspace: float = None,
@@ -317,7 +318,8 @@ def ensemble_recovery(
                          label_fontsize=fitted_label_size or legend_fontsize,
                          pixel_alphas=pixel_alpha_maps,
                          thumb_scale=thumb_scale, per_row=thumb_per_row,
-                         fit_labels=False, spread=thumb_spread)
+                         fit_labels=False, spread=thumb_spread,
+                         tight_rows=thumb_tight_rows)
 
     if fit_labels:
         # AFTER the legend. _add_mask_legend re-runs tight_layout to reserve the

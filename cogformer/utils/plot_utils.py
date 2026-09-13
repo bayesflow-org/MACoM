@@ -128,6 +128,7 @@ def _add_mask_legend(
     per_row: int | None = None,
     fit_labels: bool = False,
     spread: bool = False,
+    tight_rows: bool = False,
 ):
     """
     Add parameter mask thumbnails as a visual legend in a strip on the LEFT
@@ -181,10 +182,13 @@ def _add_mask_legend(
         n_per_col = int(np.ceil(n / n_cols_leg))
         row_major = False
 
-    # Rough label height in figure coords (1 line of text below each thumbnail)
-    label_h_fig = (label_fontsize * 2.2 / 72) / figH
+    # Rough label height in figure coords (1 line of text below each thumbnail).
+    # 2.2x the font size is a generous allowance -- roughly double what one line
+    # actually renders -- which is fine when the strip has room and is exactly the
+    # slack that shows up as a gap between thumbnail rows when it does not.
+    label_h_fig = (label_fontsize * (1.35 if tight_rows else 2.2) / 72) / figH
 
-    cell_gap_fig = 2 * pad
+    cell_gap_fig = (pad if tight_rows else 2 * pad)
 
     # A single row of thumbnails goes in a horizontal band along the BOTTOM; anything
     # taller stays a left sidebar. Forcing a wide row into the sidebar makes the strip
