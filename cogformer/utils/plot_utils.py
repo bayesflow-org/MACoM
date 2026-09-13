@@ -127,6 +127,7 @@ def _add_mask_legend(
     max_per_column: int = 6,
     per_row: int | None = None,
     fit_labels: bool = False,
+    spread: bool = False,
 ):
     """
     Add parameter mask thumbnails as a visual legend in a strip on the LEFT
@@ -239,9 +240,21 @@ def _add_mask_legend(
             color="lightgray", linewidth=0.7, zorder=10,
         ))
 
-        # Centre each legend column vertically
+        # Centre each legend column vertically...
         cell_h_fig = thumb_h_fig + label_h_fig + cell_gap_fig
         y_top = 0.5 + (n_per_col * cell_h_fig) / 2
+        if spread:
+            # ...unless asked to SPREAD. Centring a block shorter than the figure
+            # leaves the difference as whitespace, and because the main grid's ink is
+            # asymmetric -- titles above, x labels below -- it does not land evenly
+            # top and bottom; it pools under the strip. Distributing the rows over the
+            # full height removes it without changing the thumbnails' size.
+            # Pitch chosen so the LAST row's caption lands on the bottom margin,
+            # rather than dividing the height evenly -- the caption hangs below its
+            # thumbnail, so an even division stops short by exactly that much.
+            y_top = 1.0 - pad
+            span = y_top - thumb_h_fig - (pad + label_h_fig)
+            cell_h_fig = span / max(n_per_col - 1, 1)
 
     for k in range(n):
         mask_k = np.array(parameter_masks[k])
