@@ -924,6 +924,12 @@ _DIV_HEAVY = dict(color="#5a5a66", lw=1.5, ls="-")
 # extent, so the gutter does not have to be padded for them.
 WSPACE = 0.26
 
+# Row gap for the two-row (CDM) figure, and the band of figure height each row
+# spends on its title, ticks and axis label. The two rows sit closer than the
+# default layout puts them: the gap only has to hold the upper row's x label and
+# the lower row's titles, and a solid rule marks the break between them.
+HSPACE, ROW_BAND = 0.34, 0.46
+
 # SIZED FOR THE PAGE, NOT FOR THE SCREEN. The target is a LaTeX \textwidth of 5.5 in
 # (US Letter, 1.5 in margins). The figure is drawn at FIG_SCALE times that, so
 # \includegraphics[width=\textwidth] scales it down by 1/FIG_SCALE and every point
@@ -1192,6 +1198,32 @@ def _draw_choice_grid(fig, pos, obs_ch, ppc_ch, ordered, ppc_color, bar_color):
     return axes
 
 
+def _axes_divider_h(fig, top_row, bottom_row, heavy=True):
+    """Horizontal rule in the clear space BETWEEN two rows of axes.
+
+    The counterpart of `_axes_divider` turned ninety degrees, and used for the same
+    reason a solid vertical rule separates the quantile panels from the choice
+    panel: crossing it, the y axis stops meaning seconds and starts meaning radians.
+    Placed against the rows' measured extents, so it falls between the upper row's
+    x label and the lower row's titles rather than through either.
+    """
+    rend = fig.canvas.get_renderer()
+    inv = fig.transFigure.inverted()
+    tb = [ax.get_tightbbox(rend).transformed(inv) for ax in top_row if ax.get_visible()]
+    bb = [ax.get_tightbbox(rend).transformed(inv) for ax in bottom_row
+          if ax.get_visible()]
+    if not tb or not bb:
+        return
+    lo, hi = min(b.y0 for b in tb), max(b.y1 for b in bb)
+    y = (lo + hi) / 2 if lo > hi else (
+        min(ax.get_position().y0 for ax in top_row if ax.get_visible())
+        + max(ax.get_position().y1 for ax in bottom_row if ax.get_visible())) / 2
+    x0 = min(ax.get_position().x0 for ax in top_row if ax.get_visible())
+    x1 = max(ax.get_position().x1 for ax in top_row if ax.get_visible())
+    fig.add_artist(Line2D([x0, x1], [y, y], transform=fig.transFigure, zorder=5,
+                          **dict(_DIV_HEAVY if heavy else _DIV_LIGHT)))
+
+
 def _axes_divider(fig, ax_left, ax_right, heavy=False):
     """Vertical rule in the gutter between two axes, in figure coordinates.
 
@@ -1292,7 +1324,8 @@ def plot_combined(obs_pooled, ppc_pooled, obs_ch, ppc_ch, conditions, model_name
     cell_w = FIG_W / (sum(ratios) + WSPACE * (n_grid - 1))
     # Cell as tall as it is wide, so a square plot area fills it instead of
     # leaving slack, plus a fixed band per row for title, ticks and axis label.
-    height = n_rows * (cell_w + 0.55 * FIG_SCALE)
+    band = ROW_BAND if n_rows > 1 else 0.55
+    height = n_rows * (cell_w + band * FIG_SCALE)
     fig, axes = plt.subplots(n_rows, n_grid, squeeze=False,
                              figsize=(FIG_W, height),
                              gridspec_kw={"width_ratios": ratios})
@@ -1345,7 +1378,7 @@ def plot_combined(obs_pooled, ppc_pooled, obs_ch, ppc_ch, conditions, model_name
     # WSPACE LAST: tight_layout computes its own, so setting it up front has no
     # effect. This widens every gutter by the same amount, which is what keeps the
     # panels equally spaced while leaving the rules somewhere to go.
-    fig.subplots_adjust(wspace=WSPACE)
+    fig.subplots_adjust(wspace=WSPACE, **({"hspace": HSPACE} if n_rows > 1 else {}))
     fig.canvas.draw()
 
     # The choice cell is a PLACEHOLDER: it reserves one quantile panel's footprint
@@ -1369,8 +1402,21 @@ def plot_combined(obs_pooled, ppc_pooled, obs_ch, ppc_ch, conditions, model_name
     last_row = n_rows - 1
     for k, g in enumerate(breaks_grid):
         heavy = (not two_row) and k == len(breaks_grid) - 1
-        right = axes[last_row, g] if not heavy else grid[0][0]
-        _axes_divider(fig, axes[0, g - 1], right, heavy=heavy)
+        if two_row:
+            # ONE RULE PER ROW, not one spanning both. The rows are different
+            # measures on their y axes, so a rule running through both would read
+            # as a single shared frame that the condition break cuts across.
+            for r in range(n_rows):
+                _axes_divider(fig, axes[r, g - 1], axes[r, g], heavy=False)
+        else:
+            right = axes[last_row, g] if not heavy else grid[0][0]
+            _axes_divider(fig, axes[0, g - 1], right, heavy=heavy)
+
+    if two_row:
+        # Seconds above, radians below: a change of MEASURE, so it takes the solid
+        # rule, exactly as the quantile/choice break does in the one-row figures.
+        _axes_divider_h(fig, [axes[0, c] for c in panel_cols],
+                        [axes[1, c] for c in panel_cols], heavy=True)
 
     savepath = outdir / f"{model_name}_{variant}_combined_ppc{tag}.pdf"
     fig.savefig(savepath, bbox_inches="tight")
