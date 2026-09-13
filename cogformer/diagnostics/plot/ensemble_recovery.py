@@ -257,7 +257,7 @@ def ensemble_recovery(
                     color=color_k, alpha=cell_alpha,
                 )
             ax.text(
-                0.02, 0.95, f"r = {mean_corr:.3f}",
+                0.07, 0.95, f"r = {mean_corr:.3f}",
                 ha="left", va="center",
                 transform=ax.transAxes, size=annot_fontsize
             )
@@ -326,8 +326,11 @@ def _fit_grid_labels(fig, axarr, n_rows, n_cols, wspace, hspace):
     fig.canvas.draw()
 
     figW, figH = fig.get_size_inches()
-    pos = axarr[0, 0].get_position()
-    cell_w_in, cell_h_in = pos.width * figW, pos.height * figH
+    # The PLOT AREA, not the grid cell. The axes are square by box_aspect, so they do
+    # not fill their cell -- the cell also carries the tick labels and the gutter --
+    # and a label sized to the cell is wider than the panel it belongs to.
+    bb = axarr[0, 0].get_window_extent(renderer=fig.canvas.get_renderer())
+    cell_w_in, cell_h_in = bb.width / fig.dpi, bb.height / fig.dpi
 
     xlabels, ylabels = [], []
     for r in range(n_rows):
@@ -370,6 +373,8 @@ def global_ensemble_recovery(
     figsize: tuple = None,
     share_limits: bool = False,
     annot_fontsize: float = 12,
+    wspace: float = None,
+    hspace: float = None,
     alpha: float = 0.7,
     max_per_row: int = 6,
     **kwargs,
@@ -495,6 +500,11 @@ def global_ensemble_recovery(
             axarr[gi * rows_per_param + k // n_cols_grid, k % n_cols_grid].axis("off")
 
     fig.tight_layout()
+    # After tight_layout, which computes its own and would discard anything set up
+    # front. The panels are square, so a wide gutter is pure dead space between them.
+    adj = {k: v for k, v in (("wspace", wspace), ("hspace", hspace)) if v is not None}
+    if adj:
+        fig.subplots_adjust(**adj)
     return fig
 
 

@@ -71,7 +71,7 @@ def parse_args():
 PAGE_SPEC = {
     # label/legend here are only STARTING sizes for recovery: fit_labels rescales
     # each one to its cell, so what matters is the cell, not this number.
-    "recovery":        dict(width=11.0, title=15, label=12, legend=10, tick=8,  annot=7),
+    "recovery":        dict(width=11.0, title=15, label=12, legend=10, tick=6,  annot=7),
     "recovery_global": dict(width=11.0, title=12, label=11, legend=9,  tick=8,  annot=9),
 }
 DEFAULT_SPEC = dict(width=None, title=None, label=None, legend=None, tick=None,
@@ -178,7 +178,7 @@ def main():
         # Labels fitted to their cell and the gutters pulled in as far as they go:
         # the panels are what the figure is for, so nothing else gets to claim space.
         row_kw = {"row_labels": ROW_LABELS, "max_ticks": 3, "fit_labels": True,
-                  "wspace": 0.02, "hspace": 0.02} if name == "recovery" else {}
+                  "wspace": 0.02, "hspace": 0.0} if name == "recovery" else {}
         fig = sized(fn, name, n_rows_grid, n_cols_main,
                     **shared, **extra, **main_only, **row_kw)
         if fig is not None:
@@ -187,8 +187,8 @@ def main():
             logging.info(f"[saved] {path}")
         # The pi grid wraps 12 configs into 2 rows of 6 and every panel shows the
         # same parameter, so it takes one shared scale with ticks on the first column.
-        gkw = {"share_limits": True, "max_per_row": GLOBAL_PER_ROW} \
-            if name == "recovery" else {}
+        gkw = {"share_limits": True, "max_per_row": GLOBAL_PER_ROW,
+               "wspace": 0.05} if name == "recovery" else {}
         g_rows = int(np.ceil(n / GLOBAL_PER_ROW))
         gfig = sized(global_fn, f"{name}_global", g_rows, GLOBAL_PER_ROW,
                      **shared, **extra, **gkw)
