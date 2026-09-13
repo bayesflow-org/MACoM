@@ -36,6 +36,9 @@ def ensemble_recovery(
     max_ticks: int = None,
     fit_labels: bool = False,
     fit_delta: float = 0.0,
+    tick_pad: float = None,
+    marker_size: float = None,
+    err_linewidth: float = 1.2,
     wspace: float = None,
     hspace: float = None,
     thumb_scale: float = 1.0,
@@ -251,11 +254,12 @@ def ensemble_recovery(
                     ax.errorbar(
                         x_k, y_mean_k, yerr=y_err_k,
                         fmt="none", alpha=cell_alpha * 0.6,
-                        linewidth=1.2, color=color_k
+                        linewidth=err_linewidth, color=color_k
                     )
                 sns.scatterplot(
                     x=x_k, y=y_mean_k, ax=ax,
                     color=color_k, alpha=cell_alpha,
+                    **({"s": marker_size} if marker_size else {}),
                 )
             ax.text(
                 0.07, 0.95, f"r = {mean_corr:.3f}",
@@ -266,6 +270,11 @@ def ensemble_recovery(
             ax.set_box_aspect(1)
             ax.grid(True, color="lightgray", linestyle="--", linewidth=0.5, alpha=0.2)
             sns.despine(ax=ax)
+            if tick_pad is not None:
+                # The blank band between panels is mostly this: matplotlib pads tick
+                # labels 3.5 pt off the axis by default, which at these sizes is most
+                # of the gap. Closing it hands the space back to the plot area.
+                ax.tick_params(pad=tick_pad)
             if max_ticks is not None:
                 # A default locator puts five labels under a panel an inch wide and
                 # they run into the panel beside them.
@@ -278,7 +287,11 @@ def ensemble_recovery(
                               fontsize=label_fontsize)
 
     fitted_label_size = None
+    grid_axes = {id(ax) for ax in np.ravel(axarr)}
     if fit_labels:
+        # Layout only; the labels are fitted after the legend claims its strip.
+        _tighten_grid(fig, wspace, hspace)
+    if False:
         # THE PANELS ARE THE FIGURE. Labels are sized to the cell they belong to --
         # x labels to a cell's width, row labels to its height -- rather than to an
         # absolute point size, so they fill their cell exactly and never spill into
@@ -303,8 +316,36 @@ def ensemble_recovery(
                          label_fontsize=fitted_label_size or legend_fontsize,
                          pixel_alphas=pixel_alpha_maps,
                          thumb_scale=thumb_scale, per_row=thumb_per_row,
-                         fit_labels=fit_labels and fitted_label_size is None)
+                         fit_labels=False)
+
+    if fit_labels:
+        # AFTER the legend. _add_mask_legend re-runs tight_layout to reserve the
+        # thumbnail strip, which shrinks the panels; fitting before that sizes the
+        # labels against panels that are about to get smaller and they overrun each
+        # other. Re-apply the gutters first -- the legend's tight_layout resets them.
+        adj = {k: v for k, v in (("wspace", wspace), ("hspace", hspace))
+               if v is not None}
+        if adj:
+            fig.subplots_adjust(**adj)
+        fitted_label_size = _fit_grid_labels(fig, axarr, row_idx.size, num_cols,
+                                             wspace, hspace, fit_delta)
+        if fitted_label_size:
+            # The thumbnail captions take the same size, for the same reason the row
+            # labels do: they are all doing one job and should read as one size.
+            for ax in fig.axes:
+                if id(ax) not in grid_axes and ax.get_xlabel():
+                    ax.xaxis.label.set_fontsize(fitted_label_size)
     return fig
+
+
+def _tighten_grid(fig, wspace, hspace):
+    """Lay the grid out and pull the gutters in. Separate from the fitting step
+    because the two have to happen at different points: the layout before the
+    thumbnail strip is reserved, the fitting after it, once the panels are final."""
+    fig.tight_layout()
+    adj = {k: v for k, v in (("wspace", wspace), ("hspace", hspace)) if v is not None}
+    if adj:
+        fig.subplots_adjust(**adj)
 
 
 def _fit_grid_labels(fig, axarr, n_rows, n_cols, wspace, hspace, fit_delta=0.0):
@@ -315,15 +356,9 @@ def _fit_grid_labels(fig, axarr, n_rows, n_cols, wspace, hspace, fit_delta=0.0):
     independently -- x to the width, y to the height -- is defensible but reads
     badly: the row labels come out visibly larger than the column labels beside
     them, when the two are doing the same job.
+    NO LAYOUT HERE. Calling tight_layout at this point would discard the rect the
+    thumbnail strip was reserved with and put the panels back on top of it.
     """
-    fig.tight_layout()
-    adj = {}
-    if wspace is not None:
-        adj["wspace"] = wspace
-    if hspace is not None:
-        adj["hspace"] = hspace
-    if adj:
-        fig.subplots_adjust(**adj)
     fig.canvas.draw()
 
     figW, figH = fig.get_size_inches()
