@@ -22,6 +22,7 @@ from matplotlib.lines import Line2D
 from matplotlib.patches import Patch
 from matplotlib.ticker import MaxNLocator
 from matplotlib.transforms import Bbox
+from matplotlib.transforms import Bbox
 from scipy.stats import gaussian_kde
 
 from cogformer.simulator.benchmarks.ssms.ddm import DDM
@@ -911,9 +912,10 @@ COMBINED_COND_ORDER = {
     "cdm": ["difficulty", "speed"],
 }
 
-# A condition-group boundary and a change of MEASURE are not the same kind of
-# break, so they are not drawn the same way: dashed for "different levels of a
-# different factor", solid for "the y axis now means something else entirely".
+# Dashed separates anything WITHIN one model family -- condition groups, and the
+# break between the RT panels and the response-dimension check. Solid is reserved
+# for the break between FAMILIES in the all-families figure, which is the only
+# boundary across which nothing is comparable.
 _DIV_LIGHT = dict(color=GUIDE_COLOR, lw=1.0, ls=(0, (4, 3)))
 _DIV_HEAVY = dict(color="#5a5a66", lw=1.5, ls="-")
 
@@ -961,10 +963,20 @@ def _ordered_conditions(conditions, model_name):
     return [by_name[n] for n in want if n in by_name]
 
 
+# Level order inside a condition group, where the figure wants something other than
+# the registry's. CDM's speed map is keyed -0.5/0.5 = Unspeeded/Speeded, so its
+# natural order is the reverse of how the figure reads.
+COMBINED_LEVEL_ORDER = {"speed": ["Speeded", "Unspeeded"]}
+
+
 def _levels_with_data(pool_obs, pool_ppc, cond_name, label_map):
-    return [l for l in label_map.values()
+    have = [l for l in label_map.values()
             if len(pool_obs.get(cond_name, {}).get(l, []))
             and len(pool_ppc.get(cond_name, {}).get(l, []))]
+    want = COMBINED_LEVEL_ORDER.get(cond_name)
+    if want:
+        have = [l for l in want if l in have] + [l for l in have if l not in want]
+    return have
 
 
 def _draw_quantile_panel(ax, obs, ppc_samples, quantiles, xs, ppc_color, ppc_fill,
@@ -1057,7 +1069,8 @@ def _fit_block(fig, axes, pos, nrow, ncol, passes=2):
                     axes[r][c].set_position(xywh)
 
 
-def _draw_choice_grid(fig, pos, obs_ch, ppc_ch, ordered, ppc_color, bar_color):
+def _draw_choice_grid(fig, pos, obs_ch, ppc_ch, ordered, ppc_color, bar_color,
+                      legend=True):
     """The response-dimension check as a 2x2 of per-level proportion panels.
 
     One panel per condition level, as in the standalone `choice_ppc_<cond>.pdf`
@@ -1179,6 +1192,9 @@ def _draw_choice_grid(fig, pos, obs_ch, ppc_ch, ordered, ppc_color, bar_color):
 
     # Short labels, not the quantile panels' wording: a quarter-size panel is not
     # wide enough for "PPC median + 95% CI" and the text runs into its neighbour.
+    if not legend:
+        return axes
+
     # ONE ROW, UNDER THE BLOCK. Inside a quarter-size panel the legend was wider than
     # its own axes and had to overhang a neighbour; below the grid it has the block's
     # full width and costs the bars no headroom. Placed against the bottom row's
@@ -1401,7 +1417,11 @@ def plot_combined(obs_pooled, ppc_pooled, obs_ch, ppc_ch, conditions, model_name
     # drawn solid; every other separates condition groups and is drawn dashed.
     last_row = n_rows - 1
     for k, g in enumerate(breaks_grid):
-        heavy = (not two_row) and k == len(breaks_grid) - 1
+        # Every within-family break is DASHED. Which axes the rule anchors to is a
+        # separate question from how it is drawn: the last break of a one-row figure
+        # is the RT/choice one, and the placeholder that reserved the choice column
+        # has been removed by now, so it has to anchor to the block itself.
+        is_measure_break = (not two_row) and k == len(breaks_grid) - 1
         if two_row:
             # ONE RULE PER ROW, not one spanning both. The rows are different
             # measures on their y axes, so a rule running through both would read
@@ -1409,19 +1429,182 @@ def plot_combined(obs_pooled, ppc_pooled, obs_ch, ppc_ch, conditions, model_name
             for r in range(n_rows):
                 _axes_divider(fig, axes[r, g - 1], axes[r, g], heavy=False)
         else:
-            right = axes[last_row, g] if not heavy else grid[0][0]
-            _axes_divider(fig, axes[0, g - 1], right, heavy=heavy)
+            right = grid[0][0] if (is_measure_break and grid) else axes[last_row, g]
+            _axes_divider(fig, axes[0, g - 1], right, heavy=False)
 
     if two_row:
         # Seconds above, radians below: a change of MEASURE, so it takes the solid
         # rule, exactly as the quantile/choice break does in the one-row figures.
         _axes_divider_h(fig, [axes[0, c] for c in panel_cols],
-                        [axes[1, c] for c in panel_cols], heavy=True)
+                        [axes[1, c] for c in panel_cols], heavy=False)
 
     savepath = outdir / f"{model_name}_{variant}_combined_ppc{tag}.pdf"
     fig.savefig(savepath, bbox_inches="tight")
     plt.close(fig)
     logging.info(f"[saved] {savepath}")
+
+
+def plot_combined_all(per_family, outpath, quantiles=DEFAULT_RT_QUANTILES):
+    """All three families' PPCs in ONE figure, five slots per row.
+
+    The three per-family figures happen to share a column count, which is what makes
+    this tile without stretching anything:
+
+        DDM  | 4 RT-quantile panels          | 2x2 choice block
+        RDM  | 4 RT-quantile panels          | 2x2 choice block
+        CDM  | 5 RT-quantile panels          |
+        CDM  | 5 response-angle panels       |
+
+    CDM costs two rows because its response is a continuous angle, so its response
+    check is a quantile plot rather than the bar block -- there is no collapsing it
+    into one slot the way a discrete choice collapses.
+
+    Dashed rules separate anything WITHIN a family: the condition groups, and the
+    break between the RT panels and the response check. Solid rules separate the
+    FAMILIES, which is the only boundary in the figure across which nothing is
+    comparable -- different data, different subjects, different response space.
+
+    `per_family` maps "ddm"/"rdm"/"cdm" to the five things collect_ppc returns.
+    """
+    fams = [f for f in ("ddm", "rdm", "cdm") if f in per_family]
+    if not fams:
+        return
+    quantiles = np.asarray(quantiles, dtype=float)
+    xs = np.arange(len(quantiles))
+
+    # Plan the rows first: each is (family, kind, [(cond, level), ...], break indices).
+    plan = []
+    for fam in fams:
+        obs_pooled, ppc_pooled, conditions, obs_ch, ppc_ch = per_family[fam]
+        ordered = _ordered_conditions(conditions, fam)
+        cols, breaks = [], []
+        for cond_name, _, label_map in ordered:
+            here = _levels_with_data(obs_pooled, ppc_pooled, cond_name, label_map)
+            if not here:
+                continue
+            if cols:
+                breaks.append(len(cols))
+            cols += [(cond_name, l) for l in here]
+        if not cols:
+            continue
+        plan.append((fam, "rt", cols, breaks))
+        if fam == "cdm":
+            plan.append((fam, "theta", cols, breaks))
+
+    n_rows = len(plan)
+    n_cols = max(len(c) for _, _, c, _ in plan)
+    has_choice = any(f != "cdm" for f, _, _, _ in plan)
+    n_grid = n_cols + (1 if has_choice else 0)
+
+    fig, axes = plt.subplots(n_rows, n_grid, squeeze=False,
+                             figsize=(FIG_W, FIG_W * 0.22 * n_rows))
+    holders, grids = {}, {}
+
+    for r, (fam, kind, cols, breaks) in enumerate(plan):
+        obs_pooled, ppc_pooled, conditions, obs_ch, ppc_ch = per_family[fam]
+        ppc_color, ppc_fill = _ppc_colors(fam)
+        src_obs, src_ppc = (obs_pooled, ppc_pooled) if kind == "rt" else (obs_ch, ppc_ch)
+        xlabel = "RT quantile" if kind == "rt" else "Response quantile"
+        ylabel = "RT (s)" if kind == "rt" else r"$\theta$ (rad)"
+
+        for j, (cond_name, lbl) in enumerate(cols):
+            ax = axes[r, j]
+            o = np.asarray(src_obs.get(cond_name, {}).get(lbl, []), dtype=float)
+            draws = [np.asarray(d, dtype=float)
+                     for d in src_ppc.get(cond_name, {}).get(lbl, [])]
+            if not len(o) or not draws:
+                ax.set_visible(False)
+                continue
+            _draw_quantile_panel(ax, o, draws, quantiles, xs, ppc_color, ppc_fill,
+                                 xlabel, ylabel if j == 0 else "",
+                                 zero_guide=(kind == "theta"))
+            # The level name only on the FIRST row that shows it: rows 3 and 4 are
+            # the same five CDM conditions twice, and repeating the names implies
+            # they are different ones.
+            if kind == "rt":
+                ax.set_title(lbl, fontsize=FS_TITLE)
+        for j in range(len(cols), n_cols):
+            axes[r, j].set_visible(False)
+
+        if has_choice:
+            # The choice block takes every slot this row does not spend on quantile
+            # panels, not just the last one. DDM and RDM have four conditions against
+            # CDM's five, so pinning the block to the final column would leave a hole
+            # in the middle of their rows.
+            spare = list(range(len(cols), n_grid))
+            for j in spare:
+                axes[r, j].set_visible(False)
+            if fam != "cdm" and spare:
+                holders[r] = spare
+
+    # One shared y scale per ROW, ticks on the first column only -- the same rule the
+    # single-family figures use, applied row by row since each row is its own measure.
+    for r in range(n_rows):
+        live = [axes[r, j] for j in range(n_cols) if axes[r, j].get_visible()]
+        if not live:
+            continue
+        lo = min(a.get_ylim()[0] for a in live)
+        hi = max(a.get_ylim()[1] for a in live)
+        for j, a in enumerate(live):
+            a.set_ylim(lo, hi)
+            if j:
+                a.tick_params(labelleft=False)
+
+    fig.tight_layout()
+    fig.subplots_adjust(wspace=WSPACE, hspace=HSPACE)
+    fig.canvas.draw()
+
+    for r, spare in holders.items():
+        fam = plan[r][0]
+        obs_pooled, ppc_pooled, conditions, obs_ch, ppc_ch = per_family[fam]
+        first, last = axes[r, spare[0]], axes[r, spare[-1]]
+        p_first, p_last = first.get_position(), last.get_position()
+        pos = Bbox.from_extents(p_first.x0, p_first.y0, p_last.x1, p_first.y1)
+        for j in spare:
+            # Hidden BEFORE removal: a removed axes still reports get_visible() True,
+            # and the divider loops below filter on that. Touching a removed axes'
+            # bbox makes matplotlib re-apply its aspect against a figure it lost.
+            axes[r, j].set_visible(False)
+            axes[r, j].remove()
+        # No legend inside the block here: under a 2x2 it lands on the next
+        # family's panel titles, and one legend already covers the whole figure.
+        grids[r] = _draw_choice_grid(fig, pos, obs_ch, ppc_ch,
+                                     _ordered_conditions(conditions, fam),
+                                     *_ppc_colors(fam), legend=False)
+    fig.canvas.draw()
+
+    # ONE legend for the figure, on the first panel, covering the bar marks too --
+    # the choice blocks carry none of their own.
+    first_grid = grids.get(min(grids)) if grids else None
+    extra = [first_grid[0][0]] if first_grid else []
+    _combined_legend(axes[0, 0], extra)
+
+    # Dashed: condition-group breaks, and the RT/choice break on the DDM/RDM rows.
+    for r, (fam, kind, cols, breaks) in enumerate(plan):
+        for b in breaks:
+            _axes_divider(fig, axes[r, b - 1], axes[r, b], heavy=False)
+        if r in grids and grids[r]:
+            _axes_divider(fig, axes[r, len(cols) - 1], grids[r][0][0], heavy=False)
+
+    # Dashed between CDM's two rows; solid between families.
+    def row_axes(r):
+        """Every axes on a row, INCLUDING the hand-placed choice block -- those are
+        not in `axes`, so a divider spanning only `axes` stops short of them."""
+        out = [axes[r, j] for j in range(n_grid) if axes[r, j].get_visible()]
+        if grids.get(r):
+            out += [ax for row in grids[r] for ax in row if ax.get_visible()]
+        return out
+
+    for r in range(n_rows - 1):
+        same_family = plan[r][0] == plan[r + 1][0]
+        top, bot = row_axes(r), row_axes(r + 1)
+        if top and bot:
+            _axes_divider_h(fig, top, bot, heavy=not same_family)
+
+    outpath.parent.mkdir(parents=True, exist_ok=True)
+    fig.savefig(outpath, bbox_inches="tight")
+    plt.close(fig)
+    logging.info(f"[saved] {outpath}")
 
 
 def parse_args():

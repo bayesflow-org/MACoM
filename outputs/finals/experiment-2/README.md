@@ -1,8 +1,8 @@
 # Experiment 2 — real data (posterior predictive checks)
 
 Frozen snapshot, organised by model family. Assembled
-2026-09-13 20:00:54Z by
-`experiments/finalize_experiment_2.py` — 71 files. Git commit `108dead0963189dbb7686f6a200ed8031739ce87`.
+2026-09-14 15:08:29Z by
+`experiments/finalize_experiment_2.py` — 72 files. Git commit `cb129295c5effc9b8f7647063dcd7d573ba94627`.
 Per-file sources and original mtimes: `MANIFEST.csv`.
 
 ## Contents
@@ -17,6 +17,12 @@ Each family folder holds, per grouping variable:
 | `rt_qq_<cond>.pdf` | RT quantile–quantile |
 | `choice_quantiles_<cond>.pdf` | **CDM only** — see below |
 | `combined_ppc.pdf` | every grouping variable in ONE figure — see below |
+
+At the tree ROOT, `combined_ppc.pdf` puts all three families in a single figure:
+DDM and RDM take one row each (four RT-quantile panels plus their 2x2 choice block),
+CDM takes two (RT quantiles, then response-angle quantiles). Dashed rules separate
+anything within a family; solid rules separate the families, the one boundary across
+which nothing is comparable.
 
 `posteriors/{ddm,rdm,cdm}.npz` holds the posterior draws every figure was simulated
 from, so the plots can be regenerated without re-running inference.

@@ -77,6 +77,14 @@ def tidy(rest: str) -> str:
 def plan() -> tuple[list[tuple[Path, Path]], list[Path]]:
     jobs, excluded = [], []
     skipped: list[Path] = []
+
+    # All three families in one figure, at the TREE ROOT rather than under a family
+    # folder -- it belongs to none of them. Produced by experiments.experiment_2
+    # .combined_all from the same cached draws the per-family figures use.
+    all_fams = SRC / "combined_ppc.pdf"
+    if all_fams.exists():
+        jobs.append((all_fams, FINALS / "combined_ppc.pdf"))
+
     for fam in FAMILIES:
         d = SRC / fam
         if not d.is_dir():
@@ -214,6 +222,12 @@ Each family folder holds, per grouping variable:
 | `rt_qq_<cond>.pdf` | RT quantile–quantile |
 | `choice_quantiles_<cond>.pdf` | **CDM only** — see below |
 | `combined_ppc.pdf` | every grouping variable in ONE figure — see below |
+
+At the tree ROOT, `combined_ppc.pdf` puts all three families in a single figure:
+DDM and RDM take one row each (four RT-quantile panels plus their 2x2 choice block),
+CDM takes two (RT quantiles, then response-angle quantiles). Dashed rules separate
+anything within a family; solid rules separate the families, the one boundary across
+which nothing is comparable.
 
 `posteriors/{{ddm,rdm,cdm}}.npz` holds the posterior draws every figure was simulated
 from, so the plots can be regenerated without re-running inference.
