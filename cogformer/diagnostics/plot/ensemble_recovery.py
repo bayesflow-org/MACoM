@@ -40,6 +40,8 @@ def ensemble_recovery(
     thumb_spread: bool = False,
     pack_rows: bool = False,
     row_gap_px: float = 6.0,
+    pack_cols: bool = False,
+    col_gap_px: float = 10.0,
     thumb_tight_rows: bool = False,
     marker_size: float = None,
     err_linewidth: float = 1.2,
@@ -334,6 +336,8 @@ def ensemble_recovery(
             fig.subplots_adjust(**adj)
         if pack_rows:
             _pack_rows(fig, axarr, row_idx.size, num_cols, row_gap_px)
+        if pack_cols:
+            _pack_cols(fig, axarr, row_idx.size, num_cols, col_gap_px)
         fitted_label_size = _fit_grid_labels(fig, axarr, row_idx.size, num_cols,
                                              wspace, hspace, fit_delta)
         if fitted_label_size:
@@ -372,6 +376,47 @@ def _pack_rows(fig, axarr, n_rows, n_cols, gap_px=6.0):
             pos = axarr[r, c].get_position()
             axarr[r, c].set_position([pos.x0, p0.y0 - r * pitch,
                                       pos.width, p0.height])
+
+
+def _pack_cols(fig, axarr, n_rows, n_cols, gap_px=10.0):
+    """Stack the columns at a fixed blank gap, the mirror of _pack_rows.
+
+    wspace cannot express this: it is a fraction of the cell width, and the cell
+    also holds the y tick labels, so the BLANK part of the gutter is whatever is
+    left over after they are drawn. Measuring how far column 0's decorations reach
+    to its left gives the pitch directly -- axes width + that reach + `gap_px`.
+    """
+    if n_cols < 2:
+        return
+    fig.canvas.draw()
+    rend = fig.canvas.get_renderer()
+    inv = fig.transFigure.inverted()
+    p0 = axarr[0, 0].get_position()
+    gap = gap_px / (fig.get_size_inches()[0] * fig.dpi)
+
+    def left_reach(c):
+        """How far column c's decorations stick out to the LEFT of its axes.
+
+        Per column, not a single figure for all of them: the y tick labels differ
+        in width from column to column ("-2.5" against "0"), so one pitch derived
+        from column 0 leaves some columns crowded and others far apart.
+        """
+        out = 0.0
+        for r in range(n_rows):
+            ax = axarr[r, c]
+            if not ax.get_visible():
+                continue
+            tb = ax.get_tightbbox(rend).transformed(inv)
+            out = max(out, max(0.0, ax.get_position().x0 - tb.x0))
+        return out
+
+    x = p0.x0
+    for c in range(n_cols):
+        if c:
+            x += p0.width + left_reach(c) + gap
+        for r in range(n_rows):
+            pos = axarr[r, c].get_position()
+            axarr[r, c].set_position([x, pos.y0, p0.width, pos.height])
 
 
 def _tighten_grid(fig, wspace, hspace):
