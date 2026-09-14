@@ -129,6 +129,7 @@ def _add_mask_legend(
     fit_labels: bool = False,
     spread: bool = False,
     tight_rows: bool = False,
+    thumb_height_in: float = None,
 ):
     """
     Add parameter mask thumbnails as a visual legend in a strip on the LEFT
@@ -219,19 +220,31 @@ def _add_mask_legend(
         x_left = max((1.0 - row_w_fig) / 2, pad)
         y_bottom = pad + label_h_fig
     else:
-        # Size thumbnails so a full legend column fits in ~90% of the figure height
-        # (square pixels); cap the width so the strip stays a narrow sidebar. The
-        # lower clamp keeps small figures (e.g. single-cell global panels) valid.
-        thumb_h_fig = max(thumb_scale * (0.9 / n_per_col - label_h_fig - cell_gap_fig), 0.02)
-        thumb_h_in  = thumb_h_fig * figH
-        thumb_w_in  = thumb_h_in * num_cols / num_rows   # square pixels
-        thumb_w_fig = thumb_w_in / figW
-        max_w_fig = 0.11 * thumb_scale
-        if thumb_w_fig > max_w_fig:
-            thumb_w_fig = max_w_fig
-            thumb_w_in  = thumb_w_fig * figW
-            thumb_h_in  = thumb_w_in * num_rows / num_cols
+        if thumb_height_in is not None:
+            # ABSOLUTE SIZE, decoupled from the figure. Sizing a thumbnail as a
+            # fraction of figure height ties the two together: every change to the
+            # figure's height resizes the thumbnails, and every change to the
+            # thumbnail scale changes how much height the strip needs. Given in
+            # inches, the strip is whatever it is and the grid can be scaled freely.
+            thumb_h_in  = thumb_height_in * thumb_scale
             thumb_h_fig = thumb_h_in / figH
+            thumb_w_in  = thumb_h_in * num_cols / num_rows   # square pixels
+            thumb_w_fig = thumb_w_in / figW
+        else:
+            # Size thumbnails so a full legend column fits in ~90% of the figure
+            # height (square pixels); cap the width so the strip stays a narrow
+            # sidebar. The lower clamp keeps small figures valid.
+            thumb_h_fig = max(
+                thumb_scale * (0.9 / n_per_col - label_h_fig - cell_gap_fig), 0.02)
+            thumb_h_in  = thumb_h_fig * figH
+            thumb_w_in  = thumb_h_in * num_cols / num_rows   # square pixels
+            thumb_w_fig = thumb_w_in / figW
+            max_w_fig = 0.11 * thumb_scale
+            if thumb_w_fig > max_w_fig:
+                thumb_w_fig = max_w_fig
+                thumb_w_in  = thumb_w_fig * figW
+                thumb_h_in  = thumb_w_in * num_rows / num_cols
+                thumb_h_fig = thumb_h_in / figH
 
         strip_w_fig = pad + n_cols_leg * thumb_w_fig + (n_cols_leg - 1) * gap + pad
 
