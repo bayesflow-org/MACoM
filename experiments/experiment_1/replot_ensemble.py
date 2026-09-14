@@ -186,7 +186,7 @@ def main():
         row_kw = {"row_labels": ROW_LABELS, "max_ticks": 3, "fit_labels": True,
                   "fit_delta": -1.0, "wspace": 0.20, "hspace": 0.0,
                   "tick_pad": 1.9, "marker_size": 9, "err_linewidth": 0.7,
-                  "thumb_scale": 1.1, "thumb_spread": False, "thumb_tight_rows": True,
+                  "thumb_scale": 0.8, "thumb_spread": False, "thumb_tight_rows": True,
                   "pack_rows": True, "row_gap_px": 6.0} if name == "recovery" else {}
         fig = sized(fn, name, n_rows_grid, n_cols_main,
                     **shared, **extra, **main_only, **row_kw)
