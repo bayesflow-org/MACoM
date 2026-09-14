@@ -43,6 +43,7 @@ def ensemble_recovery(
     row_gap_px: float = 6.0,
     pack_cols: bool = False,
     col_gap_px: float = 10.0,
+    align_bottom_frac: float = None,
     thumb_tight_rows: bool = False,
     marker_size: float = None,
     err_linewidth: float = 1.2,
@@ -348,6 +349,10 @@ def ensemble_recovery(
             for ax in fig.axes:
                 if id(ax) not in grid_axes and ax.get_xlabel():
                     ax.xaxis.label.set_fontsize(fitted_label_size)
+        if align_bottom_frac is not None:
+            # LAST: the labels have just been resized, so the grid's lowest ink is
+            # only final now.
+            _align_grid_bottom(fig, axarr, align_bottom_frac)
     return fig
 
 
@@ -378,6 +383,33 @@ def _pack_rows(fig, axarr, n_rows, n_cols, gap_px=6.0):
             pos = axarr[r, c].get_position()
             axarr[r, c].set_position([pos.x0, p0.y0 - r * pitch,
                                       pos.width, p0.height])
+
+
+def _align_grid_bottom(fig, axarr, target_frac):
+    """Translate the whole grid so its lowest ink sits at `target_frac`.
+
+    The thumbnail strip's divider is drawn at a fixed 0.02..0.98 of the figure, while
+    the grid's extent depends on its labels, so the two ends rarely line up on their
+    own. Measured on the tight bboxes, which is what includes the x labels -- the
+    axes boxes stop well above them.
+    """
+    live = [ax for ax in np.ravel(axarr) if ax.get_visible()]
+    if not live:
+        return
+    # ITERATED: the axes are aspect-constrained, so set_position is a request rather
+    # than the final geometry -- matplotlib re-applies the aspect at draw and the
+    # result lands a few pixels off. Re-measuring and correcting converges in two.
+    for _ in range(4):
+        fig.canvas.draw()
+        rend = fig.canvas.get_renderer()
+        inv = fig.transFigure.inverted()
+        bottom = min(ax.get_tightbbox(rend).transformed(inv).y0 for ax in live)
+        dy = target_frac - bottom
+        if abs(dy) < 5e-4:
+            return
+        for ax in live:
+            pos = ax.get_position()
+            ax.set_position([pos.x0, pos.y0 + dy, pos.width, pos.height])
 
 
 def _pack_cols(fig, axarr, n_rows, n_cols, gap_px=10.0):

@@ -188,7 +188,12 @@ def main():
                   "tick_pad": 1.9, "marker_size": 9, "err_linewidth": 0.7,
                   "thumb_scale": 0.8, "thumb_height_in": 0.60, "thumb_spread": False, "thumb_tight_rows": True,
                   "pack_rows": True, "row_gap_px": 10.0,
-                  "pack_cols": True, "col_gap_px": 10.0} if name == "recovery" else {}
+                  "pack_cols": True, "col_gap_px": 10.0,
+                  # The strip divider is drawn at 0.02..0.98 of the figure. The target
+                  # is BELOW 0.02 on purpose: this aligns the grid's tight bbox, and a
+                  # text bbox reserves descender space that "Ground Truth" does not
+                  # use, so matching the bboxes leaves the visible ink ~8px high.
+                  "align_bottom_frac": 0.0086} if name == "recovery" else {}
         fig = sized(fn, name, n_rows_grid, n_cols_main,
                     **shared, **extra, **main_only, **row_kw)
         if fig is not None:
