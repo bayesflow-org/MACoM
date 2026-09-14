@@ -1002,7 +1002,8 @@ def _draw_quantile_panel(ax, obs, ppc_samples, quantiles, xs, ppc_color, ppc_fil
     ax.spines[["top", "right"]].set_visible(False)
 
 
-def _choice_grid_axes(fig, pos, nrow=2, ncol=2, gw=CHOICE_GW, gh=CHOICE_GH):
+def _choice_grid_axes(fig, pos, nrow=2, ncol=2, gw=CHOICE_GW, gh=CHOICE_GH,
+                      square=False):
     """`nrow` x `ncol` axes laid inside the rectangle `pos`, in figure coordinates.
 
     The whole block has to occupy exactly ONE quantile panel's footprint, so the
@@ -1017,8 +1018,16 @@ def _choice_grid_axes(fig, pos, nrow=2, ncol=2, gw=CHOICE_GW, gh=CHOICE_GH):
     into the gap instead of into its neighbour. The plots end up small; that is the
     trade the fixed footprint forces, and the alternative is text no one can read.
     """
-    return [[fig.add_axes(r) for r in row]
-            for row in _choice_grid_rects(pos, nrow, ncol, gw, gh)]
+    out = []
+    for row in _choice_grid_rects(pos, nrow, ncol, gw, gh):
+        axs = [fig.add_axes(r) for r in row]
+        if square:
+            # Square each panel rather than letting it fill a cell that may be much
+            # wider than tall; the surplus width becomes spacing.
+            for ax in axs:
+                ax.set_box_aspect(1)
+        out.append(axs)
+    return out
 
 
 def _choice_grid_rects(pos, nrow, ncol, gw=CHOICE_GW, gh=CHOICE_GH):
@@ -1070,7 +1079,7 @@ def _fit_block(fig, axes, pos, nrow, ncol, passes=2):
 
 
 def _draw_choice_grid(fig, pos, obs_ch, ppc_ch, ordered, ppc_color, bar_color,
-                      legend=True):
+                      legend=True, square_panels=False):
     """The response-dimension check as a 2x2 of per-level proportion panels.
 
     One panel per condition level, as in the standalone `choice_ppc_<cond>.pdf`
@@ -1096,7 +1105,7 @@ def _draw_choice_grid(fig, pos, obs_ch, ppc_ch, ordered, ppc_color, bar_color,
 
     ncol = 2
     nrow = int(np.ceil(len(levels) / ncol))
-    axes = _choice_grid_axes(fig, pos, nrow, ncol)
+    axes = _choice_grid_axes(fig, pos, nrow, ncol, square=square_panels)
 
     # One y scale across the four, or a level whose proportions happen to sit low
     # would be drawn at the same apparent height as one that sits high.
@@ -1278,7 +1287,9 @@ def _combined_legend(primary, extra_axes=()):
         for h, l in zip(*ax.get_legend_handles_labels()):
             if l and l not in seen:
                 seen.add(l); H.append(h); L.append(l)
-    primary.legend(H, L, fontsize=FS_LEG, frameon=False)
+    # Lower right: these panels rise left-to-right, so the upper-left corner the
+    # default picks is exactly where the data is.
+    primary.legend(H, L, fontsize=FS_LEG, frameon=False, loc="lower right")
 
 
 def plot_combined(obs_pooled, ppc_pooled, obs_ch, ppc_ch, conditions, model_name,
@@ -1559,7 +1570,17 @@ def plot_combined_all(per_family, outpath, quantiles=DEFAULT_RT_QUANTILES):
         obs_pooled, ppc_pooled, conditions, obs_ch, ppc_ch = per_family[fam]
         first, last = axes[r, spare[0]], axes[r, spare[-1]]
         p_first, p_last = first.get_position(), last.get_position()
-        pos = Bbox.from_extents(p_first.x0, p_first.y0, p_last.x1, p_first.y1)
+        # Vertical bounds from a DRAWN quantile panel, not from the grid cell. The
+        # panels are square by box_aspect and sit shorter than their cell, so a block
+        # sized to the cell starts above them and ends below -- visibly out of line
+        # with its own row.
+        ref = next((axes[r, j].get_position() for j in range(len(cols))
+                    if axes[r, j].get_visible()), p_first)
+        # Full spare width. Capping it to a square shrank the block and left a hole
+        # where the spare column was; the mini panels are squared individually
+        # instead, so the extra width becomes spacing between them rather than
+        # stretching each one into a squat rectangle.
+        pos = Bbox.from_extents(p_first.x0, ref.y0, p_last.x1, ref.y1)
         for j in spare:
             # Hidden BEFORE removal: a removed axes still reports get_visible() True,
             # and the divider loops below filter on that. Touching a removed axes'
@@ -1570,14 +1591,23 @@ def plot_combined_all(per_family, outpath, quantiles=DEFAULT_RT_QUANTILES):
         # family's panel titles, and one legend already covers the whole figure.
         grids[r] = _draw_choice_grid(fig, pos, obs_ch, ppc_ch,
                                      _ordered_conditions(conditions, fam),
-                                     *_ppc_colors(fam), legend=False)
+                                     *_ppc_colors(fam), legend=False,
+                                     square_panels=True)
     fig.canvas.draw()
 
-    # ONE legend for the figure, on the first panel, covering the bar marks too --
-    # the choice blocks carry none of their own.
+    # ONE legend for the figure, BELOW it, covering the bar marks too -- the choice
+    # blocks carry none of their own. Not inside a panel: at this size every corner
+    # of every panel has data in it, and the first panel's y tick labels were being
+    # covered as well.
     first_grid = grids.get(min(grids)) if grids else None
-    extra = [first_grid[0][0]] if first_grid else []
-    _combined_legend(axes[0, 0], extra)
+    H, L, seen = [], [], set()
+    for ax in [axes[0, 0]] + ([first_grid[0][0]] if first_grid else []):
+        for h, l in zip(*ax.get_legend_handles_labels()):
+            if l and l not in seen:
+                seen.add(l); H.append(h); L.append(l)
+    if H:
+        fig.legend(H, L, loc="lower center", bbox_to_anchor=(0.5, -0.015),
+                   ncol=len(H), frameon=False, fontsize=FS_LEG)
 
     # Dashed: condition-group breaks, and the RT/choice break on the DDM/RDM rows.
     for r, (fam, kind, cols, breaks) in enumerate(plan):
