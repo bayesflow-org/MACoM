@@ -51,7 +51,8 @@ from cogformer.diagnostics.plot.adaptive_metrics import (
     adaptive_metrics as plot_adaptive_metrics,
     global_metrics as plot_global_metrics,
 )
-from cogformer.diagnostics.metric.adaptive_metrics import adaptive_metrics as compute_metrics
+from cogformer.diagnostics.metric.adaptive_metrics import (
+    adaptive_metrics as compute_metrics, global_metrics as compute_global_metrics)
 from cogformer.utils.plot_utils import family_colors, cogformer_mc_colors
 
 from .model_class_lba_finetune_validate import (
@@ -71,10 +72,11 @@ CFG = {"lba": _LBA_WITH_PI, **{k: _MODELS_WITH_PI[k] for k in ("ddm", "rdm", "cd
 # are `<fam>_<scen>_cf_pred.npz` against figures `<fam>_<scen>_fm_*`. Only finetuned
 # uses one infix for both.
 ARMS = {
-    "zeroshot":  (["lba"], "mid1_cf", "mid1", None),
-    "finetuned": (["ddm", "rdm", "cdm", "lba"], "ft", "ft", None),
+    "zeroshot":  (["lba"], "mid1_cf", "mid1", 4),
+    "finetuned": (["ddm", "rdm", "cdm", "lba"], "ft", "ft", 4),
     "original":  (["ddm", "rdm", "cdm"], "cf", "fm", 4),
 }
+MAX_REGS = 4          # the training geometry, MC_MAX_REG
 MAX_CATS = 4          # verified against all 48 metrics.csv indices
 BASE_W_PER_COL = 3.0  # inches, the widest of the four plot types
 TARGET_W = 11.0       # the width this project draws at
@@ -108,7 +110,7 @@ def main():
     mc = cogformer_mc_colors()
     lba = family_colors("lba")
 
-    written, skipped, verified = 0, [], 0
+    written, skipped, verified, relabelled = 0, [], 0, []
     for arm in a.arms:
         fams, pred_tag, fig_tag, regs = ARMS[arm]
         for fam in fams:
@@ -131,13 +133,23 @@ def main():
                     variable_names=cfg["variable_names"],
                     global_params=GLOBAL_PARAMS, max_num_regressors=regs)
 
-                # VERIFY: reproduce the labels the original run recorded, or skip.
+
+                # VERIFY on the CELL COUNT, and report label changes rather than
+                # requiring none. The zeroshot and finetuned arms' runs did not forward
+                # max_num_regressors to the label builder, so their saved metrics.csv
+                # names the interaction block as a phantom main effect; those names are
+                # what this pass is correcting, and demanding they match would pin the
+                # error in place. What must NOT change is which cells exist.
                 got = list(compute_metrics(**common).index)
                 want = list(pd.read_csv(csv, index_col=0).index)
-                if got != want:
-                    skipped.append(f"{arm}/{fam}/{scen} (labels differ from metrics.csv)")
+                if len(got) != len(want):
+                    skipped.append(f"{arm}/{fam}/{scen} "
+                                   f"(cell count {len(got)} != {len(want)} in metrics.csv)")
                     continue
                 verified += 1
+                changed = sum(1 for x, y in zip(got, want) if x != y)
+                if changed:
+                    relabelled.append(f"{arm}/{fam}/{scen}: {changed}/{len(got)} row names")
 
                 # Font scale from the figure's own width. num_cols counts active,
                 # non-global columns, which is what the plotters compact down to.
@@ -200,10 +212,32 @@ def main():
                                          bbox_inches="tight")
                             plt.close(gfig)
                             written += 1
+                # Rewrite the metrics CSVs too: leaving them would put a figure
+                # saying "u_1 x u_2" beside a table saying "u_5" for the same cell.
+                # The VALUES must be untouched by a labelling fix, so they are
+                # checked against the old file positionally before it is replaced.
+                new = compute_metrics(**common, skip_log_gamma=a.skip_log_gamma)
+                old = pd.read_csv(csv, index_col=0)
+                shared = [c for c in new.columns if c in old.columns]
+                delta = float(np.abs(new[shared].to_numpy()
+                                     - old[shared].to_numpy()).max())
+                if delta > 1e-9:
+                    skipped.append(f"{arm}/{fam}/{scen} "
+                                   f"(metric VALUES moved by {delta:.2e}; not written)")
+                    continue
+                new.to_csv(outdir / f"{tag}_metrics.csv")
+                gm = compute_global_metrics(**common, skip_log_gamma=a.skip_log_gamma)
+                if gm is not None and len(gm):
+                    gm.to_csv(outdir / f"{tag}_metrics_global.csv")
                 logging.info(f"  {arm}/{fam}/{scen}: {num_cols} cols, font x{s:.2f}")
 
     verb = "would write" if a.dry_run else "wrote"
     logging.info(f"\n{verb} {written} figures from {verified} verified cases")
+    if relabelled:
+        logging.info(f"\n  {len(relabelled)} cases had row NAMES corrected "
+                     f"(values unchanged):")
+        for r in relabelled:
+            logging.info(f"    {r}")
     for s_ in skipped:
         logging.info(f"  SKIPPED {s_}")
     if not a.dry_run:

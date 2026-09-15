@@ -58,8 +58,15 @@ def parse_args():
     p.add_argument("--root", type=str, default=str(TRAJ))
     p.add_argument("--outdir", type=str,
                    default="outputs/figures/model_class/cf/lba_trajectory")
-    p.add_argument("--max_num_categories", type=int, default=5)
-    p.add_argument("--max_num_regressors", type=int, default=7)
+    # BOTH matter, and both were wrong here before. max_num_categories sets the
+    # block width, so 5 laid the design out on 4-wide blocks when the run used 3,
+    # putting each active cell under the wrong regressor's name. And
+    # max_num_regressors must be FORWARDED to the label builder: without it,
+    # expand_design_config_to_mask invents phantom main effects (u_3, u_4, u_5...) to
+    # cover rows it cannot account for, so the interaction block u_1:u_2 is labelled
+    # as a main effect "u_5". 4 is the training geometry (MC_MAX_REG/MC_MAX_CAT).
+    p.add_argument("--max_num_categories", type=int, default=4)
+    p.add_argument("--max_num_regressors", type=int, default=4)
     return p.parse_args()
 
 
@@ -91,6 +98,25 @@ def main():
         raise SystemExit("arms have different parameter masks; cannot overlay")
     logging.info(f"{a.scenario}: {true0.shape[0]} datasets x {pred0.shape[1]} draws, "
                  f"{int(mask0.sum())} active cells")
+
+    # Guard on the CELL COUNT, not on the labels. The run's own metrics.csv is the
+    # oracle for which cells exist, and this checks the layout does not drop any --
+    # but its label strings are NOT used as a reference, because the run wrote them
+    # without max_num_regressors and so recorded the interaction block under a
+    # phantom main-effect name. Matching those would preserve the error.
+    ref = (Path(a.root) / f"ep{ARM_EPOCH['finetuned']}" / "lba" / a.scenario
+           / f"lba_{a.scenario}_ft_metrics.csv")
+    if ref.exists():
+        import pandas as pd
+        n_ref = len(pd.read_csv(ref, index_col=0))
+        gcols = {i for i, p_ in enumerate(cfg["intrinsic_params"])
+                 if p_ in GLOBAL_PARAMS}
+        n_here = sum(1 for r in range(mask0.shape[0]) for c in range(mask0.shape[1])
+                     if mask0[r, c] == 1.0 and c not in gcols)
+        if n_here != n_ref:
+            raise SystemExit(f"layout mismatch: {n_here} non-global active cells "
+                             f"but {ref.name} records {n_ref}")
+        logging.info(f"  layout check: {n_here} non-global cells, matches {ref.name}")
 
     arms = [(pred0, C_ZERO, "zero-shot"), (pred1, C_FT, "finetuned")]
     common = dict(true=true0, pred=pred0, design_config=design_config,

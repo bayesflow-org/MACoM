@@ -379,6 +379,14 @@ def main():
         params_mask   = case["params_mask"]
         outdir        = case["outdir"]
         tag = f"{label}_{cfg_name}_ft"
+        # max_num_regressors is forwarded to every plot and metric call below, not
+        # only to the sampler. Without it expand_design_config_to_mask cannot account
+        # for the rows an interaction block occupies and invents phantom main effects
+        # (u_3, u_4, u_5 ...) to cover them, so `u_1:u_2` is labelled and COLOURED as
+        # a main effect. The cell values are unaffected -- this is purely which name
+        # sits beside a row -- but every interaction/mixed_predictor figure and
+        # metrics.csv this script wrote before 2026-09-15 carries the wrong names.
+
 
         for fn, name, kwargs in [
             (adaptive_recovery,      "recovery",  {}),
@@ -391,6 +399,7 @@ def main():
                 design_config=design_config,
                 intrinsic_params=intrinsic_params,
                 max_num_categories=args.max_num_categories,
+                max_num_regressors=args.max_num_regressors,
                 parameter_mask=params_mask,
                 variable_names=variable_names,
                 intercept_color=colors["intercept"],
@@ -415,6 +424,7 @@ def main():
                 design_config=design_config,
                 intrinsic_params=intrinsic_params,
                 max_num_categories=args.max_num_categories,
+                max_num_regressors=args.max_num_regressors,
                 global_params=GLOBAL_PARAMS,
                 parameter_mask=params_mask,
                 variable_names=variable_names,
@@ -431,6 +441,7 @@ def main():
             design_config=design_config,
             intrinsic_params=intrinsic_params,
             max_num_categories=args.max_num_categories,
+            max_num_regressors=args.max_num_regressors,
             parameter_mask=params_mask,
             variable_names=variable_names,
             skip_log_gamma=args.skip_log_gamma,
@@ -443,6 +454,7 @@ def main():
         metrics_glob_df = compute_global_metrics(
             true=true_set, pred=pred_set, design_config=design_config,
             intrinsic_params=intrinsic_params, max_num_categories=args.max_num_categories,
+            max_num_regressors=args.max_num_regressors,
             global_params=GLOBAL_PARAMS, parameter_mask=params_mask,
             variable_names=variable_names, skip_log_gamma=args.skip_log_gamma,
         )
