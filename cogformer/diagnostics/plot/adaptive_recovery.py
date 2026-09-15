@@ -27,6 +27,7 @@ def adaptive_recovery(
     global_only: bool = False,
     max_num_regressors: int = None,
     categorical_regressors: list[str] = None,
+    arms: list = None,
 ):
     """Coefficient-matrix recovery grid.
 
@@ -42,9 +43,19 @@ def adaptive_recovery(
     - ``global_only=True``: only those columns are kept (used by
       :func:`global_recovery`).
 
+    ``arms`` overlays SEVERAL prediction sets on one grid: a list of
+    ``(pred, color, label)``. Every cell then carries one cloud per arm in that arm's
+    colour, with one ``r`` annotation per arm, and the figure gets a legend naming
+    them. The row-kind colours (intercept / main effect / interaction) are given up
+    when it is used -- with two arms in a cell, colour has to mean which arm -- but
+    the N/A tiles keep them, so the row structure is still legible. ``pred`` is
+    ignored; pass ``arms[0][0]`` for it.
+
     Returns ``None`` if the selected column set is empty (e.g. ``global_only`` with
     no active global params), so callers can skip saving/logging.
     """
+    if arms:
+        pred = arms[0][0]
     if variable_names is None:
         variable_names = design_config["1"]
 
@@ -91,6 +102,13 @@ def adaptive_recovery(
     parameter_mask = parameter_mask[np.ix_(row_idx, col_idx)]
     true_f  = true[..., row_idx, :][..., col_idx]  # keep original for ref below
     pred_f  = pred[..., row_idx, :][..., col_idx] if pred.ndim >= 3 else pred
+    arms_f = ([(q[..., row_idx, :][..., col_idx] if q.ndim >= 3 else q, c, lab)
+               for q, c, lab in arms] if arms else None)
+    # Smaller and edgeless ONLY when overlaying. seaborn's default marker edge is
+    # white, which separates points nicely for one arm but, with two arms in a cell,
+    # rings every point of the arm drawn second in white and hides the one beneath.
+    # Passing these unconditionally silently restyled the single-arm figures.
+    dot = dict(s=14, edgecolor="none") if arms else {}
     row_ylabels = [row_ylabels[i] for i in row_idx]
     row_colors  = [row_colors[i]  for i in row_idx]
     col_labels  = [variable_names[i] for i in col_idx]
@@ -114,28 +132,38 @@ def adaptive_recovery(
             x = true_f[..., r_f, c_f]
             mask = parameter_mask[r_f, c_f]
             if mask == 1.0:
-                if pred_f.ndim == 4:  # Full posterior
-                    y = pred_f[..., r_f, c_f]
-                    y_mean = y.mean(axis=1)
-                    make_quadratic(ax, x, y_mean, color=color)
+                todo = arms_f if arms_f else [(pred_f, color, None)]
+                # One pass to fix the box, so the identity line and the limits cover
+                # EVERY arm; drawing it per arm would leave the last arm's range
+                # deciding the frame and the earlier ones clipped.
+                means = []
+                for q, _, _ in todo:
+                    means.append(q[..., r_f, c_f].mean(axis=1) if q.ndim == 4
+                                 else q[..., r_f, c_f])
+                make_quadratic(ax, x, np.concatenate(means),
+                               color="black" if arms_f else color)
 
-                    ci = uncertainty_agg(y, prob=0.9, axis=1)
-                    y_lo, y_hi = ci[0], ci[1]
-                    y_err = np.vstack([y_mean - y_lo, y_hi - y_mean])
-
-                    ax.errorbar(x, y_mean, yerr=y_err, fmt="none", alpha=0.3, linewidth=1.5, color=color)
-                    sns.scatterplot(x=x, y=y_mean, ax=ax, color=color, alpha=0.7)
-
+                for k, ((q, acol, _), y_mean) in enumerate(zip(todo, means)):
+                    if q.ndim == 4:   # Full posterior
+                        y = q[..., r_f, c_f]
+                        ci = uncertainty_agg(y, prob=0.9, axis=1)
+                        y_err = np.vstack([y_mean - ci[0], ci[1] - y_mean])
+                        # Thinner and more transparent with two arms on one cell:
+                        # at the single-arm settings the second set of bars simply
+                        # buries the first.
+                        ax.errorbar(x, y_mean, yerr=y_err, fmt="none",
+                                    alpha=0.18 if arms_f else 0.3,
+                                    linewidth=0.9 if arms_f else 1.5, color=acol)
+                        sns.scatterplot(x=x, y=y_mean, ax=ax, color=acol,
+                                        alpha=0.45 if arms_f else 0.7, **dot)
+                    else:             # Point estimate
+                        sns.scatterplot(x=x, y=y_mean, ax=ax, color=acol,
+                                        alpha=0.45 if arms_f else 0.5, **dot)
                     corr = np.corrcoef(x, y_mean)[0, 1]
-                else:                 # Point estimate
-                    y = pred_f[..., r_f, c_f]
-                    make_quadratic(ax, x, y, color=color)
-
-                    sns.scatterplot(x=x, y=y, ax=ax, color=color, alpha=0.5)
-                    corr = np.corrcoef(x, y)[0, 1]
-
-                metric_label = f"r = {corr:.3f}"
-                ax.text(0.1, 0.95, metric_label, ha="left", va="center", transform=ax.transAxes, size=12)
+                    ax.text(0.1 if not arms_f else 0.06, 0.95 - 0.085 * k,
+                            f"r = {corr:.3f}", ha="left", va="center",
+                            transform=ax.transAxes, size=12,
+                            color=acol if arms_f else "black")
 
                 ax.grid(True, color="lightgray", linestyle="--", linewidth=0.5, alpha=0.2)
                 sns.despine(ax=ax)
@@ -165,6 +193,14 @@ def adaptive_recovery(
                 ax.set_xlabel("Ground Truth" if r_f == num_rows - 1 else "", fontsize=label_fontsize)
 
     fig.tight_layout()
+    if arms_f:
+        handles = [plt.Line2D([], [], marker="o", ls="none", color=c, label=lab)
+                   for _, c, lab in arms_f if lab]
+        if handles:
+            # Clear of the bottom row's x-labels; bbox_inches="tight" takes it in.
+            fig.legend(handles=handles, loc="lower center", ncol=len(handles),
+                       frameon=False, fontsize=label_fontsize,
+                       bbox_to_anchor=(0.5, -0.035))
     return fig
 
 

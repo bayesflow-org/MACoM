@@ -61,6 +61,7 @@ def adaptive_ecdf(
     global_only: bool = False,
     max_num_regressors: int = None,
     categorical_regressors: list = None,
+    arms: list = None,
 ) -> plt.Figure:
     """
     Adaptive (masked) ECDF calibration plot over a regressor-by-parameter grid.
@@ -68,6 +69,14 @@ def adaptive_ecdf(
     ``global_params`` (e.g. the contamination probability ``pi``) are estimated
     jointly but presented separately: with ``global_only=False`` (default) their
     columns are excluded from the grid; with ``global_only=True`` only those are
+    ``arms`` overlays SEVERAL prediction sets on one grid: a list of
+    ``(pred, color, label)``. Each cell then carries one rank-ECDF curve per arm in
+    that arm's colour against the SAME confidence band, which is what makes them
+    directly comparable -- the band depends only on the number of datasets, and both
+    arms are scored on identical data here. Row-kind tints are given up for the
+    curves (colour has to mean which arm) but the N/A tiles keep them. ``pred`` is
+    ignored; pass ``arms[0][0]`` for it.
+
     kept (used by :func:`global_ecdf`). Returns ``None`` if no column is selected.
 
     For each active cell, computes the fractional rank of the true parameter value
@@ -117,6 +126,8 @@ def adaptive_ecdf(
     -------
     fig : plt.Figure
     """
+    if arms:
+        pred = arms[0][0]
     if parameter_mask is None:
         parameter_mask = build_parameter_mask(
             design_config=design_config,
@@ -160,6 +171,8 @@ def adaptive_ecdf(
     parameter_mask = parameter_mask[np.ix_(row_idx, col_idx)]
     true = true[:, row_idx, :][:, :, col_idx]
     pred = pred[:, :, row_idx, :][:, :, :, col_idx]
+    arms_f = ([(q[:, :, row_idx, :][:, :, :, col_idx], c, lab)
+               for q, c, lab in arms] if arms else None)
     row_ylabels = [row_ylabels[i] for i in row_idx]
     row_tints   = [row_tints[i]   for i in row_idx]
     col_labels  = [variable_names[i] for i in col_idx]
@@ -211,11 +224,10 @@ def adaptive_ecdf(
                 ax.set_xlabel("Fractional rank statistic" if r_f == num_rows - 1 else "", fontsize=label_fontsize)
                 continue
 
-            # Compute fractional ranks: for each dataset, fraction of draws < true value
-            ranks = np.mean(pred[:, :, r_f, c_f] < true[:, r_f, c_f, np.newaxis], axis=1)  # (num_datasets,)
-            ranks_sorted = np.sort(ranks)
             ecdf_y = np.arange(1, num_datasets + 1) / num_datasets
-
+            # The band is drawn ONCE, before the curves: it is a property of
+            # num_datasets, not of any arm, so one band is the common reference
+            # both arms are read against.
             if difference:
                 ax.fill_between(
                     band_x,
@@ -225,7 +237,6 @@ def adaptive_ecdf(
                     label=f"{int(prob * 100)}% Confidence Band",
                 )
                 ax.axhline(0.0, color="black", linestyle="dashed", label="Ideal (Uniform)")
-                ax.plot(ranks_sorted, ecdf_y - ranks_sorted, color=tint, alpha=1.0, label="ECDF Difference")
             else:
                 ax.fill_between(
                     band_x,
@@ -235,7 +246,16 @@ def adaptive_ecdf(
                     label=f"{int(prob * 100)}% Confidence Band",
                 )
                 ax.plot([0, 1], [0, 1], color="black", linestyle="dashed", label="Ideal (Uniform)")
-                ax.plot(ranks_sorted, ecdf_y, color=tint, alpha=1.0, label="Empirical CDF")
+
+            for q, acol, alab in (arms_f if arms_f else [(pred, tint, None)]):
+                # Fractional rank: per dataset, the fraction of draws below truth.
+                ranks_sorted = np.sort(np.mean(
+                    q[:, :, r_f, c_f] < true[:, r_f, c_f, np.newaxis], axis=1))
+                ax.plot(ranks_sorted,
+                        ecdf_y - ranks_sorted if difference else ecdf_y,
+                        color=acol, alpha=1.0,
+                        label=alab or ("ECDF Difference" if difference
+                                       else "Empirical CDF"))
 
             ax.set_xlim(-0.02, 1.02)
             ax.set_ylabel(ylabel if c_f == 0 else "", fontsize=label_fontsize)

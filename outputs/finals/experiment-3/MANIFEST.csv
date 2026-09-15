@@ -524,7 +524,11 @@ predictions/zeroshot/lba_interaction_mid1_cf_pred.npz,outputs/figures/model_clas
 predictions/zeroshot/lba_intercept_only_mid1_cf_pred.npz,outputs/figures/model_class/cf/paired_lba_20260816/zeroshot/predictions/lba_intercept_only_mid1_cf_pred.npz,75794924,2026-08-15 22:39:06Z,False
 predictions/zeroshot/lba_mixed_predictor_mid1_cf_pred.npz,outputs/figures/model_class/cf/paired_lba_20260816/zeroshot/predictions/lba_mixed_predictor_mid1_cf_pred.npz,75417848,2026-08-15 22:39:15Z,False
 predictions/zeroshot/lba_regressed_mid1_cf_pred.npz,outputs/figures/model_class/cf/paired_lba_20260816/zeroshot/predictions/lba_regressed_mid1_cf_pred.npz,75794924,2026-08-15 22:39:09Z,False
+trajectory/lba_calibration_plane.csv,outputs/figures/model_class/cf/lba_trajectory/lba_calibration_plane.csv,4663,2026-09-15 05:26:29Z,False
+trajectory/lba_calibration_plane.pdf,outputs/figures/model_class/cf/lba_trajectory/lba_calibration_plane.pdf,42483,2026-09-15 05:26:29Z,False
 trajectory/lba_finetuning_trajectory.pdf,outputs/figures/model_class/cf/lba_trajectory/lba_finetuning_trajectory.pdf,29147,2026-09-11 16:14:10Z,False
+trajectory/lba_interaction_overlay_ecdf.pdf,outputs/figures/model_class/cf/lba_trajectory/lba_interaction_overlay_ecdf.pdf,127313,2026-09-15 05:29:16Z,False
+trajectory/lba_interaction_overlay_recovery.pdf,outputs/figures/model_class/cf/lba_trajectory/lba_interaction_overlay_recovery.pdf,287196,2026-09-15 05:29:15Z,False
 trajectory/trajectory_per_scenario.csv,outputs/figures/model_class/cf/lba_trajectory/trajectory_per_scenario.csv,16247,2026-09-11 16:14:10Z,False
 trajectory/trajectory_summary.csv,outputs/figures/model_class/cf/lba_trajectory/trajectory_summary.csv,3185,2026-09-11 16:14:10Z,False
 zeroshot/lba/fixed/coverage.pdf,outputs/figures/model_class/cf/paired_lba_20260816/zeroshot/fixed/mid_rdm/lba_fixed_mid1_coverage.pdf,27723,2026-08-15 22:39:08Z,False
