@@ -65,6 +65,7 @@ def adaptive_delta(
     max_num_regressors: int = None,
     categorical_regressors: list[str] = None,
     symmetric: bool = True,
+    cell_size: float = 0.75,
 ) -> plt.Figure:
     """Delta heatmaps for ``pred_b`` minus ``pred_a`` on shared ``true``.
 
@@ -74,6 +75,11 @@ def adaptive_delta(
 
     ``symmetric`` puts the colour limits at +/- max|delta| per panel. Turning it off
     uses each panel's own min/max, which exaggerates a panel where nothing moved.
+
+    ``cell_size`` is half the adaptive_metrics default. This plot carries two panels
+    where that one carries three or four, so at 1.5 in a cell the same grid comes out
+    a third wider than the figures it sits beside, and each cell holds one short
+    signed number rather than needing room to be read as a level.
 
     Returns ``None`` if no column survives compacting, matching adaptive_metrics.
     """
@@ -147,4 +153,5 @@ def adaptive_delta(
     return _draw_grids(grids, specs, parameter_mask, row_labels, row_colors,
                        col_labels, figsize=figsize, title_fontsize=title_fontsize,
                        label_fontsize=label_fontsize, tick_fontsize=tick_fontsize,
-                       annot_fontsize=annot_fontsize, fmt=fmt)
+                       annot_fontsize=annot_fontsize, fmt=fmt,
+                       cell_size=cell_size)

@@ -1,8 +1,8 @@
 # Experiment 3 — LBA zero-shot inference and finetuning
 
 Frozen snapshot of the three-arm paired validation. Assembled
-2026-09-15 05:37:17Z by
-`experiments/finalize_experiment_3.py` — 593 files. Git commit `177fd4b0312973a29955f5eecc30729a5725515a`.
+2026-09-15 05:54:53Z by
+`experiments/finalize_experiment_3.py` — 593 files. Git commit `22fad3d5961a6a3bae464878935cc39b227ffa7c`.
 
 `paired_validation_notes.md` is the original run's write-up and carries the headline
 tables; `MANIFEST.csv` records per-file provenance.
@@ -111,7 +111,7 @@ calls, or use contraction, which is reproducible.
 
 ## Excluded
 
-0 posterior pairplots (0 files, 10 per case in `original/`) were
+1 posterior pairplots (1 files, 10 per case in `original/`) were
 deleted at source and are excluded here. This assembler uses an ALLOWLIST of plot
 stems rather than copying directory contents, so a future run that forgets
 `--skip_posteriors` cannot reintroduce them silently.
