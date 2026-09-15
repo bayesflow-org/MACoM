@@ -355,7 +355,8 @@ def pooled_embedding(summ_by_enc, seed=0):
 def draw_pooled(fig, ax, emb, fam_lab, enc_lab, fams, encs, fs=None,
                 legend_anchor=-0.02, tight_rect=(0, 0.10, 1, 1), adjust=None,
                 marker_size=14, contour_lw=0.5, legend_markerscale=1.8,
-                legend_ncol=None):
+                legend_ncol=None, legend_loc="lower center", legend_x=0.5,
+                legend_row_major=False):
     """Draw the two panels and the legend into an existing figure or subfigure.
 
     ``fig`` may be a SubFigure, which has no tight_layout -- pass ``adjust`` (a
@@ -422,7 +423,9 @@ def draw_pooled(fig, ax, emb, fam_lab, enc_lab, fams, encs, fs=None,
     handles, labels = ax[0].get_legend_handles_labels()
     # No suptitle: the panel titles already say which encoder each side is, and the
     # rest belongs in the caption.
-    if adjust is not None:
+    if adjust is False:
+        pass                 # the caller positioned the axes itself
+    elif adjust is not None:
         fig.subplots_adjust(**adjust)
     else:
         fig.tight_layout(rect=list(tight_rect))
@@ -430,11 +433,31 @@ def draw_pooled(fig, ax, emb, fam_lab, enc_lab, fams, encs, fs=None,
     # bboxes, 0.01 put the legend 0.09 in INTO the "MDS 1" labels; -0.02 clears them.
     # savefig with bbox_inches="tight" grows the canvas to take it in, so a negative
     # anchor costs nothing but the gap it buys.
-    fig.legend(handles, labels, loc="lower center",
-               bbox_to_anchor=(0.5, legend_anchor),
-               ncol=legend_ncol or len(fams), fontsize=FS_LG, frameon=False,
+    ncol = legend_ncol or len(fams)
+    if legend_row_major:
+        handles, labels = _row_major(handles, labels, ncol)
+    fig.legend(handles, labels, loc=legend_loc,
+               bbox_to_anchor=(legend_x, legend_anchor),
+               ncol=ncol, fontsize=FS_LG, frameon=False,
                markerscale=legend_markerscale)
     return ax
+
+
+def _row_major(handles, labels, ncol):
+    """Reorder so a multi-column legend READS across, not down.
+
+    Matplotlib fills legend columns top-to-bottom, so five entries in three columns
+    come out DDM/CDM/LBA on the first line and RDM/aDDM on the second -- the three
+    trained families and the two held-out ones interleaved, which is the one
+    distinction the figure exists to make. Laying the entries into a row-major grid
+    and reading it back column-major puts DDM/RDM/CDM on the first line and the
+    held-out pair on the second.
+    """
+    n = len(handles)
+    nrow = -(-n // ncol)
+    order = [r * ncol + c for c in range(ncol) for r in range(nrow)
+             if r * ncol + c < n]
+    return [handles[i] for i in order], [labels[i] for i in order]
 
 
 def main():

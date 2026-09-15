@@ -238,7 +238,7 @@ def _matrix_scatter_panel(mats, titles, colors, cbar_label, xy, scatter_title,
                           stat_text, axis_label, scatter_labels, outpath, cmap,
                           target=None, fs=MAT_FS, height_ratio=5.1, hspace=0.60,
                           width_ratios=(3.4, 0.34, 1.05), gap_in=0.825,
-                          divider_in=0.143, margins=None):
+                          divider_in=0.143, margins=None, axes_override=None):
     """Three heatmaps on ONE shared scale plus a full-height correspondence scatter.
 
     Draws into ``target`` (a Figure or SubFigure) instead of a new figure when one is
@@ -283,15 +283,23 @@ def _matrix_scatter_panel(mats, titles, colors, cbar_label, xy, scatter_title,
     own = target is None
     fig = (plt.figure(figsize=(FIG_W_WIDE, FIG_W_WIDE * height_ratio / 17.5))
            if own else target)
-    # margins go to the gridspec rather than subplots_adjust: the scatter is
-    # repositioned by hand afterwards, and subplots_adjust would move it back.
-    outer = fig.add_gridspec(1, 3, width_ratios=list(width_ratios), wspace=0.10,
-                             **(margins or {}))
-    maps_gs = outer[0, 0].subgridspec(2, 3, height_ratios=[1.0, 0.055],
-                                      hspace=hspace, wspace=0.14)
-    axes = [fig.add_subplot(maps_gs[0, i]) for i in range(3)]
-    cax = fig.add_subplot(maps_gs[1, :])
-    ax = fig.add_subplot(outer[0, 2])
+    if axes_override is not None:
+        # The caller has already placed every axes -- used by the combined panel,
+        # which sizes this block's maps to match the geometry block's panels and so
+        # cannot let a gridspec decide them. The scatter is then left exactly where it
+        # was put; the square-and-full-height repositioning below is skipped.
+        axes, cax, ax = axes_override
+        axes = list(axes)
+    else:
+        # margins go to the gridspec rather than subplots_adjust: the scatter is
+        # repositioned by hand afterwards, and subplots_adjust would move it back.
+        outer = fig.add_gridspec(1, 3, width_ratios=list(width_ratios), wspace=0.10,
+                                 **(margins or {}))
+        maps_gs = outer[0, 0].subgridspec(2, 3, height_ratios=[1.0, 0.055],
+                                          hspace=hspace, wspace=0.14)
+        axes = [fig.add_subplot(maps_gs[0, i]) for i in range(3)]
+        cax = fig.add_subplot(maps_gs[1, :])
+        ax = fig.add_subplot(outer[0, 2])
 
     # imshow centres cell i at i and ends the axis at n - 0.5, so np.arange(0, n, 50)
     # stops at 150 and the last 50 draws run off with nothing marking where the matrix
@@ -352,6 +360,13 @@ def _matrix_scatter_panel(mats, titles, colors, cbar_label, xy, scatter_title,
     fig.canvas.draw()
     top = axes[0].get_position().y1
     bot = cax.get_position().y0
+    if axes_override is not None:
+        # Divider only: span the maps block as placed, and leave the scatter alone.
+        xd = (axes[-1].get_position().x1 + ax.get_position().x0) / 2
+        fig.add_artist(Line2D([xd, xd], [cax.get_position().y0, top],
+                              transform=fig.transSubfigure,
+                              color="0.72", linewidth=1.1, zorder=10))
+        return
     H = top - bot
     figW, figH = _fig_size_in(fig)
     W = H * figH / figW                      # equal side lengths in INCHES
