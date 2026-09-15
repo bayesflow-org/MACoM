@@ -159,13 +159,47 @@ def adaptive_metrics(
             if not skip_log_gamma:
                 grids["Log Gamma"][r, c] = _log_gamma(estimates, targets, null_quantile)
 
-    # ------------------------------------------------------------------
-    # Row / column axis labels (built before compact filtering)
-    # ------------------------------------------------------------------
-    row_labels, row_kinds = build_row_labels(design_config, max_num_categories, return_kinds=True,
+    compacted = _compact_grids(
+        grids, parameter_mask, design_config, num_rows, max_num_categories,
+        intrinsic_params, col_labels, global_params, global_only,
+        categorical_regressors,
+        (intercept_color, main_effect_color, interaction_color),
+    )
+    if compacted is None:
+        return None
+    grids, parameter_mask, row_labels, row_colors, col_labels = compacted
+    num_rows, num_cols = parameter_mask.shape
+
+    metric_specs = [
+        (rmse_col,                "mako",   0.0, 1.0),
+        ("Posterior Contraction", "rocket", 0.0, 1.0),
+        ("Calibration Error",     "crest",  0.0, 1.0),
+    ]
+    if not skip_log_gamma:
+        metric_specs.append(("Log Gamma", "flare", None, None))
+
+    return _draw_grids(grids, metric_specs, parameter_mask, row_labels, row_colors,
+                       col_labels, figsize=figsize, title_fontsize=title_fontsize,
+                       label_fontsize=label_fontsize, tick_fontsize=tick_fontsize,
+                       annot_fontsize=annot_fontsize, fmt=fmt)
+
+
+def _compact_grids(grids, parameter_mask, design_config, num_rows, max_num_categories,
+                   intrinsic_params, col_labels, global_params, global_only,
+                   categorical_regressors, kind_colors):
+    """Row/column labels, then the drop of all-N/A rows and columns.
+
+    Split out of :func:`adaptive_metrics` so a plot of DIFFERENCES between two arms
+    gets the identical grid without a second copy of this bookkeeping. Returns None
+    when nothing survives, which the callers pass straight on.
+    """
+    intercept_color, main_effect_color, interaction_color = kind_colors
+    row_labels, row_kinds = build_row_labels(design_config, max_num_categories,
+                                             return_kinds=True,
                                              categorical_regressors=categorical_regressors,
                                              parameter_mask=parameter_mask)
-    _kind_color = {"intercept": intercept_color, "main": main_effect_color, "interaction": interaction_color}
+    _kind_color = {"intercept": intercept_color, "main": main_effect_color,
+                   "interaction": interaction_color}
     row_colors = [_kind_color[k] for k in row_kinds]
     row_labels = row_labels[:num_rows]
     row_colors = row_colors[:num_rows]
@@ -187,37 +221,34 @@ def adaptive_metrics(
         return None
 
     parameter_mask = parameter_mask[np.ix_(row_idx, col_idx)]
-    for key in grids:
-        grids[key] = grids[key][np.ix_(row_idx, col_idx)]
+    grids = {k: v[np.ix_(row_idx, col_idx)] for k, v in grids.items()}
     row_labels = [row_labels[i] for i in row_idx]
     row_colors = [row_colors[i] for i in row_idx]
     col_labels = [col_labels[i] for i in col_idx]
     if global_only:
         # Global params aren't coefficient-matrix rows; the column title names them.
         row_labels = [""] * len(row_labels)
-    num_rows   = len(row_idx)
-    num_cols   = len(col_idx)
+    return grids, parameter_mask, row_labels, row_colors, col_labels
 
-    # ------------------------------------------------------------------
-    # Colormap specs  (seaborn palette name)
-    # ------------------------------------------------------------------
-    metric_specs = [
-        (rmse_col,                "mako",   0.0, 1.0),
-        ("Posterior Contraction", "rocket", 0.0, 1.0),
-        ("Calibration Error",     "crest",  0.0, 1.0),
-    ]
-    if not skip_log_gamma:
-        metric_specs.append(("Log Gamma", "flare", None, None))
 
+def _draw_grids(grids, metric_specs, parameter_mask, row_labels, row_colors,
+                col_labels, figsize=None, title_fontsize=16, label_fontsize=12,
+                tick_fontsize=10, annot_fontsize=10, fmt=".3f", cell_size=1.5):
+    """One annotated heatmap per spec, sharing the coefficient-matrix layout.
+
+    ``metric_specs`` is (name, palette, vmin, vmax); a None limit is taken from the
+    grid. Cells carry their value, inactive cells become tinted N/A tiles. Split out
+    of :func:`adaptive_metrics` so the delta plot renders through the same code --
+    two implementations of this layout is how the two would drift apart.
+    """
+    num_rows, num_cols = parameter_mask.shape
     n_metrics = len(metric_specs)
-    cell_size = 1.5  # inches per cell
     if figsize is None:
-        figsize = (
-            n_metrics * num_cols * cell_size + 2.0,
-            num_rows * cell_size + 2.5,
-        )
+        figsize = (n_metrics * num_cols * cell_size + 2.0,
+                   num_rows * cell_size + 2.5)
 
-    fig, axes = plt.subplots(1, n_metrics, figsize=figsize)
+    fig, axes = plt.subplots(1, n_metrics, figsize=figsize, squeeze=False)
+    axes = axes[0]
 
     for ax, (metric_name, palette, vmin, vmax) in zip(axes, metric_specs):
         grid = grids[metric_name]
@@ -228,7 +259,8 @@ def adaptive_metrics(
         if vmax is None:
             vmax = np.nanmax(grid)
         norm = mcolors.Normalize(vmin=vmin, vmax=vmax)
-        cmap = sns.color_palette(palette, as_cmap=True)
+        cmap = (palette if isinstance(palette, mcolors.Colormap)
+                else sns.color_palette(palette, as_cmap=True))
 
         # Masked array — matplotlib leaves NaN cells transparent
         masked = np.ma.masked_where(~active, grid)

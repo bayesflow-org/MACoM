@@ -29,7 +29,8 @@ import matplotlib.pyplot as plt
 
 from cogformer.diagnostics.plot.adaptive_recovery import adaptive_recovery
 from cogformer.diagnostics.plot.adaptive_ecdf import adaptive_ecdf
-from cogformer.utils.plot_utils import family_colors
+from cogformer.diagnostics.plot.adaptive_delta import adaptive_delta
+from cogformer.utils.plot_utils import cogformer_vi_colors, cogformer_fm_colors
 
 from ..configs import LBA_CONFIG
 from ..utils import add_global_params
@@ -38,11 +39,16 @@ GLOBAL_PARAMS = ["pi"]
 GLOBAL_VARIABLE_NAMES = [r"$\pi$"]
 TRAJ = Path("outputs/data/model_class/cf/lba_trajectory")
 
-# Finetuned takes LBA's identity colour; zero-shot is neutral grey. Two stops of the
-# same orange ramp were tried first and are not separable when the two clouds overlap
-# in a cell -- which is most of them. Grey also says the right thing: at epoch 0 the
-# checkpoint has no LBA identity, it is running LBA through RDM's embedding row.
-C_ZERO, C_FT = "#8C8C96", family_colors("lba")["main_effect"]
+# Zero-shot on the purple/blue ramp, finetuned on the magenta one. Taken from the
+# ramps directly rather than through family_colors: these are ARMS of one family, not
+# families, and naming them "rdm"/"ddm" in code would read as a claim about which
+# family each arm is. Two stops of LBA's own orange ramp were tried first and are not
+# separable where the two clouds overlap, which is most cells.
+#
+# NOTE these two hues are RDM's and DDM's identity colours elsewhere in the project.
+# Nothing else appears in this figure, so there is no ambiguity inside it, but a
+# caption should not lean on colour to mean a family here.
+C_ZERO, C_FT = cogformer_vi_colors()["main_effect"], cogformer_fm_colors()["main_effect"]
 ARM_EPOCH = {"zero-shot": 0, "finetuned": 2000}
 
 
@@ -105,6 +111,24 @@ def main():
         out = outdir / f"lba_{a.scenario}_overlay_{name}.pdf"
         fig.savefig(out, bbox_inches="tight")
         plt.close(fig)
+        logging.info(f"[saved] {out}")
+
+    # The same two arms as a per-cell CHANGE, in the adaptive-metrics layout. The
+    # overlays above show both arms and leave the comparison to the eye; this states
+    # it as a number per cell, which is what the scenario-level means average away.
+    delta = adaptive_delta(
+        true=true0, pred_a=pred0, pred_b=pred1, design_config=design_config,
+        intrinsic_params=cfg["intrinsic_params"],
+        max_num_categories=a.max_num_categories,
+        max_num_regressors=a.max_num_regressors, parameter_mask=mask0,
+        variable_names=cfg["variable_names"], global_params=GLOBAL_PARAMS,
+        arm_names=("zero-shot", "finetuned"))
+    if delta is None:
+        logging.info("[skip] delta: no active columns")
+    else:
+        out = outdir / f"lba_{a.scenario}_delta_metrics.pdf"
+        delta.savefig(out, bbox_inches="tight")
+        plt.close(delta)
         logging.info(f"[saved] {out}")
 
 
