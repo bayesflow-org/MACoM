@@ -39,7 +39,8 @@ import matplotlib.pyplot as plt
 from matplotlib.lines import Line2D
 
 from .combined_recovery import ROWS, load_arm, draw_grid, parse_args as rec_args
-from .crossfamily_representation import pooled_embedding, draw_pooled, POOLED
+from .crossfamily_representation import (pooled_embedding, draw_pooled, POOLED,
+                                        _stacked_legend)
 from .addm_representation import plot_gram_panel
 
 FIG = Path("outputs/figures/encoder_rep")
@@ -198,6 +199,9 @@ def main():
     plot_gram_panel(fro, lea, cka_obs, None, target=bottom, fs=FS_CKA,
                     axes_override=(map_axes, cax, sax))
 
+    _match_legend_to_colorbar(bottom, cax, gax[0], GEOM_LEG_ROWS,
+                              (xs["geom"][0] + S + GAP_GEOM / 2) / W, y_foot / Hb)
+
     _row_divider(fig, top, bottom)
 
     out = Path(a.out)
@@ -206,6 +210,50 @@ def main():
     plt.close(fig)
     logging.info(f"[saved] {out} ({a.fig_width:.2f} x {H_TOP + h_bottom:.2f} in, "
                  f"panel side {S:.2f} in)")
+
+
+def _match_legend_to_colorbar(fig, cax, src_ax, rows, x, anchor):
+    """Redraw the geometry legend so it occupies the colorbar's exact vertical band.
+
+    The two footers are the bottom of their respective blocks and the eye reads them
+    as a pair, so they need the same top AND the same overall height -- but one is a
+    colorbar plus its label and the other is two rows of legend entries, and no shared
+    constant makes those agree. Both are therefore MEASURED after a first draw and the
+    legend is rebuilt: its anchor is shifted so its top ink meets the colorbar's, and
+    the gap between its rows is set to whatever makes the block the colorbar's height.
+
+    The gap is clamped at zero; if the rows are already taller than the colorbar's ink
+    the heights cannot be matched, and the tops still are.
+    """
+    fig.canvas.draw()
+    R = fig.canvas.get_renderer()
+    legs = list(fig.legends)
+    if not legs:
+        return
+    cb = cax.get_tightbbox(R)
+    h_row = max(lg.get_window_extent(R).height for lg in legs)
+    top_ink = max(lg.get_window_extent(R).y1 for lg in legs)
+
+    # bbox_to_anchor positions the legend BOX; its ink sits a borderpad inside that,
+    # so the offset has to be measured rather than assumed to be zero.
+    anchor_disp = fig.transSubfigure.transform((0, anchor))[1]
+    offset = anchor_disp - top_ink
+    new_anchor = fig.transSubfigure.inverted().transform((0, cb.y1 + offset))[1]
+
+    n = len(rows)
+    gap_in = max(0.0, (cb.height - n * h_row) / (n - 1) / fig.dpi) if n > 1 else 0.0
+
+    handles, labels = src_ax.get_legend_handles_labels()
+    for lg in legs:
+        lg.remove()
+    _stacked_legend(fig, handles, labels, rows, x, new_anchor, FS_LEG,
+                    GEOM_LEG_SCALE, GEOM_LEG_KW, gap_in)
+
+    fig.canvas.draw()
+    lo = min(lg.get_window_extent(R).y0 for lg in fig.legends)
+    hi = max(lg.get_window_extent(R).y1 for lg in fig.legends)
+    logging.info(f"footers: colorbar {cb.y0 / fig.dpi:.3f}..{cb.y1 / fig.dpi:.3f} in, "
+                 f"legend {lo / fig.dpi:.3f}..{hi / fig.dpi:.3f} in")
 
 
 def _row_divider(fig, top, bottom):

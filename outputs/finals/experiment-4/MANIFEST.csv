@@ -86,7 +86,7 @@ probe/vsvfixed/compare/c2st_joint.npz,outputs/data/encoder_rep/addm_compare/inte
 probe/vsvfixed/compare/c2st_summary.csv,outputs/data/encoder_rep/addm_compare/intercept_only_vsvfixed/c2st_summary.csv,158,2026-09-05 02:58:36Z
 probe/vsvfixed/compare/contraction_shared.csv,outputs/data/encoder_rep/addm_compare/intercept_only_vsvfixed/contraction_shared.csv,131,2026-09-05 02:58:36Z
 probe/vsvfixed/compare/intercept_only_vsvfixed.pdf,outputs/figures/encoder_rep/addm_compare/intercept_only_vsvfixed/addm_arm_compare_intercept_only_vsvfixed.pdf,40633,2026-09-14 16:05:38Z
-probe/vsvfixed/compare/intercept_only_vsvfixed_panel.pdf,outputs/figures/encoder_rep/addm_compare/intercept_only_vsvfixed/addm_arm_compare_intercept_only_vsvfixed_panel.pdf,692293,2026-09-15 04:58:21Z
+probe/vsvfixed/compare/intercept_only_vsvfixed_panel.pdf,outputs/figures/encoder_rep/addm_compare/intercept_only_vsvfixed/addm_arm_compare_intercept_only_vsvfixed_panel.pdf,692249,2026-09-15 05:03:19Z
 probe/vsvfixed/compare/intercept_only_vsvfixed_recovery.pdf,outputs/figures/encoder_rep/addm_compare/intercept_only_vsvfixed/addm_arm_compare_intercept_only_vsvfixed_recovery.pdf,204909,2026-09-15 03:45:02Z
 probe/vsvfixed/compare/logprob_paired.csv,outputs/data/encoder_rep/addm_compare/intercept_only_vsvfixed/logprob_paired.csv,7096,2026-09-05 02:58:36Z
 probe/vsvfixed/compare/shared_validation.npz,outputs/data/encoder_rep/addm_compare/intercept_only_vsvfixed/shared_validation.npz,20953558,2026-09-05 02:58:36Z
@@ -97,10 +97,10 @@ probe/vsvfixed/frozen/data.npz,outputs/data/encoder_rep/addm_vsvfixed/intercept_
 probe/vsvfixed/frozen/recovery.pdf,outputs/data/encoder_rep/addm_vsvfixed/intercept_only/addm_intercept_only_recovery.pdf,111979,2026-09-14 18:42:52Z
 probe/vsvfixed/frozen/z_score_contraction.pdf,outputs/data/encoder_rep/addm_vsvfixed/intercept_only/addm_intercept_only_z_score_contraction.pdf,58230,2026-09-14 18:42:57Z
 representation/crossfamily/app3_between_family_cka.csv,outputs/data/encoder_rep/representation/crossfamily/app3_between_family_cka.csv,153,2026-09-12 23:02:24Z
-representation/crossfamily/app3_geometry_summary.csv,outputs/figures/encoder_rep/representation/crossfamily/app3_geometry_summary.csv,613,2026-09-15 04:59:14Z
+representation/crossfamily/app3_geometry_summary.csv,outputs/figures/encoder_rep/representation/crossfamily/app3_geometry_summary.csv,613,2026-09-15 05:04:14Z
 representation/crossfamily/app3_geometry_summary.csv,outputs/data/encoder_rep/representation/crossfamily/app3_geometry_summary.csv,613,2026-09-14 17:56:37Z
 representation/crossfamily/app3_per_family_rsa.csv,outputs/data/encoder_rep/representation/crossfamily/app3_per_family_rsa.csv,195,2026-09-12 23:01:44Z
-representation/crossfamily/app3_pooled_geometry.pdf,outputs/figures/encoder_rep/representation/crossfamily/app3_pooled_geometry.pdf,156914,2026-09-15 04:59:14Z
+representation/crossfamily/app3_pooled_geometry.pdf,outputs/figures/encoder_rep/representation/crossfamily/app3_pooled_geometry.pdf,156914,2026-09-15 05:04:14Z
 representation/crossfamily/app3_summaries.npz,outputs/data/encoder_rep/representation/crossfamily/app3_summaries.npz,3810210,2026-09-12 23:02:25Z
 representation/crossfamily/app3_transfer_scores.pdf,outputs/figures/encoder_rep/representation/crossfamily/app3_transfer_scores.pdf,15047,2026-09-12 23:01:44Z
 representation/intercept_only_svfixed/app1_geometry.csv,outputs/data/encoder_rep/representation/intercept_only_svfixed/app1_geometry.csv,161,2026-09-05 02:55:04Z
