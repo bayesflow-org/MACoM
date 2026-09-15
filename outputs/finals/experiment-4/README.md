@@ -1,7 +1,7 @@
 # Experiment 4 — encoder representation
 
-Frozen snapshot. Assembled 2026-09-15 03:45:56Z
-by `experiments/finalize_experiment_4.py` — 139 files. Commit `607ca279ed4e5ff79e7de18b2f46dfc4c000e458`.
+Frozen snapshot. Assembled 2026-09-15 04:59:15Z
+by `experiments/finalize_experiment_4.py` — 139 files. Commit `f34b6149e43b431854aa4e97c74e20f4dd9ec127`.
 
 ## Layout
 

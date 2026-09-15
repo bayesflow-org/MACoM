@@ -60,7 +60,16 @@ FS_CKA = (FS_TITLE, FS_LABEL, FS_TICK, FS_CBTICK, FS_ANNOT)
 # and at the standalone's s=14 the five clouds merge into one mass and the density
 # contours underneath stop being visible.
 GEOM_MARKER, GEOM_LEG_SCALE, GEOM_CONTOUR_LW = 5.0, 3.2, 0.4
-GEOM_LEG_NCOL = 3
+# Three trained families on the first line, the two held-out ones on the second --
+# drawn as two SEPARATE legends so the rows are not forced onto a shared column grid.
+# The long labels are all on the second row, and a single ncol=3 legend sizes its
+# columns to them, leaving the first row's three short entries spread through columns
+# they do not fill.
+GEOM_LEG_ROWS = (3, 2)
+# Tightened from matplotlib's defaults so the block fits the combined width of the two
+# MDS panels (2S + GAP_GEOM). At the defaults it is 3.96 in against a 2.83 in target
+# and runs out under the CKA block.
+GEOM_LEG_KW = dict(columnspacing=0.5, handletextpad=0.25, handlelength=0.6)
 
 # --- bottom-row width budget, inches ----------------------------------------------
 # Everything that is NOT one of the six squares. Measured from the standalone figures
@@ -74,7 +83,10 @@ L_CKA = 0.56        # "Simulated dataset" + its tick labels
 # 0..200, so a narrow gap runs one map's terminal "200" straight into the next map's
 # "0" and the pair reads as "2000".
 GAP_MAP = 0.30
-GAP_SCATTER = 0.74  # divider + the scatter's own y-label and ticks
+# Divider + the scatter's own y-label and ticks. The rule goes midway between the two
+# blocks' ink, so this has to hold the maps' "200" overhang, the rule, and the
+# scatter's y-label with clearance on both sides of the rule.
+GAP_SCATTER = 0.86
 R_PAD = 0.06
 
 # --- bottom-row height budget, inches ---------------------------------------------
@@ -82,6 +94,13 @@ TOP_PAD = 0.34      # panel titles, and clearance under the row divider
 FOOT_PAD = 0.46     # x tick labels + x label, below every panel
 CB_H = 0.085        # colorbar bar itself
 CB_LABEL = 0.30     # "Summary similarity" under it
+# The geometry legend's two rows, measured at FS_LEG with GEOM_LEG_ROW_GAP between
+# them. The footer allowance is the TALLER of the two footers, not the colorbar's:
+# budgeting for the colorbar alone put the legend's second row below the figure, and
+# bbox_inches="tight" then silently grew the canvas to take it in.
+LEG_BLOCK = 0.52
+GEOM_LEG_ROW_GAP = 0.06
+FOOTER = max(CB_H + CB_LABEL, LEG_BLOCK)
 BOT_PAD = 0.04
 
 
@@ -148,7 +167,7 @@ def main():
     # Height follows from the solved panel side, so the row is exactly as tall as its
     # contents need -- no slack to trim afterwards.
     S, xs = _bottom_layout(a.fig_width)
-    h_bottom = TOP_PAD + S + FOOT_PAD + CB_H + CB_LABEL + BOT_PAD
+    h_bottom = TOP_PAD + S + FOOT_PAD + FOOTER + BOT_PAD
     fig = plt.figure(figsize=(a.fig_width, H_TOP + h_bottom))
     top, bottom = fig.subfigures(2, 1, height_ratios=[H_TOP, h_bottom])
 
@@ -157,8 +176,8 @@ def main():
     top.subplots_adjust(**ADJ_REC)
 
     W, Hb = a.fig_width, h_bottom
-    y_panel = CB_LABEL + CB_H + FOOT_PAD + BOT_PAD       # bottom edge of every panel
-    y_foot = BOT_PAD + CB_LABEL                          # top of colorbar / legend
+    y_panel = FOOTER + FOOT_PAD + BOT_PAD                # bottom edge of every panel
+    y_foot = BOT_PAD + FOOTER                            # top of colorbar / legend
 
     gax = np.array([bottom.add_axes(_rect(x, y_panel, S, S, W, Hb))
                     for x in xs["geom"]])
@@ -167,10 +186,10 @@ def main():
     # line up across the row.
     draw_pooled(bottom, gax, emb, fam_lab, enc_lab, fams, encs, fs=FS_GEOM,
                 adjust=False, marker_size=GEOM_MARKER, contour_lw=GEOM_CONTOUR_LW,
-                legend_markerscale=GEOM_LEG_SCALE, legend_ncol=GEOM_LEG_NCOL,
-                legend_row_major=True, legend_loc="upper center",
+                legend_markerscale=GEOM_LEG_SCALE, legend_rows=GEOM_LEG_ROWS,
+                legend_kw=GEOM_LEG_KW, legend_loc="upper center",
                 legend_x=(xs["geom"][0] + S + GAP_GEOM / 2) / W,
-                legend_anchor=y_foot / Hb)
+                legend_anchor=y_foot / Hb, legend_row_gap=GEOM_LEG_ROW_GAP)
 
     map_axes = [bottom.add_axes(_rect(x, y_panel, S, S, W, Hb)) for x in xs["maps"]]
     cax = bottom.add_axes(_rect(xs["maps"][0], y_foot - CB_H,

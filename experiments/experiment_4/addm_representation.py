@@ -362,7 +362,15 @@ def _matrix_scatter_panel(mats, titles, colors, cbar_label, xy, scatter_title,
     bot = cax.get_position().y0
     if axes_override is not None:
         # Divider only: span the maps block as placed, and leave the scatter alone.
-        xd = (axes[-1].get_position().x1 + ax.get_position().x0) / 2
+        # Midway between the two blocks' INK, not between their axes boxes. The maps'
+        # terminal "200" overhangs the box on the right and the scatter's y-label and
+        # ticks hang off it on the left, by different amounts -- splitting the boxes
+        # put the rule underneath that y-label.
+        R = fig.canvas.get_renderer()
+        inv = fig.transSubfigure.inverted()
+        x_maps = inv.transform((axes[-1].get_tightbbox(R).x1, 0))[0]
+        x_scat = inv.transform((ax.get_tightbbox(R).x0, 0))[0]
+        xd = (x_maps + x_scat) / 2
         fig.add_artist(Line2D([xd, xd], [cax.get_position().y0, top],
                               transform=fig.transSubfigure,
                               color="0.72", linewidth=1.1, zorder=10))

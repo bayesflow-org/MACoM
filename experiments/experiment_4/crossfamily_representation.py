@@ -356,7 +356,8 @@ def draw_pooled(fig, ax, emb, fam_lab, enc_lab, fams, encs, fs=None,
                 legend_anchor=-0.02, tight_rect=(0, 0.10, 1, 1), adjust=None,
                 marker_size=14, contour_lw=0.5, legend_markerscale=1.8,
                 legend_ncol=None, legend_loc="lower center", legend_x=0.5,
-                legend_row_major=False):
+                legend_row_major=False, legend_kw=None, legend_rows=None,
+                legend_row_gap=0.10):
     """Draw the two panels and the legend into an existing figure or subfigure.
 
     ``fig`` may be a SubFigure, which has no tight_layout -- pass ``adjust`` (a
@@ -433,14 +434,67 @@ def draw_pooled(fig, ax, emb, fam_lab, enc_lab, fams, encs, fs=None,
     # bboxes, 0.01 put the legend 0.09 in INTO the "MDS 1" labels; -0.02 clears them.
     # savefig with bbox_inches="tight" grows the canvas to take it in, so a negative
     # anchor costs nothing but the gap it buys.
+    if legend_rows:
+        _stacked_legend(fig, handles, labels, legend_rows, legend_x, legend_anchor,
+                        FS_LG, legend_markerscale, legend_kw or {}, legend_row_gap)
+        return ax
     ncol = legend_ncol or len(fams)
     if legend_row_major:
         handles, labels = _row_major(handles, labels, ncol)
     fig.legend(handles, labels, loc=legend_loc,
                bbox_to_anchor=(legend_x, legend_anchor),
                ncol=ncol, fontsize=FS_LG, frameon=False,
-               markerscale=legend_markerscale)
+               markerscale=legend_markerscale, **(legend_kw or {}))
     return ax
+
+
+def _stacked_legend(fig, handles, labels, rows, x, y_top, fontsize, markerscale,
+                    kw, row_gap_in):
+    """One legend per row, each centred on ``x``, all stretched to a common width.
+
+    A single ncol=N legend puts every row on ONE column grid, so the columns are as
+    wide as the widest entry in each. Here the long labels are all on the second row
+    ("aDDM (held out)", "LBA (held out)") and the short ones on the first, so that
+    grid leaves the first row's three entries rattling around inside columns sized
+    for the second row's two -- and the two rows still do not end up the same width.
+
+    Drawing the rows as separate legends decouples them: each is centred in its own
+    right, and the narrower ones are then stretched to the widest row's width by
+    opening up their column spacing. ``columnspacing`` is in units of the font size,
+    hence the conversion through points.
+    """
+    groups, i = [], 0
+    for n in rows:
+        groups.append((handles[i:i + n], labels[i:i + n]))
+        i += n
+
+    def build(spacings, y):
+        legs = []
+        for (h, l), cs in zip(groups, spacings):
+            k = dict(kw)
+            if cs is not None:
+                k["columnspacing"] = cs
+            leg = fig.legend(h, l, loc="upper center", bbox_to_anchor=(x, y),
+                             ncol=len(h), fontsize=fontsize, frameon=False,
+                             markerscale=markerscale, **k)
+            legs.append(leg)
+            fig.canvas.draw()
+            y -= leg.get_window_extent(fig.canvas.get_renderer()).height / fig.bbox.height
+            y -= row_gap_in / (fig.bbox.height / fig.dpi)
+        return legs
+
+    legs = build([kw.get("columnspacing")] * len(groups), y_top)
+    R = fig.canvas.get_renderer()
+    widths = [lg.get_window_extent(R).width / fig.dpi for lg in legs]
+    target = max(widths)
+    spacings = []
+    for (h, _), lg, w in zip(groups, legs, widths):
+        cs = kw.get("columnspacing", 2.0)
+        if len(h) > 1 and target - w > 1e-3:
+            cs = cs + (target - w) * 72.0 / (len(h) - 1) / fontsize
+        spacings.append(cs)
+        lg.remove()
+    build(spacings, y_top)
 
 
 def _row_major(handles, labels, ncol):
