@@ -71,6 +71,18 @@ def main():
     figdir = Path(a.figdir); figdir.mkdir(parents=True, exist_ok=True)
     plot_representation_set(rdm_f, rdm_l, fro, lea, score, null_rsa,
                             cka_obs, null_cka, figdir)
+
+    # app2 lives in a CSV beside the npz, not in the npz, so it is redrawn from
+    # there. Without this the folder ends up half restyled -- four figures in the
+    # new face and this one still in the old.
+    csv = Path(a.npz).parent / "app2_parameter_rsa.csv"
+    if csv.exists():
+        import pandas as pd
+        from .addm_representation import plot_app2
+        plot_app2(pd.read_csv(csv), figdir / "app2_what_is_encoded.pdf")
+        logging.info(f"[saved] {figdir / 'app2_what_is_encoded.pdf'}")
+    else:
+        logging.warning(f"no {csv.name} beside the npz; app2 figure not redrawn")
     logging.info(f"[saved] {figdir}")
 
 

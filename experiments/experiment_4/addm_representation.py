@@ -213,17 +213,47 @@ def _shared_ticks(ax, ticks, labels=None):
     ax.set_yticks(ticks, labels)
 
 
+# Its own, smaller set. This figure packs four panels plus a colorbar into one
+# \textwidth row, so the shared FS_TITLE/FS_LABEL/FS_TICK -- sized for a figure with
+# one or two panels -- crowd it: at 15 pt the four titles nearly touch, and the tick
+# numbers compete with the matrices they annotate for attention they do not deserve.
+FS_MAT_TITLE, FS_MAT_LABEL, FS_MAT_TICK, FS_MAT_CBTICK = 12, 10, 8.5, 8
+# (title, label, tick, colorbar tick, annotation). Passed as a unit so a caller that
+# draws this block at reduced width -- the combined panel puts it in half a row -- can
+# scale every size in it with one argument instead of five.
+MAT_FS = (FS_MAT_TITLE, FS_MAT_LABEL, FS_MAT_TICK, FS_MAT_CBTICK, 10)
+
+
+def _fig_size_in(fig):
+    """Size in inches of a Figure OR a SubFigure.
+
+    SubFigure has no get_size_inches; its bbox is in display units of the parent, so
+    dividing by the shared dpi gives the inches this block actually occupies -- which
+    is what the scatter's square aspect has to be computed against.
+    """
+    return tuple(np.asarray(fig.bbox.size) / fig.dpi)
+
+
 def _matrix_scatter_panel(mats, titles, colors, cbar_label, xy, scatter_title,
-                          stat_text, axis_label, scatter_labels, outpath, cmap):
+                          stat_text, axis_label, scatter_labels, outpath, cmap,
+                          target=None, fs=MAT_FS, height_ratio=5.1, hspace=0.60,
+                          width_ratios=(3.4, 0.34, 1.05), gap_in=0.825,
+                          divider_in=0.143, margins=None):
     """Three heatmaps on ONE shared scale plus a full-height correspondence scatter.
+
+    Draws into ``target`` (a Figure or SubFigure) instead of a new figure when one is
+    given. With ``target`` set nothing is saved and the block is laid out inside
+    whatever area the caller allocated, so the combined three-part panel reuses this
+    block rather than keeping a second copy of the layout.
 
     Shared by the RSA and CKA panels so their layout cannot drift apart -- the two
     diverged once already when a hand-rolled recovery plot silently overwrote the
     BayesFlow one, and duplicated layout code is how that happens.
 
-    ``mats`` is (first, second, residual); the residual is expected to read fainter
-    than its two inputs, which is the shared structure showing rather than a
-    rendering artifact.
+    ``mats`` is (first, second, first - second); that difference is expected to read
+    fainter than its two inputs, which is the shared structure showing rather than a
+    rendering artifact. It is labelled "Difference", not "Residual": nothing is
+    fitted here, it is a plain subtraction of two matrices on one shared scale.
 
     The colormap is DIVERGING (Spectral_r, red positive) and the limits are symmetric
     about zero, so zero lands on the colormap's centre in all three panels and they
@@ -241,18 +271,24 @@ def _matrix_scatter_panel(mats, titles, colors, cbar_label, xy, scatter_title,
     iu = np.triu_indices(n, k=1)
     v = max(np.percentile(np.abs(M[iu]), 98) for M in mats)
 
-    # Gap between the x-labels and the colorbar. Most of it is not hspace but slack
-    # inside the maps row -- the squares are centred in a taller slot -- so trimming
-    # hspace alone barely moves it. Lowering the figure height removes the slack;
-    # widening the maps block buys back the block height the scatter is sized from.
-    # Measured on the LABEL's tight bbox, not the axes box: the label sits below the
-    # box, so an axes-to-axes measurement overstates the clearance and lets the two
-    # collide. Chosen point halves the clearance (0.45 -> 0.23 in) while the scatter
-    # side barely moves (3.70 -> 3.58 in).
-    fig = plt.figure(figsize=(17.5, 4.7))
-    outer = fig.add_gridspec(1, 3, width_ratios=[3.4, 0.34, 1.05], wspace=0.10)
+    # Gap between the x-labels and the colorbar. Measured on the LABEL's tight bbox,
+    # not the axes box: the label sits below the box, so an axes-to-axes measurement
+    # overstates the clearance and lets the two collide. At 4.7/17.5 with hspace 0.42
+    # the clearance was 0.008 in -- the colorbar touching "Simulated dataset". Raising
+    # hspace alone buys clearance out of the maps themselves (0.75 gives 0.21 in but
+    # shrinks each square 1.73 -> 1.57 in), so the height ratio goes up with it: at
+    # 5.1 / hspace 0.60 the clearance is 0.19 in with the squares still 1.73 in, for
+    # 0.26 in of extra figure height.
+    FS_T, FS_L, FS_TK, FS_CB, FS_AN = fs
+    own = target is None
+    fig = (plt.figure(figsize=(FIG_W_WIDE, FIG_W_WIDE * height_ratio / 17.5))
+           if own else target)
+    # margins go to the gridspec rather than subplots_adjust: the scatter is
+    # repositioned by hand afterwards, and subplots_adjust would move it back.
+    outer = fig.add_gridspec(1, 3, width_ratios=list(width_ratios), wspace=0.10,
+                             **(margins or {}))
     maps_gs = outer[0, 0].subgridspec(2, 3, height_ratios=[1.0, 0.055],
-                                      hspace=0.42, wspace=0.14)
+                                      hspace=hspace, wspace=0.14)
     axes = [fig.add_subplot(maps_gs[0, i]) for i in range(3)]
     cax = fig.add_subplot(maps_gs[1, :])
     ax = fig.add_subplot(outer[0, 2])
@@ -268,17 +304,18 @@ def _matrix_scatter_panel(mats, titles, colors, cbar_label, xy, scatter_title,
     for a, M, title, color in zip(axes, mats, titles, colors):
         im = a.imshow(M, cmap=cmap, vmin=-v, vmax=v, interpolation="nearest",
                       aspect="equal")
-        a.set_title(title, color=color, fontsize=12, pad=8)
-        a.set_xlabel(axis_label, fontsize=11)
+        a.set_title(title, color=color, fontsize=FS_T, pad=8)
+        a.set_xlabel(axis_label, fontsize=FS_L)
         _shared_ticks(a, map_ticks, map_labels)
+        a.tick_params(labelsize=FS_TK)
         a.set_xlim(-0.5, n - 0.5); a.set_ylim(n - 0.5, -0.5)
-    axes[0].set_ylabel(axis_label, fontsize=11)
+    axes[0].set_ylabel(axis_label, fontsize=FS_L)
     for a in axes[1:3]:
         a.set_yticklabels([])
 
     cb = fig.colorbar(im, cax=cax, orientation="horizontal")
-    cb.set_label(cbar_label, fontsize=11)
-    cb.ax.tick_params(labelsize=9)
+    cb.set_label(cbar_label, fontsize=FS_L)
+    cb.ax.tick_params(labelsize=FS_CB)
 
     x, y = xy
     # Limits from the DATA rather than symmetric about zero, but identical on both
@@ -295,15 +332,16 @@ def _matrix_scatter_panel(mats, titles, colors, cbar_label, xy, scatter_title,
     ax.set_xlim(lo, hi); ax.set_ylim(lo, hi)
     sc_ticks = MaxNLocator(nbins=5, steps=[1, 2, 2.5, 5, 10]).tick_values(lo, hi)
     _shared_ticks(ax, sc_ticks[(sc_ticks >= lo) & (sc_ticks <= hi)])
-    ax.set_xlabel(scatter_labels[0], fontsize=11)
-    ax.set_ylabel(scatter_labels[1], fontsize=11)
-    ax.set_title(scatter_title, fontsize=12, pad=8)
+    ax.tick_params(labelsize=FS_TK)
+    ax.set_xlabel(scatter_labels[0], fontsize=FS_L)
+    ax.set_ylabel(scatter_labels[1], fontsize=FS_L)
+    ax.set_title(scatter_title, fontsize=FS_T, pad=8)
     # The statistic sits inside the panel, lower right, rather than in the title:
     # it belongs to the cloud, and the titles across the row then read as a plain
     # list of what each panel shows. Axes coordinates, so it follows the box when
     # the panel is repositioned below.
     ax.text(0.97, 0.045, stat_text, transform=ax.transAxes,
-            ha="right", va="bottom", fontsize=12)
+            ha="right", va="bottom", fontsize=FS_AN)
     ax.spines[["top", "right"]].set_visible(False)
 
     # Size the scatter to the FULL height of the left block -- top of the maps down to
@@ -315,24 +353,39 @@ def _matrix_scatter_panel(mats, titles, colors, cbar_label, xy, scatter_title,
     top = axes[0].get_position().y1
     bot = cax.get_position().y0
     H = top - bot
-    figW, figH = fig.get_size_inches()
+    figW, figH = _fig_size_in(fig)
     W = H * figH / figW                      # equal side lengths in INCHES
-    gap = 0.075
+    # gap and divider offset are given in INCHES, not figure fractions. They used to
+    # be fractions (0.075 and 0.013), which is the same thing only while the block is
+    # 11 in wide: in the combined panel's 6.4 in subfigure that 0.075 shrank from
+    # 0.83 in to 0.48 in and the scatter's y-label landed on the Difference map.
+    gap = gap_in / figW
+    x0 = cax.get_position().x1 + gap
+    # A square at the block's full height does not always fit the width left over. It
+    # does at 11 x 3.2 in; it does not in a subfigure that is relatively taller. Rather
+    # than let it run off the right edge, cap the side length and hang the square from
+    # the TOP of the maps, which keeps it aligned with the row it belongs to.
+    if x0 + W > 1.0:
+        W = 1.0 - x0
+        H = W * figW / figH
+        bot = top - H
     ax.set_aspect("auto")
-    ax.set_position([cax.get_position().x1 + gap, bot, W, H])
+    ax.set_position([x0, bot, W, H])
 
     # Divider: the left block shares one color scale and one normalization; the
     # scatter is a different kind of plot of the same numbers. Placed just clear of
     # the block so the scatter's y-LABEL stays on the scatter's side of the rule.
-    xd = cax.get_position().x1 + 0.013
-    fig.add_artist(Line2D([xd, xd], [bot, top], transform=fig.transFigure,
+    xd = cax.get_position().x1 + divider_in / figW
+    fig.add_artist(Line2D([xd, xd], [cax.get_position().y0, top],
+                          transform=fig.transSubfigure,
                           color="0.72", linewidth=1.1, zorder=10))
 
-    fig.savefig(outpath, bbox_inches="tight"); plt.close(fig)
+    if own:
+        fig.savefig(outpath, bbox_inches="tight"); plt.close(fig)
 
 
-def plot_gram_panel(fro, lea, cka_obs, outpath):
-    """CKA side: two centred Gram matrices, their residual, and the scatter.
+def plot_gram_panel(fro, lea, cka_obs, outpath, **kw):
+    """CKA side: two centred Gram matrices, their difference, and the scatter.
 
     Each Gram is scaled to unit Frobenius norm over its off-diagonal, then BOTH are
     multiplied by one shared constant that puts them in [-1, 1]. A common factor
@@ -348,14 +401,14 @@ def plot_gram_panel(fro, lea, cka_obs, outpath):
     iu = np.triu_indices_from(A_f, k=1)
     A_f, A_l = (A_f, A_l) / np.abs(np.concatenate([A_f[iu], A_l[iu]])).max()
     _matrix_scatter_panel(
-        # Set Transformer first, so the Residual (Set Transformer - CogFormer) reads
+        # Set Transformer first, so the Difference (Set Transformer - CogFormer) reads
         # as first minus second, matching the order it is displayed in.
         (A_l, A_f, A_l - A_f),
-        ("Set Transformer", "CogFormer", "Residual"),
+        ("Set Transformer", "CogFormer", "Difference"),
         (BASELINE_COLOR, FROZEN_COLOR, "0.25"),
-        "Inner product", (A_f[iu], A_l[iu]),
-        "Correspondence", f"CKA = {cka_obs:.3f}", "Parameter draw",
-        ("CogFormer", "Set Transformer"), outpath, "Spectral_r")
+        "Summary similarity", (A_f[iu], A_l[iu]),
+        "Correspondence", f"CKA = {cka_obs:.3f}", "Simulated dataset",
+        ("CogFormer", "Set Transformer"), outpath, "Spectral_r", **kw)
 
 
 def _z_rdm(rdm):
@@ -381,48 +434,65 @@ def _z_rdm(rdm):
     return Z
 
 
-def plot_rdm_panel(rdm_f, rdm_l, score, outpath):
-    """RSA side, mirroring plot_gram_panel exactly: two RDMs, residual, scatter."""
+def plot_rdm_panel(rdm_f, rdm_l, score, outpath, **kw):
+    """RSA side, mirroring plot_gram_panel exactly: two RDMs, difference, scatter."""
     Z_f, Z_l = _z_rdm(rdm_f), _z_rdm(rdm_l)
     iu = np.triu_indices_from(Z_f, k=1)
     Z_f, Z_l = (Z_f, Z_l) / np.abs(np.concatenate([Z_f[iu], Z_l[iu]])).max()
     _matrix_scatter_panel(
         (Z_l, Z_f, Z_l - Z_f),
-        ("Set Transformer", "CogFormer", "Residual"),
+        ("Set Transformer", "CogFormer", "Difference"),
         (BASELINE_COLOR, FROZEN_COLOR, "0.25"),
         "Dissimilarity, z-scored", (Z_f[iu], Z_l[iu]),
-        "Correspondence", f"r = {score:.3f}", "Parameter draw",
-        ("CogFormer", "Set Transformer"), outpath, "Spectral_r")
+        "Correspondence", f"r = {score:.3f}", "Simulated dataset",
+        ("CogFormer", "Set Transformer"), outpath, "Spectral_r", **kw)
 
 
 def plot_rsa_vs_null(score, null_rsa, cka_obs, null_cka, outpath):
     """Observed RSA against the dimensionality-matched null, with CKA for reference."""
-    fig, ax = plt.subplots(figsize=(5.6, 4.2))
+    fig, ax = plt.subplots(figsize=(FIG_W_SMALL, FIG_W_SMALL * 0.75))
     ax.hist(null_rsa, bins=20, color="grey", alpha=.7, label="matched null (RSA)")
     ax.axvline(score, color=FROZEN_COLOR, lw=2, label=f"observed RSA {score:.3f}")
     ax.axvline(np.mean(null_cka), color="grey", ls=":", lw=1.5,
                label=f"null CKA {np.mean(null_cka):.3f}")
     ax.axvline(cka_obs, color=BASELINE_COLOR, lw=2, ls="--",
                label=f"observed CKA {cka_obs:.3f}")
-    ax.set_title("RSA vs dimensionality-matched null", fontsize=11)
+    ax.set_title("RSA vs dimensionality-matched null", fontsize=FS_TITLE)
     ax.set_xlabel("Similarity"); ax.set_ylabel("Count")
     ax.spines[["top", "right"]].set_visible(False)
-    ax.legend(fontsize=8, frameon=False)
+    ax.legend(fontsize=FS_LEG, frameon=False)
     fig.tight_layout(); fig.savefig(outpath, bbox_inches="tight"); plt.close(fig)
+
+
+# The CKA panel is a single histogram with a long title; at the shared sizes the
+# title wraps past the axes and the tick numbers dominate a plot whose content is
+# one distribution. Its own, smaller set.
+FS_CKA_TITLE, FS_CKA_LABEL, FS_CKA_TICK = 11, 9, 8
 
 
 def plot_cka_vs_null(cka_obs, null_cka, outpath):
     """Observed CKA against the same null, with the z-score in the title."""
-    fig, ax = plt.subplots(figsize=(5.6, 4.2))
+    fig, ax = plt.subplots(figsize=(FIG_W_SMALL, FIG_W_SMALL * 0.75))
     ax.hist(null_cka, bins=20, color="grey", alpha=.75,
             label=f"matched null {np.mean(null_cka):.3f}")
     ax.axvline(cka_obs, color=BASELINE_COLOR, lw=2, label=f"observed {cka_obs:.3f}")
     z = (cka_obs - np.mean(null_cka)) / (np.std(null_cka) + 1e-12)
-    ax.set_title(f"CKA vs dimensionality-matched null   (z = {z:+.2f})", fontsize=11)
+    ax.set_title(f"CKA vs dimensionality-matched null   (z = {z:+.2f})", fontsize=FS_CKA_TITLE)
     ax.set_xlabel("Linear CKA"); ax.set_ylabel("Count")
     ax.spines[["top", "right"]].set_visible(False)
-    ax.legend(fontsize=8, frameon=False)
+    ax.legend(fontsize=FS_CKA_LABEL, frameon=False)
+    ax.tick_params(labelsize=FS_CKA_TICK)
+    ax.xaxis.label.set_fontsize(FS_CKA_LABEL)
+    ax.yaxis.label.set_fontsize(FS_CKA_LABEL)
     fig.tight_layout(); fig.savefig(outpath, bbox_inches="tight"); plt.close(fig)
+
+
+# SIZED FOR THE PAGE. Target is a 5.5 in LaTeX \\textwidth; the figures are drawn at
+# twice that so \\includegraphics scales by 0.5 and every size below lands at half its
+# nominal value. The old 17.5 in width scaled by 0.31 instead, which put a 12 pt title
+# at under 4 pt on the page.
+FIG_W_WIDE, FIG_W_SMALL = 11.0, 5.6
+FS_TITLE, FS_LABEL, FS_TICK, FS_LEG, FS_ANNOT = 15, 13, 11, 11, 10
 
 
 def plot_representation_set(rdm_f, rdm_l, fro, lea, score, null_rsa,
@@ -440,7 +510,7 @@ def plot_representation_set(rdm_f, rdm_l, fro, lea, score, null_rsa,
 
 
 def plot_app2(df, outpath):
-    fig, ax = plt.subplots(figsize=(max(6, 0.9 * len(df)), 4))
+    fig, ax = plt.subplots(figsize=(max(FIG_W_SMALL, 0.9 * len(df)), 4))
     x = np.arange(len(df))
     ax.bar(x - 0.2, df.beta_frozen, 0.4, color=FROZEN_COLOR, label="frozen CogFormer")
     ax.bar(x + 0.2, df.beta_learned, 0.4, color=BASELINE_COLOR, label="learned SetTransformer")
@@ -450,14 +520,16 @@ def plot_app2(df, outpath):
         if c == c:                                    # skip NaN
             top = max(df.beta_frozen[i], df.beta_learned[i], df.rsa_frozen[i])
             ax.annotate(f"contr\n{c:.2f}", (i, top + .02), ha="center",
-                        fontsize=6, color="dimgrey")
+                        fontsize=FS_ANNOT - 2, color="dimgrey")
     ax.axhline(0, color="k", lw=.6)
     ax.set_xticks(x); ax.set_xticklabels(df.param, rotation=30, ha="right")
     ax.set_ylabel("Standardized regression weight on encoder RDM")
     ax.set_title("What the representation encodes: unique contribution per parameter\n"
                  "(bars = joint regression, dots = diluted marginal, text = posterior contraction)",
-                 fontsize=9)
-    ax.legend(fontsize=8); fig.tight_layout()
+                 fontsize=FS_LABEL)
+    ax.legend(fontsize=FS_LEG)
+    ax.tick_params(labelsize=FS_TICK)
+    fig.tight_layout()
     fig.savefig(outpath, bbox_inches="tight"); plt.close(fig)
 
 

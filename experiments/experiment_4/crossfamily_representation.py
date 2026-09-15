@@ -46,7 +46,9 @@ import torch
 import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
+import matplotlib.colors as mcolors
 from rsatoolbox.rdm import calc_rdm, compare
+from scipy.stats import gaussian_kde
 from sklearn.manifold import MDS
 
 from cogformer.adapter import Adapter
@@ -93,6 +95,18 @@ SPECS = {
     "addm": (ADDM, addm_priors, addm_link_fun),
     "lba":  (LBA,  lba_priors,  lba_link_fun),
 }
+
+
+def _family_cmap(color):
+    """White-to-family-colour ramp, transparent at the low end.
+
+    A filled contour needs a colormap, and a per-family one keeps the background
+    reading as that family rather than as a generic heat scale. Transparent at the
+    bottom so the panels do not turn into solid blocks where a family is sparse.
+    """
+    rgb = mcolors.to_rgb(color)
+    return mcolors.LinearSegmentedColormap.from_list(
+        "fam", [(*rgb, 0.0), (*rgb, 0.18), (*rgb, 0.34)])
 
 
 def family_setup(key, fixed_A=0.5):
@@ -235,7 +249,55 @@ def _fam_label(fam):
     return f"{DISPLAY.get(fam, fam.upper())}{' (held out)' if fam in HELD_OUT else ''}"
 
 
-def plot_pooled(summ_by_enc, outpath, seed=0):
+# Font sizes for the pooled figure. Separate from anything else here because this
+# is the one figure of the set that goes in the paper at full width.
+FS_PANEL_TITLE, FS_AXIS_LABEL, FS_TICK, FS_LEGEND = 18, 14, 11, 12.5
+# The panel title stays a step above the axis label: the titles say which encoder
+# a side is, the labels only name the MDS axes.
+
+
+def geometry_summary(emb, fam_lab, enc_lab, fams, encs):
+    """What the MDS panels show, as numbers.
+
+    A scatter can only be read qualitatively -- "the families look separate", "LBA
+    barely moved" -- and those are exactly the claims worth pinning down. Four
+    quantities, all in the shared MDS frame so they are comparable across panels:
+
+      spread          mean distance of a family's points to its own centroid.
+      nearest         distance from its centroid to the closest OTHER family's.
+      separation      nearest / spread. Above ~1 the family occupies its own
+                      region; near or below 1 it overlaps its neighbour.
+      centroid_shift  how far the family's centroid moved between the two
+                      encoders. This is the persistence number: small means
+                      finetuning left that family's geometry where it was.
+
+    The shift is only meaningful because both panels come from ONE MDS fit; with
+    per-panel fits it would measure the arbitrary rotation between them.
+    """
+    cent = {(e, f): emb[(enc_lab == e) & (fam_lab == f)].mean(0)
+            for e in encs for f in fams}
+    rows = []
+    for e in encs:
+        for f in fams:
+            pts = emb[(enc_lab == e) & (fam_lab == f)]
+            c = cent[(e, f)]
+            spread = float(np.linalg.norm(pts - c, axis=1).mean())
+            others = [float(np.linalg.norm(c - cent[(e, g)])) for g in fams if g != f]
+            nearest = min(others) if others else float("nan")
+            shift = (float(np.linalg.norm(cent[(encs[0], f)] - cent[(encs[1], f)]))
+                     if len(encs) > 1 else float("nan"))
+            rows.append({"encoder": e, "family": f, "n": int(len(pts)),
+                         "spread": spread, "nearest_family": nearest,
+                         "separation": nearest / spread if spread else float("nan"),
+                         "centroid_shift": shift})
+    df = pd.DataFrame(rows)
+    # Shift relative to spread: 0.1 means the family moved a tenth of its own width,
+    # which is the scale on which "it did not really move" is a fair statement.
+    df["shift_over_spread"] = df.centroid_shift / df.spread
+    return df
+
+
+def plot_pooled(summ_by_enc, outpath, seed=0, csv_path=None):
     """MDS of the pooled condition means, one panel per encoder.
 
     Left is the encoder as trained on DDM + RDM + CDM; right is the same encoder
@@ -249,6 +311,29 @@ def plot_pooled(summ_by_enc, outpath, seed=0):
     The two encoders' points are embedded together and then split, which makes the
     panels share axes -- and the standardisation is likewise computed once, over the
     pooled matrix, so neither encoder gets its own scaling.
+
+    Returns the geometry summary table, and writes it to `csv_path` when given.
+    """
+    emb, fam_lab, enc_lab, fams, encs = pooled_embedding(summ_by_enc, seed)
+    fig, ax = plt.subplots(1, 2, figsize=(9.5, 5.2))
+    draw_pooled(fig, ax, emb, fam_lab, enc_lab, fams, encs)
+    fig.savefig(outpath, bbox_inches="tight"); plt.close(fig)
+
+    df = geometry_summary(emb, fam_lab, enc_lab, fams, encs)
+    if csv_path is not None:
+        df.to_csv(csv_path, index=False, float_format="%.4f")
+        logging.info(f"[saved] {csv_path}")
+    logging.info("\n" + df.to_string(index=False, float_format=lambda x: f"{x:.3f}"))
+    return df
+
+
+def pooled_embedding(summ_by_enc, seed=0):
+    """The shared MDS fit, split out from the drawing.
+
+    Separate because the combined three-part panel draws the same embedding into a
+    subfigure and must not refit it: MDS is arbitrary up to rotation and reflection,
+    so a second fit would put the composite's panels in a different frame from the
+    standalone figure's and the two would silently disagree.
     """
     encs = list(summ_by_enc)
     fams = list(summ_by_enc[encs[0]])
@@ -261,36 +346,95 @@ def plot_pooled(summ_by_enc, outpath, seed=0):
             enc_lab += [e] * s.shape[0]
     X = np.concatenate(blocks)
     fam_lab, enc_lab = np.array(fam_lab), np.array(enc_lab)
-
     Xs = (X - X.mean(0)) / (X.std(0) + 1e-12)
     emb = MDS(n_components=2, random_state=seed, n_init=4,
               normalized_stress="auto").fit_transform(Xs)
+    return emb, fam_lab, enc_lab, fams, encs
 
-    fig, ax = plt.subplots(1, 2, figsize=(9.5, 5.2))
-    titles = {"original": "Before LBA finetuning", "finetuned": "After LBA finetuning"}
+
+def draw_pooled(fig, ax, emb, fam_lab, enc_lab, fams, encs, fs=None,
+                legend_anchor=-0.02, tight_rect=(0, 0.10, 1, 1), adjust=None,
+                marker_size=14, contour_lw=0.5, legend_markerscale=1.8,
+                legend_ncol=None):
+    """Draw the two panels and the legend into an existing figure or subfigure.
+
+    ``fig`` may be a SubFigure, which has no tight_layout -- pass ``adjust`` (a
+    subplots_adjust kwargs dict) in that case and ``tight_rect`` is ignored.
+
+    ``marker_size`` is in points^2 and so does NOT follow the panel: at the combined
+    panel's ~40%% width the default 14 covers about six times as much of the panel,
+    the five clouds merge into one mass and the density contours underneath stop
+    being visible at all. A caller drawing small must shrink it.
+    """
+    FS_T, FS_L, FS_TK, FS_LG = fs or (FS_PANEL_TITLE, FS_AXIS_LABEL,
+                                      FS_TICK, FS_LEGEND)
+    titles = {"original": "Before finetuning", "finetuned": "After finetuning"}
     # MDS output is centred, so symmetric limits give both axes the same span; with a
     # square box that makes the DATA aspect equal too, which a distance embedding
     # needs -- a stretched axis misreports how far apart two families are.
     lim = float(np.abs(emb).max()) * 1.08
+    grid = np.linspace(-lim, lim, 160)
+    GX, GY = np.meshgrid(grid, grid)
+    mesh = np.vstack([GX.ravel(), GY.ravel()])
+
     for k, e in enumerate(encs):
         for fam in fams:
             m = (fam_lab == fam) & (enc_lab == e)
-            ax[k].scatter(emb[m, 0], emb[m, 1], s=14, alpha=.65, color=COLORS[fam],
-                          marker=MARKERS[fam], linewidths=0, label=_fam_label(fam))
-        ax[k].set_title(titles.get(e, e), fontsize=10)
-        ax[k].set_xlabel("MDS 1")
+            pts = emb[m]
+            # Density contour UNDER the points. Where a family's cloud overlaps
+            # another's the scatter alone just reads as mixed colour; the contour
+            # shows where each family's mass actually is, which is the thing being
+            # compared between panels.
+            if len(pts) > 5:
+                try:
+                    dens = gaussian_kde(pts.T)(mesh).reshape(GX.shape)
+                    # Levels start well above zero. A KDE is positive everywhere, so
+                    # contouring from 0 paints every family across the whole panel
+                    # and five overlapping tails turn the background grey. Starting
+                    # at a fraction of the peak draws only where the family's mass
+                    # actually is.
+                    hi = float(dens.max())
+                    levels = np.linspace(0.22 * hi, hi, 5)
+                    ax[k].contourf(GX, GY, dens, levels=levels, zorder=0,
+                                   cmap=_family_cmap(COLORS[fam]), extend="neither")
+                    ax[k].contour(GX, GY, dens, levels=levels[1:], zorder=1,
+                                  colors=[COLORS[fam]], linewidths=contour_lw,
+                                  alpha=0.45)
+                except Exception:
+                    pass          # singular covariance: scatter alone still stands
+            ax[k].scatter(pts[:, 0], pts[:, 1], s=marker_size, alpha=.65,
+                          color=COLORS[fam],
+                          marker=MARKERS[fam], linewidths=0, label=_fam_label(fam),
+                          zorder=3)
+        ax[k].set_title(titles.get(e, e), fontsize=FS_T)
+        ax[k].set_xlabel("MDS 1", fontsize=FS_L)
         ax[k].set_xlim(-lim, lim); ax[k].set_ylim(-lim, lim)
+        ax[k].tick_params(labelsize=FS_TK)
         ax[k].set_box_aspect(1)
         for side in ("top", "right"):
             ax[k].spines[side].set_visible(False)
-    ax[0].set_ylabel("MDS 2")
+    ax[0].set_ylabel("MDS 2", fontsize=FS_L)
+    # Shared y axis. Both panels come from ONE MDS fit and already carry identical
+    # limits, so the right panel's tick numbers are a verbatim repeat of the left's;
+    # printing them twice invites the reader to check whether they differ.
+    ax[1].set_yticklabels([])
 
     handles, labels = ax[0].get_legend_handles_labels()
-    fig.tight_layout(rect=[0, 0.12, 1, 0.95])
-    fig.suptitle("Pooled encoder geometry (MDS)", fontsize=11)
-    fig.legend(handles, labels, loc="lower center", bbox_to_anchor=(0.5, 0.01),
-               ncol=len(fams), fontsize=8, frameon=False, markerscale=1.8)
-    fig.savefig(outpath, bbox_inches="tight"); plt.close(fig)
+    # No suptitle: the panel titles already say which encoder each side is, and the
+    # rest belongs in the caption.
+    if adjust is not None:
+        fig.subplots_adjust(**adjust)
+    else:
+        fig.tight_layout(rect=list(tight_rect))
+    # Anchored BELOW the figure, not just near its bottom. Measured on the tight
+    # bboxes, 0.01 put the legend 0.09 in INTO the "MDS 1" labels; -0.02 clears them.
+    # savefig with bbox_inches="tight" grows the canvas to take it in, so a negative
+    # anchor costs nothing but the gap it buys.
+    fig.legend(handles, labels, loc="lower center",
+               bbox_to_anchor=(0.5, legend_anchor),
+               ncol=legend_ncol or len(fams), fontsize=FS_LG, frameon=False,
+               markerscale=legend_markerscale)
+    return ax
 
 
 def main():
@@ -340,7 +484,8 @@ def main():
                  f"| held-out aDDM: {held:.4f}")
     df.to_csv(OUT / "app3_per_family_rsa.csv", index=False, float_format="%.4f")
     plot_scores(df, FIG / "app3_transfer_scores.pdf")
-    plot_pooled(summ, FIG / "app3_pooled_geometry.pdf", a.seed)
+    plot_pooled(summ, FIG / "app3_pooled_geometry.pdf", a.seed,
+                csv_path=OUT / "app3_geometry_summary.csv")
     # CKA matrix keeps the original encoder and the original four families, so the
     # CSV stays comparable with the runs that produced the orthogonality claim.
     fams, M = between_family_cka({f: summ["original"][f] for f in TRAINED + ["addm"]})

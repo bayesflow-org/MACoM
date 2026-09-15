@@ -211,7 +211,11 @@ def main():
 
 def _plot(rows, outdir, figdir, lp_f, lp_b, tag):
     n = len(rows)
-    fig, axes = plt.subplots(1, n + 1, figsize=(4.2 * (n + 1), 3.6))
+    # SIZED FOR THE PAGE: 2x a 5.5 in text width, so \includegraphics scales by 0.5
+    # and the sizes below land at half their nominal value.
+    FIG_W = 11.0
+    FS_TITLE, FS_LABEL, FS_TICK, FS_LEG = 15, 13, 11, 11
+    fig, axes = plt.subplots(1, n + 1, figsize=(FIG_W, FIG_W / (n + 1) * 0.9))
     axes = np.atleast_1d(axes)
     for ax, row in zip(axes, rows):
         arm = np.load(outdir / f"c2st_{row['subset']}.npz")
@@ -223,7 +227,11 @@ def _plot(rows, outdir, figdir, lp_f, lp_b, tag):
         ax.axvline(0.5, color="k", ls="--", lw=1)
         ax.set_title(f"C2ST — {row['subset']} ({row['n_dims']}d)")
         ax.set_xlabel("held-out accuracy")
-        ax.legend(fontsize=7)
+        ax.legend(fontsize=FS_LEG)
+        ax.tick_params(labelsize=FS_TICK)
+        ax.title.set_fontsize(FS_TITLE)
+        ax.xaxis.label.set_fontsize(FS_LABEL)
+        ax.yaxis.label.set_fontsize(FS_LABEL)
     ax = axes[-1]
     ax.scatter(lp_b, lp_f, s=9, alpha=0.4, color=FROZEN_COLOR)
     lo = min(lp_b.min(), lp_f.min()); hi = max(lp_b.max(), lp_f.max())

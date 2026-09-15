@@ -799,7 +799,7 @@ def plot_choice_quantiles(obs_ch, ppc_ch, conditions, model_name, variant, outdi
             ax.axhline(0.0, color=GUIDE_COLOR, ls=":", lw=0.8, zorder=0)
             ax.set_xticks(xs); ax.set_xticklabels([f"{q:g}" for q in quantiles])
             ax.set_title(lbl, fontsize=9)
-            ax.set_xlabel("Response quantile", fontsize=8)
+            ax.set_xlabel("Choice quantile", fontsize=8)
             ax.set_ylabel(r"Response deviation $\theta$ (rad)", fontsize=8)
             ax.tick_params(labelsize=7)
             ax.spines[["top", "right"]].set_visible(False)
@@ -947,7 +947,10 @@ FIG_SCALE = 2.0
 FIG_W = TEXT_WIDTH_IN * FIG_SCALE
 
 # Nominal sizes; divide by FIG_SCALE for what the reader gets.
-FS_TITLE, FS_LABEL, FS_TICK, FS_LEG = 16, 14, 10, 8           # 8 / 7 / 5 / 4 pt
+# Title above label, with a real gap between them: at 16/14 the two read as one
+# weight. The label drops further than the title, so the panel's name leads and
+# the axis name follows.
+FS_TITLE, FS_LABEL, FS_TICK, FS_LEG = 14, 11, 10, 8           # 7 / 5.5 / 5 / 4 pt
 FS_MINI_TITLE, FS_MINI_LABEL, FS_MINI_TICK, FS_MINI_LEG = 11, 9.5, 7.5, 8
 
 # Gaps inside the 2x2, as fractions of a mini axes. Module level because the
@@ -1376,7 +1379,7 @@ def plot_combined(obs_pooled, ppc_pooled, obs_ch, ppc_ch, conditions, model_name
                 # sizes and runs into the row above. The x label already says these
                 # are response quantiles.
                 _draw_quantile_panel(ax2, o, draws, quantiles, xs, ppc_color, ppc_fill,
-                                     "Response quantile",
+                                     "Choice quantile",
                                      r"$\theta$ (rad)" if j == 0 else "",
                                      zero_guide=True)
             else:
@@ -1505,7 +1508,11 @@ def plot_combined_all(per_family, outpath, quantiles=DEFAULT_RT_QUANTILES):
     n_rows = len(plan)
     n_cols = max(len(c) for _, _, c, _ in plan)
     has_choice = any(f != "cdm" for f, _, _, _ in plan)
-    n_grid = n_cols + (1 if has_choice else 0)
+    # NO extra column for the choice block. It takes the slots a family does not
+    # spend on quantile panels -- DDM and RDM have four conditions against CDM's
+    # five, so the block occupies what would have been their fifth. An extra column
+    # instead left the CDM rows ending short of the others by that column's width.
+    n_grid = n_cols
 
     fig, axes = plt.subplots(n_rows, n_grid, squeeze=False,
                              figsize=(FIG_W, FIG_W * 0.22 * n_rows))
@@ -1515,7 +1522,7 @@ def plot_combined_all(per_family, outpath, quantiles=DEFAULT_RT_QUANTILES):
         obs_pooled, ppc_pooled, conditions, obs_ch, ppc_ch = per_family[fam]
         ppc_color, ppc_fill = _ppc_colors(fam)
         src_obs, src_ppc = (obs_pooled, ppc_pooled) if kind == "rt" else (obs_ch, ppc_ch)
-        xlabel = "RT quantile" if kind == "rt" else "Response quantile"
+        xlabel = "RT quantile" if kind == "rt" else "Choice quantile"
         ylabel = "RT (s)" if kind == "rt" else r"$\theta$ (rad)"
 
         for j, (cond_name, lbl) in enumerate(cols):
@@ -1562,7 +1569,10 @@ def plot_combined_all(per_family, outpath, quantiles=DEFAULT_RT_QUANTILES):
                 a.tick_params(labelleft=False)
 
     fig.tight_layout()
-    fig.subplots_adjust(wspace=WSPACE, hspace=HSPACE)
+    # More row spacing than the single-family figures use. Four rows of five panels
+    # leave each row's x labels close to the next row's titles, and the family rule
+    # has to sit BETWEEN them -- with the default gap it lands on the labels.
+    fig.subplots_adjust(wspace=WSPACE, hspace=HSPACE * 2.0)
     fig.canvas.draw()
 
     for r, spare in holders.items():
@@ -1599,15 +1609,21 @@ def plot_combined_all(per_family, outpath, quantiles=DEFAULT_RT_QUANTILES):
     # blocks carry none of their own. Not inside a panel: at this size every corner
     # of every panel has data in it, and the first panel's y tick labels were being
     # covered as well.
-    first_grid = grids.get(min(grids)) if grids else None
-    H, L, seen = [], [], set()
-    for ax in [axes[0, 0]] + ([first_grid[0][0]] if first_grid else []):
-        for h, l in zip(*ax.get_legend_handles_labels()):
-            if l and l not in seen:
-                seen.add(l); H.append(h); L.append(l)
-    if H:
-        fig.legend(H, L, loc="lower center", bbox_to_anchor=(0.5, -0.015),
-                   ncol=len(H), frameon=False, fontsize=FS_LEG)
+    # GREY, not any family's colour. The legend describes marks that appear in all
+    # three families, each drawn in its own hue; borrowing DDM's artists made it read
+    # as a key to the DDM row alone. Built from scratch in neutral grey so it says
+    # what the SHAPES mean and leaves colour to mean family.
+    grey, dark = "#8a8a94", OBS_COLOR
+    H = [Patch(facecolor=grey, alpha=0.40, lw=0),
+         Line2D([], [], color=grey, marker="o", ms=4, lw=1.4),
+         Line2D([], [], color=dark, marker="s", ms=4, lw=1.6, ls="--"),
+         Line2D([], [], color=grey, marker="o", ms=4, lw=1.2)]
+    L = [f"PPC {PPC_CI:g}% CI", "PPC median", "Observed",
+         f"PPC median + {PPC_CI:g}% CI"]
+    if not any(grids.values()):
+        H, L = H[:3], L[:3]
+    fig.legend(H, L, loc="lower center", bbox_to_anchor=(0.5, -0.015),
+               ncol=len(H), frameon=False, fontsize=FS_LEG)
 
     # Dashed: condition-group breaks, and the RT/choice break on the DDM/RDM rows.
     for r, (fam, kind, cols, breaks) in enumerate(plan):

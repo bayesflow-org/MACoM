@@ -12,6 +12,7 @@ near-zero contraction has a posterior no narrower than its prior, which is an
 identifiability statement, not a representation failure.
 """
 import argparse
+import inspect
 import logging
 from pathlib import Path
 
@@ -44,6 +45,11 @@ ARM_PREFIX = {"frozen": "addm", "baseline": "addm_baseline"}
 # kwargs. calibration_ecdf's fill_color is deliberately left at grey: that band
 # is the theoretical reference envelope, not this arm's data, and recolouring it
 # would imply it belongs to the frozen arm.
+# Only these draw error bars; elinewidth is meaningless to the others and would be
+# forwarded into a call that has no use for it.
+_ERRORBAR_PLOTS = {"recovery"}
+
+
 def plots_for(arm):
     """The four diagnostics, coloured for one arm.
 
@@ -87,6 +93,15 @@ def parse_args():
     # This default used to point at the figures directory, where an old copy of
     # the npz happened to sit, so a rerun silently produced diagnostics for
     # stale data with no error.
+    p.add_argument("--fig_width", type=float, default=11.0,
+                   help="Figure width in inches; 2x a 5.5 in text width.")
+    p.add_argument("--title_fs", type=float, default=15)
+    p.add_argument("--label_fs", type=float, default=13)
+    p.add_argument("--metric_fs", type=float, default=11)
+    p.add_argument("--tick_fs", type=float, default=11)
+    p.add_argument("--markersize", type=float, default=2.5)
+    p.add_argument("--elinewidth", type=float, default=1.0,
+                   help="Error-bar line width for the plots that draw them.")
     p.add_argument("--data", type=str,
                    default="./outputs/data/encoder_rep/addm/intercept_only/"
                            "addm_encoder_rep_data.npz")
@@ -136,8 +151,32 @@ def main():
         # Some BayesFlow plotters size their axis grid independently of the
         # variable count and then iterate every axis, which for 7 params builds
         # 2x4=8 panels and indexes past the end. Pin the layout to one row.
+        # SIZED FOR THE PAGE. BayesFlow's defaults assume a figure viewed on screen;
+        # at a 5.5 in \textwidth these panels scale to well under a third, so the
+        # sizes are set here and the figure drawn at twice its target width.
+        #
+        # Filtered per plotter: the four do NOT take the same arguments -- coverage
+        # has no metric_fontsize, for instance -- so passing one set to all of them
+        # raises TypeError on whichever lacks it.
+        # With 500 datasets the default marker and error bar overlap into a solid
+        # block. Thinner bars and smaller marks keep every point -- nothing is
+        # subsampled -- while letting the density show through.
+        wanted = dict(figsize=(args.fig_width, args.fig_width / n_params * 1.15),
+                      label_fontsize=args.label_fs, title_fontsize=args.title_fs,
+                      metric_fontsize=args.metric_fs, tick_fontsize=args.tick_fs,
+                      markersize=args.markersize)
+        params = inspect.signature(fn).parameters
+        accepted = set(params)
+        style_kwargs = {k: v for k, v in wanted.items() if k in accepted}
+        # elinewidth is not a NAMED parameter of any of these -- it rides the **kwargs
+        # each one forwards to ax.errorbar. So it is passed only where such a
+        # catch-all exists, and only for plotters that draw error bars at all.
+        takes_extra = any(q.kind is inspect.Parameter.VAR_KEYWORD
+                          for q in params.values())
+        if takes_extra and args.elinewidth is not None and name in _ERRORBAR_PLOTS:
+            style_kwargs["elinewidth"] = args.elinewidth
         fig = fn(estimates=estimates, targets=targets, variable_names=names,
-                 num_row=1, num_col=n_params, **color_kwargs)
+                 num_row=1, num_col=n_params, **style_kwargs, **color_kwargs)
         path = outdir / f"{prefix}_{args.case}_{name}.pdf"
         fig.savefig(path, bbox_inches="tight")
         plt.close(fig)
