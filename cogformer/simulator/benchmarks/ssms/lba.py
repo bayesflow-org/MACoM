@@ -170,9 +170,29 @@ class LBA(Model):
         pi     = as_1d(params.get("pi", 0.0), num_obs)
 
         if num_alternatives == 2:
+            # STIMULUS CODING. v_diff is the drift advantage of the accumulator the
+            # STIMULUS favours, named per trial by context['favored_idx'] -- the same
+            # rule the K > 2 branch has always used. This branch used to hardcode
+            # `v[:, 1] = v_base + v_diff`, which made accumulator 1 favoured on every
+            # trial; the two accumulators were then "correct" and "error" rather than
+            # the two responses, i.e. ACCURACY coding, and load_lba_data documented
+            # that as forced-by-the-simulator and not comparable with load_ddm_data's
+            # response coding on v_diff.
+            #
+            # Accuracy coding is still reachable -- pass favored_idx = ones, which is
+            # exactly what the old hardcoding did -- so this is a change of DEFAULT,
+            # not a loss of capability. Coding is a property of the context, which is
+            # where it belongs: it describes how the data is labelled, not the model.
+            favored = np.asarray(
+                context.get("favored_idx", np.ones(num_obs, dtype=np.int32))
+            ).reshape(-1)
+            if favored.shape[0] != num_obs:
+                raise ValueError(
+                    f"favored_idx length {favored.shape[0]} != num_obs {num_obs}"
+                )
             v = np.zeros((num_obs, 2), dtype=np.float64)
-            v[:, 0] = v_base
-            v[:, 1] = v_base + v_diff
+            v[:, :] = v_base[:, None]
+            v[np.arange(num_obs), favored.astype(np.int64)] += v_diff
         else:
             if "favored_idx" not in context:
                 raise ValueError(
@@ -204,21 +224,25 @@ class LBA(Model):
     @staticmethod
     def build_context(num_obs: int, num_alternatives: int = 2) -> dict[str, np.ndarray]:
         context = {"num_alternatives": num_alternatives}
-        if num_alternatives == 2:
-            # For 2-alt the simulation always boosts accumulator 1, so record that
-            # explicitly so the encoder can see it as a per-trial feature. This
-            # mirrors RDM.build_context; without it LBA leaves the favored_idx
-            # channel empty where RDM populates it, so the two families present
-            # different inputs for the same underlying design and LBA is penalised
-            # on transfer for a bookkeeping difference rather than a real one.
-            context["favored_idx"] = np.ones(num_obs, dtype=np.int32)
-        else:
-            context["favored_idx"] = np.random.randint(0, num_alternatives, size=num_obs)
+        # Drawn per trial for EVERY K including 2. A constant favoured accumulator is
+        # accuracy coding; a varying one is stimulus coding, and the encoder already
+        # sees per-trial favored_idx from RDM (build_random_context draws K in 2..4, so
+        # ~2/3 of RDM batches vary it), which is what makes this in-distribution for the
+        # model-class checkpoint rather than a new kind of input.
+        context["favored_idx"] = np.random.randint(0, num_alternatives, size=num_obs)
         return context
 
     @staticmethod
     def build_default_context(num_obs: int) -> dict[str, np.ndarray]:
-        return {"num_alternatives": 2}
+        # Delegates to build_context rather than returning a bare dict. It used to
+        # return {"num_alternatives": 2} with NO favored_idx -- and since
+        # ModelFamily.sample reaches for build_default_context (not build_context),
+        # that was the path essentially every LBA simulation took. So the favored_idx
+        # channel build_context documents as deliberately populated "so the encoder can
+        # see it" was in fact empty for LBA, and the Adapter filled it with its zero
+        # default while the simulator boosted accumulator 1 -- the channel disagreed
+        # with the simulation. Delegating fixes that and makes the default stimulus-coded.
+        return LBA.build_context(num_obs, num_alternatives=2)
 
     @staticmethod
     def build_random_context(num_obs: int) -> dict[str, np.ndarray]:

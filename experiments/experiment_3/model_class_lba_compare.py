@@ -93,6 +93,91 @@ def _delta_metrics(df_a: pd.DataFrame, df_b: pd.DataFrame, label_a: str, label_b
     return combined[[c for c in col_order if c in combined.columns]]
 
 
+# Column order is fixed: DDM, RDM, CDM, LBA -- the three original families first, then
+# the finetune target, so "forgetting on the originals" reads left-to-right and the new
+# family sits at the end.
+DELTA_PLOT_MODELS = ["DDM", "RDM", "CDM", "LBA"]
+DELTA_PLOT_METRICS = ["NRMSE", "Calibration Error"]
+
+
+def _delta_col(df: pd.DataFrame, metric: str) -> str | None:
+    """The delta column for `metric`, whatever baseline it was computed against.
+
+    LBA is differenced against ZERO-SHOT and the other three against BASE, so the
+    suffixes differ per model ("(Δ fine-tuned−zero-shot)" vs "(Δ fine-tuned−base)").
+    Match on the prefix instead of hardcoding either one -- which is also why the
+    panels are not titled with a single baseline: one label would be wrong for three
+    of the four columns.
+    """
+    hits = [c for c in df.columns if c.startswith(f"{metric} (Δ ")]
+    # pd.concat unions the columns, so a model differenced against "base" still HAS the
+    # "(Δ fine-tuned−zero-shot)" column -- filled with NaN. Taking hits[0] therefore
+    # picked LBA's delta from the base-suffixed column and rendered an all-NaN panel.
+    # Choose the one that actually carries values for these rows.
+    for c in hits:
+        if df[c].notna().any():
+            return c
+    return None
+
+
+def plot_delta_metrics(combined: pd.DataFrame, outdir: Path, condition: str,
+                       figsize: tuple = (16.0, 7.0)) -> Path | None:
+    """2 x 4 grid of per-parameter metric deltas: rows = metric, cols = model family.
+
+    Rows are labelled on the LEFT (y-axis) rather than by per-panel titles, so the
+    metric is stated once per row instead of four times, and the top row's titles are
+    free to carry the model family.
+
+    Negative is improvement for both metrics plotted here (NRMSE and calibration error
+    are both lower-is-better), so bars are coloured by sign with that reading.
+    """
+    sub = combined[combined["condition"] == condition]
+    if sub.empty:
+        logging.warning(f"No delta rows for condition '{condition}'; skipping delta metric plot.")
+        return None
+
+    fig, axes = plt.subplots(len(DELTA_PLOT_METRICS), len(DELTA_PLOT_MODELS),
+                             figsize=figsize, squeeze=False)
+    better, worse = "#2b7bba", "#d1495b"
+
+    for r, metric in enumerate(DELTA_PLOT_METRICS):
+        for c, model_name in enumerate(DELTA_PLOT_MODELS):
+            ax = axes[r, c]
+            rows = sub[sub["model"] == model_name]
+            col = _delta_col(rows, metric) if not rows.empty else None
+            if rows.empty or col is None:
+                ax.text(0.5, 0.5, "N/A", transform=ax.transAxes, ha="center", va="center",
+                        fontsize=16, weight="bold", alpha=0.45)
+                ax.set_xticks([]); ax.set_yticks([])
+                for sp in ax.spines.values():
+                    sp.set_visible(False)
+            else:
+                vals = rows[col].to_numpy(dtype=float)
+                labels = [str(i) for i in rows.index]
+                y = np.arange(len(vals))
+                ax.barh(y, vals, color=[better if v <= 0 else worse for v in vals], alpha=0.85)
+                ax.axvline(0.0, color="0.35", linewidth=1.0)
+                ax.set_yticks(y)
+                ax.set_yticklabels(labels if c == 0 else [], fontsize=8)
+                ax.invert_yaxis()
+                ax.grid(True, axis="x", color="lightgray", linestyle="--", linewidth=0.5, alpha=0.4)
+                for sp in ("top", "right"):
+                    ax.spines[sp].set_visible(False)
+
+            if r == 0:
+                ax.set_title(model_name, fontsize=14)
+            # Metric named once per row, on the left, with no baseline in the label.
+            if c == 0:
+                ax.set_ylabel(f"\u0394 {metric}", fontsize=13)
+
+    fig.tight_layout()
+    path = outdir / f"delta_metrics_{condition}.pdf"
+    fig.savefig(path, bbox_inches="tight")
+    plt.close(fig)
+    logging.info(f"[saved] {path}")
+    return path
+
+
 def main():
     args = parse_args()
     outdir = Path(args.outdir)
@@ -207,6 +292,7 @@ def main():
         combined = pd.concat(all_delta_rows, axis=0)
         combined.to_csv(outdir / "delta_metrics.csv")
         logging.info(f"[saved] {outdir / 'delta_metrics.csv'}")
+        plot_delta_metrics(combined, outdir, condition=ref)
     else:
         logging.warning("No metrics CSVs found; delta_metrics.csv not written.")
 

@@ -44,7 +44,7 @@ from cogformer.simulator.benchmarks.ssms.priors import (
 from cogformer.simulator.benchmarks.ssms.link_funs import (
     ddm_link_fun, rdm_link_fun, cdm_link_fun, lba_link_fun)
 
-from ..configs import (MODELS as _BASE_MODELS, LBA_CONFIG,
+from ..configs import (MODELS as _BASE_MODELS, LBA_CONFIG, LBA_PPC_DESIGN_CONFIG,
                        GLOBAL_PARAMS, GLOBAL_VARIABLE_NAMES)
 from ..utils import add_global_params, build_encoder_input_dim, chunked_sample
 from .data_utils import (
@@ -59,12 +59,15 @@ from .data_utils import (
 # Only the condition x frequency interaction is carried: it is the theoretically
 # interesting one (does the speed-accuracy tradeoff change with evidence quality), and
 # every added interaction costs block_width**2 = 9 design columns.
+# Derived from the canonical table in experiments/configs.py rather than restated, so
+# the simulated val scenario ("ppc_design") and this real-data fit cannot drift -- the
+# same reason ppc.py imports this name instead of declaring its own copy. configs.py
+# defines it without pi (module convention); the real-data application DOES estimate
+# contamination, so pi joins the intercept row here, exactly as add_global_params does
+# for the simulated configs.
 LBA_DESIGN_CONFIG = {
-    "1":       ["v", "v_diff", "a", "tau", "s_v", "s_tau", "pi"],
-    "u_1":     ["v", "v_diff", "a", "tau"],   # condition   (binary +/-0.5)
-    "u_2":     ["v", "v_diff", "a", "tau"],   # freq_band   (3-level categorical)
-    "u_3":     ["v", "v_diff", "a", "tau"],   # lexicality  (binary +/-0.5)
-    "u_1:u_2": ["v", "v_diff", "a", "tau"],
+    k: (list(v) + GLOBAL_PARAMS if k == "1" else list(v))
+    for k, v in LBA_PPC_DESIGN_CONFIG.items()
 }
 
 

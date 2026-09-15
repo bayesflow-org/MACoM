@@ -240,6 +240,27 @@ LBA_BENCHMARK_CONFIGS = {
     },
 }
 
+# The design the real-data LBA application actually fits (Wagenmakers et al. lexical
+# decision): 3 regressors, one of them a 3-level categorical, plus one interaction.
+# It lives HERE rather than in experiments/real_data/lba_mc_cf_apply.py because that
+# module imports from this one -- putting it there and importing it back would be a
+# cycle -- and because a second copy is exactly the drift ppc.py warns about when it
+# imports the design instead of redeclaring it.
+#
+# Defined WITHOUT pi, like every other table in this module: add_global_params() puts
+# the global parameter on the intercept row for the callers that estimate it.
+#
+# u_1 (condition) and u_3 (lexicality) are binary contrasts carried as a single +/-0.5
+# numeric column, i.e. CONTINUOUS regressors in simulator terms. Only u_2 (freq_band)
+# is a true categorical, with 3 levels -> 2 dummy columns.
+LBA_PPC_DESIGN_CONFIG = {
+    "1":       ["v", "v_diff", "a", "tau", "s_v", "s_tau"],
+    "u_1":     ["v", "v_diff", "a", "tau"],   # condition   (binary +/-0.5)
+    "u_2":     ["v", "v_diff", "a", "tau"],   # freq_band   (3-level categorical)
+    "u_3":     ["v", "v_diff", "a", "tau"],   # lexicality  (binary +/-0.5)
+    "u_1:u_2": ["v", "v_diff", "a", "tau"],
+}
+
 LBA_CONFIG = {
     "model_cls": LBA,
     # fixed_A must be 0.5 everywhere, and LBA() defaults it to None. `a` MEANS a
@@ -272,6 +293,25 @@ LBA_CONFIG = {
         ("interaction",     LBA_BENCHMARK_CONFIGS["interaction"],     {"max_num_categories": 2, "categorical_regressors": []}),
         ("mixed_predictor", LBA_BENCHMARK_CONFIGS["interaction"],
          {"exact_num_categories": True, "categorical_regressors": ["u_1"]}),
+        # The real-data PPC design, so the application's posteriors can be checked for
+        # recovery and calibration on SIMULATED data where ground truth exists -- a PPC
+        # on real data cannot do that, it has no true parameter vector.
+        #
+        # max_num_categories=3, NOT 4. Three is what the design needs: freq_band has 3
+        # levels, so block_width = 3 - 1 = 2 dummy columns. The apply script runs at 4
+        # only because the r4c4 model-class checkpoint's encoder input dim is sized by
+        # (max_num_regressors, max_num_categories) -- r4c2 -> 16, r4c3 -> 38, r4c4 -> 72
+        # -- and a checkpoint can only be loaded at the geometry it was trained at.
+        # Setting 4 here would make exact_num_categories draw FOUR levels for freq_band,
+        # which the data does not have; the validate scripts already pass
+        # pad_to_max_num_categories=training_max_cats, which widens this 3-category
+        # layout to the checkpoint's 4-category geometry without touching the level count.
+        #
+        # categorical_regressors pins ONLY u_2: u_1 and u_3 are +/-0.5 numeric contrasts
+        # in the real data, i.e. one continuous column each, not 2-level factors.
+        ("ppc_design", LBA_PPC_DESIGN_CONFIG,
+         {"max_num_categories": 3, "exact_num_categories": True,
+          "categorical_regressors": ["u_2"]}),
     ],
     "train_context": LBA.build_random_context,
 }
