@@ -1,8 +1,8 @@
 # Experiment 3 — LBA zero-shot inference and finetuning
 
 Frozen snapshot of the three-arm paired validation. Assembled
-2026-09-15 05:54:53Z by
-`experiments/finalize_experiment_3.py` — 593 files. Git commit `22fad3d5961a6a3bae464878935cc39b227ffa7c`.
+2026-09-15 13:34:25Z by
+`experiments/finalize_experiment_3.py` — 593 files. Git commit `4462f3f13ea7e1ce24c69003ac96d35052e96d74`.
 
 `paired_validation_notes.md` is the original run's write-up and carries the headline
 tables; `MANIFEST.csv` records per-file provenance.

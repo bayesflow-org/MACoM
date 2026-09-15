@@ -13,28 +13,71 @@ change: on a sequential ramp "no change" lands wherever the data happen to put i
 The limits here are symmetric about zero by construction, so the midpoint of the
 colour bar IS no change, and the reader can see sign before reading a digit.
 
-ORIENTED SO THAT ONE HUE MEANS IMPROVEMENT. r and calibration error run in opposite
-directions -- r should go up, calibration error down -- so a single shared palette
-would paint improvement green on one panel and red on the other. Each spec therefore
-carries its own sense, and the colour always means better or worse. The ANNOTATION
-keeps the raw signed difference, so nothing is hidden by the reorientation: a cell
-whose calibration error fell by 0.2 reads "-0.200" on an improvement-coloured tile.
+ONE PALETTE FOR BOTH PANELS. Both metrics here are lower-is-better, so a single
+diverging ramp is unambiguous: negative (the arm improved) is blue/purple, positive
+(it got worse) is magenta/red, and the same colour means the same thing wherever it
+appears. This only works because both panels run the same way -- an earlier version
+plotted the change in r, which improves UPWARD, and had to reverse one panel's ramp
+to keep "red = better" true on both. Swapping r for NRMSE removes that special case.
 """
 import numpy as np
 import matplotlib.pyplot as plt
-import seaborn as sns
+import matplotlib.colors as mcolors
 
-from cogformer.simulator.design_utils import build_parameter_mask, expand_design_config_to_mask
-from cogformer.diagnostics.metric.adaptive_metrics import _calibration_error
+from cogformer.simulator.design_utils import (build_parameter_mask,
+                                              expand_design_config_to_mask,
+                                              build_row_labels)
+from cogformer.diagnostics.metric.adaptive_metrics import _calibration_error, _rmse
 from .adaptive_metrics import _compact_grids, _draw_grids
 
+# Diverging, built from the project's own identity ramps rather than a seaborn
+# default, so the hues mean what they mean elsewhere: the purple/blue ramp on the
+# negative side, the magenta/red one on the positive. Saturated at both extremes and
+# near-white at zero, so the midpoint of the bar reads as "no change".
+DELTA_CMAP = mcolors.LinearSegmentedColormap.from_list(
+    "cogformer_delta",
+    [(0.00, "#4E2A84"),    # deep purple  -- most improved
+     (0.28, "#6969FF"),    # blue
+     (0.50, "#F7F7F7"),    # no change
+     (0.72, "#FF6969"),    # red
+     (1.00, "#EC008C")],   # magenta      -- most degraded
+)
 
-def _pearson_r(estimates, targets):
-    """corr(truth, posterior mean) -- the same r the recovery panels annotate."""
-    y = estimates.mean(axis=1)
-    if np.std(targets) == 0 or np.std(y) == 0:
-        return np.nan
-    return float(np.corrcoef(targets, y)[0, 1])
+
+def _kind_row_labels(design_config, max_num_categories, parameter_mask,
+                     categorical_regressors=None):
+    """Spelled-out row names: Intercept / Main effect N / Interaction N.
+
+    The default labels are the design's own coefficient keys ($u_1:c_1$), which say
+    which regressor a row is but not what KIND of term it is -- and the kind is the
+    thing a reader compares across rows. Numbered per kind, in row order.
+    """
+    _, kinds = build_row_labels(design_config, max_num_categories, return_kinds=True,
+                                categorical_regressors=categorical_regressors,
+                                parameter_mask=parameter_mask)
+    return ["Intercept" if k == "intercept"
+            else ("Main effect" if k == "main" else "Interaction") for k in kinds]
+
+
+def _renumber(row_labels):
+    """Number each kind sequentially over the rows that SURVIVED compacting.
+
+    Numbering before the filter counts inactive rows too, so a grid showing three
+    main-effect rows came out "Main effect 1 / 4 / 13" -- the row's index in the full
+    design rather than its position in the figure. A kind with only one row keeps its
+    bare name; a number there implies a second one is somewhere off-figure.
+    """
+    totals = {}
+    for lab in row_labels:
+        totals[lab] = totals.get(lab, 0) + 1
+    seen, out = {}, []
+    for lab in row_labels:
+        if totals[lab] == 1:
+            out.append(lab)
+            continue
+        seen[lab] = seen.get(lab, 0) + 1
+        out.append(f"{lab} {seen[lab]}")
+    return out
 
 
 def adaptive_delta(
@@ -47,6 +90,9 @@ def adaptive_delta(
     parameter_mask: np.ndarray = None,
     variable_names: list[str] = None,
     arm_names: tuple = ("zero-shot", "finetuned"),
+    normalize: str | None = "range",
+    kind_row_labels: bool = True,
+    fit_row_labels: bool = True,
     aggregation=np.median,
     resolution: int = 20,
     min_quantile: float = 0.005,
@@ -115,7 +161,8 @@ def adaptive_delta(
     uppers = 1 - lowers
 
     lo, hi = arm_names
-    r_key = f"$\\Delta$ r   ({hi} $-$ {lo})"
+    rmse_name = "RMSE" if normalize is None else "NRMSE"
+    r_key = f"$\\Delta$ {rmse_name}   ({hi} $-$ {lo})"
     c_key = f"$\\Delta$ calibration error   ({hi} $-$ {lo})"
     grids = {r_key: np.full((num_rows, num_cols), np.nan),
              c_key: np.full((num_rows, num_cols), np.nan)}
@@ -126,7 +173,8 @@ def adaptive_delta(
                 continue
             t = true[:, r, c]
             a, b = pred_a[:, :, r, c], pred_b[:, :, r, c]
-            grids[r_key][r, c] = _pearson_r(b, t) - _pearson_r(a, t)
+            grids[r_key][r, c] = (_rmse(b, t, normalize, aggregation)
+                                  - _rmse(a, t, normalize, aggregation))
             grids[c_key][r, c] = (
                 _calibration_error(b, t, alphas, lowers, uppers, aggregation)
                 - _calibration_error(a, t, alphas, lowers, uppers, aggregation))
@@ -135,23 +183,23 @@ def adaptive_delta(
         grids, parameter_mask, design_config, num_rows, max_num_categories,
         intrinsic_params, col_labels, global_params, global_only,
         categorical_regressors,
-        (intercept_color, main_effect_color, interaction_color))
+        (intercept_color, main_effect_color, interaction_color),
+        row_label_fn=(_kind_row_labels
+                      if (kind_row_labels and not global_only) else None))
     if compacted is None:
         return None
     grids, parameter_mask, row_labels, row_colors, col_labels = compacted
+    if kind_row_labels and not global_only:
+        row_labels = _renumber(row_labels)
 
-    # "vlag" runs blue (low) -> red (high). r improves upward, so it is used as-is
-    # and red means better; calibration error improves DOWNWARD, so that panel takes
-    # the reversed ramp and red means better there too.
     specs = []
-    for key, cmap_name in ((r_key, "vlag"), (c_key, "vlag_r")):
+    for key in (r_key, c_key):
         g = grids[key]
         m = float(np.nanmax(np.abs(g))) if symmetric else None
-        specs.append((key, sns.color_palette(cmap_name, as_cmap=True),
-                      -m if m else None, m if m else None))
+        specs.append((key, DELTA_CMAP, -m if m else None, m if m else None))
 
     return _draw_grids(grids, specs, parameter_mask, row_labels, row_colors,
                        col_labels, figsize=figsize, title_fontsize=title_fontsize,
                        label_fontsize=label_fontsize, tick_fontsize=tick_fontsize,
                        annot_fontsize=annot_fontsize, fmt=fmt,
-                       cell_size=cell_size)
+                       cell_size=cell_size, fit_row_labels=fit_row_labels)

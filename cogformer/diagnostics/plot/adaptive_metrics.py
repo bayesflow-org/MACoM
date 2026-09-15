@@ -186,7 +186,7 @@ def adaptive_metrics(
 
 def _compact_grids(grids, parameter_mask, design_config, num_rows, max_num_categories,
                    intrinsic_params, col_labels, global_params, global_only,
-                   categorical_regressors, kind_colors):
+                   categorical_regressors, kind_colors, row_label_fn=None):
     """Row/column labels, then the drop of all-N/A rows and columns.
 
     Split out of :func:`adaptive_metrics` so a plot of DIFFERENCES between two arms
@@ -201,6 +201,12 @@ def _compact_grids(grids, parameter_mask, design_config, num_rows, max_num_categ
     _kind_color = {"intercept": intercept_color, "main": main_effect_color,
                    "interaction": interaction_color}
     row_colors = [_kind_color[k] for k in row_kinds]
+    # A caller wanting different row NAMES substitutes them here, before the filter,
+    # so the names are dropped by exactly the same row selection as the data. Doing it
+    # afterwards means re-deriving which rows survived, which is this function's job.
+    if row_label_fn is not None:
+        row_labels = row_label_fn(design_config, max_num_categories, parameter_mask,
+                                  categorical_regressors)
     row_labels = row_labels[:num_rows]
     row_colors = row_colors[:num_rows]
 
@@ -233,7 +239,8 @@ def _compact_grids(grids, parameter_mask, design_config, num_rows, max_num_categ
 
 def _draw_grids(grids, metric_specs, parameter_mask, row_labels, row_colors,
                 col_labels, figsize=None, title_fontsize=16, label_fontsize=12,
-                tick_fontsize=10, annot_fontsize=10, fmt=".3f", cell_size=1.5):
+                tick_fontsize=10, annot_fontsize=10, fmt=".3f", cell_size=1.5,
+                fit_row_labels=False):
     """One annotated heatmap per spec, sharing the coefficient-matrix layout.
 
     ``metric_specs`` is (name, palette, vmin, vmax); a None limit is taken from the
@@ -310,8 +317,33 @@ def _draw_grids(grids, metric_specs, parameter_mask, row_labels, row_colors,
         ax.set_xlim(-0.5, num_cols - 0.5)
         ax.set_ylim(num_rows - 0.5, -0.5)
 
+    if fit_row_labels:
+        _fit_row_labels(fig, axes, num_cols)
     fig.tight_layout()
     return fig
+
+
+def _fit_row_labels(fig, axes, num_cols):
+    """Shrink the row labels until the longest fits inside one cell.
+
+    The cells are square, so a cell's width is also its height and there is a single
+    budget to fit. Without this a spelled-out label like "Main effect 1" is wider than
+    the cell it names and pushes the left margin out past the grid it belongs to.
+    Measured on the rendered label, since its width depends on the font in use.
+    """
+    fig.canvas.draw()
+    R = fig.canvas.get_renderer()
+    cell = axes[0].get_window_extent().width / max(num_cols, 1)
+    widths = [t.get_window_extent(R).width for t in axes[0].get_yticklabels()]
+    widths = [w for w in widths if w > 0]
+    if not widths:
+        return
+    scale = min(1.0, cell / max(widths))
+    if scale >= 1.0:
+        return
+    for ax in axes:
+        for t in ax.get_yticklabels():
+            t.set_fontsize(t.get_fontsize() * scale)
 
 
 def global_metrics(
