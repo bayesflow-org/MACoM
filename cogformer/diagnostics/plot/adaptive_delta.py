@@ -112,6 +112,7 @@ def adaptive_delta(
     categorical_regressors: list[str] = None,
     symmetric: bool = True,
     cell_size: float = 0.75,
+    orientation: str = "column",
 ) -> plt.Figure:
     """Delta heatmaps for ``pred_b`` minus ``pred_a`` on shared ``true``.
 
@@ -121,6 +122,10 @@ def adaptive_delta(
 
     ``symmetric`` puts the colour limits at +/- max|delta| per panel. Turning it off
     uses each panel's own min/max, which exaggerates a panel where nothing moved.
+
+    ``orientation`` defaults to "column" here: two panels of the same grid read as a
+    before/after pair stacked, and side by side they push the figure past a text
+    column's width for no gain.
 
     ``cell_size`` is half the adaptive_metrics default. This plot carries two panels
     where that one carries three or four, so at 1.5 in a cell the same grid comes out
@@ -202,4 +207,5 @@ def adaptive_delta(
                        col_labels, figsize=figsize, title_fontsize=title_fontsize,
                        label_fontsize=label_fontsize, tick_fontsize=tick_fontsize,
                        annot_fontsize=annot_fontsize, fmt=fmt,
-                       cell_size=cell_size, fit_row_labels=fit_row_labels)
+                       cell_size=cell_size, fit_row_labels=fit_row_labels,
+                       orientation=orientation)

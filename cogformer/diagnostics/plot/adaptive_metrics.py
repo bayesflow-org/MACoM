@@ -240,22 +240,32 @@ def _compact_grids(grids, parameter_mask, design_config, num_rows, max_num_categ
 def _draw_grids(grids, metric_specs, parameter_mask, row_labels, row_colors,
                 col_labels, figsize=None, title_fontsize=16, label_fontsize=12,
                 tick_fontsize=10, annot_fontsize=10, fmt=".3f", cell_size=1.5,
-                fit_row_labels=False):
+                fit_row_labels=False, orientation="row"):
     """One annotated heatmap per spec, sharing the coefficient-matrix layout.
 
     ``metric_specs`` is (name, palette, vmin, vmax); a None limit is taken from the
     grid. Cells carry their value, inactive cells become tinted N/A tiles. Split out
     of :func:`adaptive_metrics` so the delta plot renders through the same code --
     two implementations of this layout is how the two would drift apart.
+
+    ``orientation`` stacks the panels in a column instead of a row. The column form
+    drops the parameter names from every panel but the last: they are the same names
+    in the same order down the stack, so repeating them under each one asks the reader
+    to check whether they differ. In the row form each panel needs its own, since
+    nothing sits below it.
     """
     num_rows, num_cols = parameter_mask.shape
     n_metrics = len(metric_specs)
+    column = orientation == "column"
     if figsize is None:
-        figsize = (n_metrics * num_cols * cell_size + 2.0,
-                   num_rows * cell_size + 2.5)
+        figsize = ((num_cols * cell_size + 2.0,
+                    n_metrics * num_rows * cell_size + 2.5) if column else
+                   (n_metrics * num_cols * cell_size + 2.0,
+                    num_rows * cell_size + 2.5))
 
-    fig, axes = plt.subplots(1, n_metrics, figsize=figsize, squeeze=False)
-    axes = axes[0]
+    fig, axes = plt.subplots(*((n_metrics, 1) if column else (1, n_metrics)),
+                             figsize=figsize, squeeze=False)
+    axes = axes[:, 0] if column else axes[0]
 
     for ax, (metric_name, palette, vmin, vmax) in zip(axes, metric_specs):
         grid = grids[metric_name]
@@ -309,7 +319,9 @@ def _draw_grids(grids, metric_specs, parameter_mask, row_labels, row_colors,
         ax.set_title(metric_name, fontsize=title_fontsize)
 
         ax.set_xticks(range(num_cols))
-        ax.set_xticklabels(col_labels, fontsize=tick_fontsize)
+        last = ax is axes[-1]
+        ax.set_xticklabels(col_labels if (last or not column) else [],
+                           fontsize=tick_fontsize)
         ax.set_yticks(range(num_rows))
         ax.set_yticklabels(row_labels, fontsize=label_fontsize)
 
