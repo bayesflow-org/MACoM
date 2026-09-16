@@ -69,6 +69,38 @@ C_WIDEN = "#C96A04"      # contraction down: the model stopped claiming what it 
 SCRIM = dict(facecolor="white", alpha=0.78, edgecolor="none", pad=2.0)
 
 
+# The stimulus-coded batch is a PAIR of arms rather than a trajectory, so it supports
+# panel A (the arrows) and not panel B (the epoch traces): the four trained-family
+# lines and the epoch path both need checkpoints validated along the way, and this
+# batch has two endpoints. Panel A is the one carrying the claim.
+STIM = Path("outputs/figures/model_class/cf/paired_lba_stimcoded")
+STIM_ARMS = {
+    "zero-shot": "zeroshot/A0.5/{scen}/mid_rdm/lba_{scen}_mid1_metrics.csv",
+    "finetuned": "finetuned/lba/{scen}/lba_{scen}_ft_metrics.csv",
+}
+STIM_SCENARIOS = ["intercept_only", "fixed", "regressed", "fixed_regressed",
+                  "interaction", "mixed_predictor", "ppc_design"]
+
+
+def load_paired(root):
+    """Per-(scenario, param) metrics for a two-arm batch, shaped like load_cells.
+
+    The two arms are relabelled as epochs 0 and 1 so panel_a, which is written
+    against the trajectory's epoch column, reads them unchanged.
+    """
+    import pandas as pd
+    rows = []
+    for arm, epoch in (("zero-shot", 0), ("finetuned", 1)):
+        for scen in STIM_SCENARIOS:
+            f = Path(root) / STIM_ARMS[arm].format(scen=scen)
+            if not f.exists():
+                raise SystemExit(f"missing {f}")
+            for pname, r in pd.read_csv(f, index_col=0).iterrows():
+                rows.append(dict(epoch=epoch, family="lba", scenario=scen,
+                                 param=pname, **r.to_dict()))
+    return pd.DataFrame(rows)
+
+
 def load_cells(root=TRAJ):
     """Per-(epoch, family, scenario, parameter) metrics from the trajectory tree."""
     rows, missing = [], []
@@ -177,6 +209,8 @@ def main():
     logging.basicConfig(level=logging.INFO, format="%(message)s")
     p = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     p.add_argument("--root", type=str, default=str(TRAJ))
+    p.add_argument("--paired_root", type=str, default=None,
+                   help="Draw panel A only, from a two-arm batch under this root.")
     p.add_argument("--out", type=str,
                    default="outputs/figures/model_class/cf/lba_trajectory"
                            "/lba_calibration_plane.pdf")
@@ -185,13 +219,22 @@ def main():
                            "/lba_calibration_plane.csv")
     a = p.parse_args()
 
-    df = load_cells(Path(a.root))
-    logging.info(f"{len(df)} cells: {df.epoch.nunique()} epochs x "
-                 f"{df.family.nunique()} families x {df.scenario.nunique()} scenarios")
-
-    fig, axes = plt.subplots(1, 2, figsize=(FIG_W, FIG_W * 0.42))
-    w = panel_a(axes[0], df)
-    g = panel_b(axes[1], df)
+    if a.paired_root:
+        df = load_paired(a.paired_root)
+        globals()["EPOCHS"] = [0, 1]
+        logging.info(f"{len(df)} cells from a paired batch: "
+                     f"{df.scenario.nunique()} scenarios, 2 arms")
+        fig, ax = plt.subplots(1, 1, figsize=(FIG_W * 0.5, FIG_W * 0.5))
+        axes = [ax]
+        w = panel_a(ax, df)
+        g = None
+    else:
+        df = load_cells(Path(a.root))
+        logging.info(f"{len(df)} cells: {df.epoch.nunique()} epochs x "
+                     f"{df.family.nunique()} families x {df.scenario.nunique()} scenarios")
+        fig, axes = plt.subplots(1, 2, figsize=(FIG_W, FIG_W * 0.42))
+        w = panel_a(axes[0], df)
+        g = panel_b(axes[1], df)
 
     for ax in axes:
         ax.set_xlabel("Posterior contraction  (sharper $\\rightarrow$)",
@@ -200,6 +243,18 @@ def main():
         ax.spines[["top", "right"]].set_visible(False)
         ax.set_box_aspect(1)
     axes[0].set_ylabel("Calibration error  ($\\leftarrow$ better)", fontsize=FS_LABEL)
+    if len(axes) == 1:
+        axes[0].set_xlim(axes[0].get_xlim()[0], 1.0)
+        axes[0].set_ylim(-0.015, axes[0].get_ylim()[1])
+        fig.tight_layout()
+        out = Path(a.out); out.parent.mkdir(parents=True, exist_ok=True)
+        fig.savefig(out, bbox_inches="tight"); plt.close(fig)
+        logging.info(f"[saved] {out}")
+        if a.csv_out:
+            w.columns = [f"{m}_arm{e}" for m, e in w.columns]
+            w.to_csv(a.csv_out, float_format="%.4f")
+            logging.info(f"[saved] {a.csv_out}")
+        return
     axes[1].set_ylabel("Calibration error  ($\\leftarrow$ better)", fontsize=FS_LABEL)
     # NOT shared limits. The panels are the same plane, but B plots family MEANS over
     # 80 cells and so lives in a corner of the range A's individual cells span;
@@ -226,7 +281,8 @@ def main():
         w.columns = [f"{m}_ep{e}" for m, e in w.columns]
         w.to_csv(a.csv_out, float_format="%.4f")
         logging.info(f"[saved] {a.csv_out}")
-    logging.info("\n" + g.to_string(index=False, float_format=lambda x: f"{x:.4f}"))
+    if g is not None:
+        logging.info("\n" + g.to_string(index=False, float_format=lambda x: f"{x:.4f}"))
 
 
 if __name__ == "__main__":

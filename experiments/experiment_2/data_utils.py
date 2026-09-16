@@ -328,14 +328,36 @@ def load_lba_data(csv_path: str) -> tuple[dict, list[int]]:
     manipulations; collapsing the three nonword levels into a single bucket, the
     obvious alternative, silently discards the nonword frequency manipulation.
 
-    CHOICES ARE ACCURACY-CODED, and this is forced by the simulator rather than
-    chosen. For K = 2 alternatives LBA.prepare_params hardcodes accumulator 1 as the
-    favored one (``v[:, 0] = v``, ``v[:, 1] = v + v_diff``) and has no favored_idx
-    path, so the two accumulators are "correct" and "error", not "word" and
-    "nonword". ``v_diff`` therefore means the drift advantage of the CORRECT
-    accumulator. NOTE this is the opposite convention to load_ddm_data, which codes
-    by response and carries truth as a covariate; the two applications are not
-    directly comparable on v_diff without accounting for that.
+    CHOICES ARE STIMULUS-CODED (changed 2026-09-16). Accumulator 0 is a "nonword"
+    response and accumulator 1 a "word" response, and ``favored_idx`` names the
+    accumulator the STIMULUS calls for on each trial -- 1 on word trials, 0 on
+    nonword trials. ``v_diff`` is therefore the drift advantage of the
+    stimulus-appropriate accumulator, and the two accumulators are the two RESPONSES,
+    which is both the standard LBA parameterisation for lexical decision and the same
+    convention load_ddm_data uses. The two applications are now comparable on v_diff.
+
+    This used to be accuracy coding (``choices = correct``), forced by the simulator:
+    LBA.prepare_params hardcoded accumulator 1 as favored for K = 2 and had no
+    favored_idx path. That path exists as of 2026-09-15, so the coding is now a
+    property of the data rather than of the model.
+
+    BOTH quantities come from columns already present. The response is recoverable
+    because a correct trial means the response matched the stimulus:
+
+        favored_idx = 1 if lexicality == "word" else 0
+        response    = favored_idx if correct else 1 - favored_idx
+
+    Verified on the shipped CSV: response equals favored_idx on 89.1% of trials,
+    which is exactly the accuracy, as it must be.
+
+    ``favored_idx`` MUST be forwarded to build_subject_batch and to the PPC's
+    simulation context. Adapter.adapt defaults the channel to zeros when it is absent
+    and raises nothing, so an unforwarded favored_idx tells the encoder "accumulator 0
+    is favoured" on every trial while the choices say otherwise.
+
+    NOTE u_3 (lexicality) is kept as a regressor even though it now also determines
+    favored_idx. The two are not redundant: favored_idx selects WHICH accumulator is
+    boosted, u_3 modulates HOW LARGE that boost is for words against nonwords.
 
     Cleaning is the dataset's own ``censor`` flag, applied when the CSV is built:
     31,351 of 31,522 trials retained, RT 0.181-2.986 s, and every ``error`` response
@@ -362,15 +384,24 @@ def load_lba_data(csv_path: str) -> tuple[dict, list[int]]:
         d_low = (band == "low").astype(np.float32)
         d_vlo = (band == "very_low").astype(np.float32)
 
-        lex = np.where(sdf["lexicality"].values == "word", 0.5, -0.5).astype(np.float32)
+        is_word = (sdf["lexicality"].values == "word")
+        lex = np.where(is_word, 0.5, -0.5).astype(np.float32)
+
+        # Stimulus coding: accumulator 1 = "word" response, 0 = "nonword" response.
+        # favored_idx is the stimulus-appropriate accumulator; the response followed
+        # it on correct trials and departed from it on errors.
+        favored = is_word.astype(np.int32)
+        correct = sdf["correct"].values.astype(bool)
+        response = np.where(correct, favored, 1 - favored).astype(np.float32)
 
         data[int(sid)] = {
-            "rts":     sdf["rt"].values.astype(np.float32),
-            "choices": sdf["correct"].values.astype(np.float32),   # 1 = correct
-            "u_1":     cond,
-            "u_2":     np.column_stack([d_low, d_vlo]),            # (num_obs, 2)
-            "u_3":     lex,
-            "u_1:u_2": np.column_stack([d_low * cond, d_vlo * cond]),
+            "rts":         sdf["rt"].values.astype(np.float32),
+            "choices":     response,                                   # 1 = "word"
+            "favored_idx": favored,                                    # 1 on word trials
+            "u_1":         cond,
+            "u_2":         np.column_stack([d_low, d_vlo]),            # (num_obs, 2)
+            "u_3":         lex,
+            "u_1:u_2":     np.column_stack([d_low * cond, d_vlo * cond]),
         }
     return data, sorted(data.keys())
 

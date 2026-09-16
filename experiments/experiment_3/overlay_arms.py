@@ -51,6 +51,17 @@ TRAJ = Path("outputs/data/model_class/cf/lba_trajectory")
 C_ZERO, C_FT = cogformer_vi_colors()["main_effect"], cogformer_fm_colors()["main_effect"]
 ARM_EPOCH = {"zero-shot": 0, "finetuned": 2000}
 
+# The stimulus-coded batch is a PAIR OF ARMS, not two epochs of one trajectory, and the
+# two arms spell their prediction files differently -- the zero-shot validate writes
+# `<scen>_mid1_cf_pred.npz` under an A<fixed_A> level, the finetuned one writes
+# `<scen>_ft_pred.npz`. Templates rather than one path so the caller names a batch
+# instead of seven files.
+STIM = Path("outputs/figures/model_class/cf/paired_lba_stimcoded")
+ARM_TEMPLATES = {
+    "zeroshot": "zeroshot/A0.5/predictions/lba_{scen}_mid1_cf_pred.npz",
+    "finetuned": "finetuned/predictions/lba_{scen}_ft_pred.npz",
+}
+
 
 def parse_args():
     p = argparse.ArgumentParser(description=__doc__.split("\n")[0])
@@ -58,6 +69,12 @@ def parse_args():
     p.add_argument("--root", type=str, default=str(TRAJ))
     p.add_argument("--outdir", type=str,
                    default="outputs/figures/model_class/cf/lba_trajectory")
+    p.add_argument("--paired_root", type=str, default=None,
+                   help="Read the two arms from a paired batch under this root "
+                        "(see ARM_TEMPLATES) instead of from trajectory epochs.")
+    p.add_argument("--prefix", type=str, default="lba",
+                   help="Output filename stem, so a second batch does not overwrite "
+                        "the first.")
     # BOTH matter, and both were wrong here before. max_num_categories sets the
     # block width, so 5 laid the design out on 4-wide blocks when the run used 3,
     # putting each active cell under the wrong regressor's name. And
@@ -71,7 +88,11 @@ def parse_args():
 
 
 def load(root, epoch, scenario):
-    f = Path(root) / f"ep{epoch}" / "predictions" / f"lba_{scenario}_ft_pred.npz"
+    return load_path(Path(root) / f"ep{epoch}" / "predictions"
+                     / f"lba_{scenario}_ft_pred.npz")
+
+
+def load_path(f):
     if not f.exists():
         raise SystemExit(f"missing {f}")
     d = np.load(f)
@@ -87,8 +108,14 @@ def main():
         raise SystemExit(f"{a.scenario!r} not in {sorted(scen)}")
     design_config = scen[a.scenario]
 
-    true0, pred0, mask0 = load(a.root, ARM_EPOCH["zero-shot"], a.scenario)
-    true1, pred1, mask1 = load(a.root, ARM_EPOCH["finetuned"], a.scenario)
+    if a.paired_root:
+        true0, pred0, mask0 = load_path(
+            Path(a.paired_root) / ARM_TEMPLATES["zeroshot"].format(scen=a.scenario))
+        true1, pred1, mask1 = load_path(
+            Path(a.paired_root) / ARM_TEMPLATES["finetuned"].format(scen=a.scenario))
+    else:
+        true0, pred0, mask0 = load(a.root, ARM_EPOCH["zero-shot"], a.scenario)
+        true1, pred1, mask1 = load(a.root, ARM_EPOCH["finetuned"], a.scenario)
     # The whole point of overlaying is that a cell compares like with like. If the two
     # arms were scored on different datasets the panels would still draw, and would be
     # meaningless, so this is an assertion rather than a note in the docstring.
@@ -104,7 +131,9 @@ def main():
     # but its label strings are NOT used as a reference, because the run wrote them
     # without max_num_regressors and so recorded the interaction block under a
     # phantom main-effect name. Matching those would preserve the error.
-    ref = (Path(a.root) / f"ep{ARM_EPOCH['finetuned']}" / "lba" / a.scenario
+    ref = (Path(a.paired_root) / "finetuned" / "lba" / a.scenario
+           / f"lba_{a.scenario}_ft_metrics.csv") if a.paired_root else (
+          Path(a.root) / f"ep{ARM_EPOCH['finetuned']}" / "lba" / a.scenario
            / f"lba_{a.scenario}_ft_metrics.csv")
     if ref.exists():
         import pandas as pd
@@ -134,7 +163,7 @@ def main():
         if fig is None:
             logging.info(f"[skip] {name}: no active columns")
             continue
-        out = outdir / f"lba_{a.scenario}_overlay_{name}.pdf"
+        out = outdir / f"{a.prefix}_{a.scenario}_overlay_{name}.pdf"
         fig.savefig(out, bbox_inches="tight")
         plt.close(fig)
         logging.info(f"[saved] {out}")
@@ -152,7 +181,7 @@ def main():
     if delta is None:
         logging.info("[skip] delta: no active columns")
     else:
-        out = outdir / f"lba_{a.scenario}_delta_metrics.pdf"
+        out = outdir / f"{a.prefix}_{a.scenario}_delta_metrics.pdf"
         delta.savefig(out, bbox_inches="tight")
         plt.close(delta)
         logging.info(f"[saved] {out}")

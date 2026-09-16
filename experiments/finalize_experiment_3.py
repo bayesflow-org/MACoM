@@ -48,6 +48,31 @@ PPC_VARIANTS = {"lba": "free", "lba_conventional": "conventional"}
 # name the same plot the same way.
 PPC_KEEP = ("ppc", "choice_ppc", "rt_quantiles", "rt_qq", "choice_quantiles")
 
+# The STIMULUS-CODED real-data application, filed under stimcoded/ rather than over
+# ppc/. The two differ in three ways at once -- coding, checkpoint (100-epoch
+# stimulus-coded vs 2000-epoch accuracy-coded) and design (intercept + condition vs the
+# full 5-row design) -- so they are not two renderings of one result and must not share
+# a directory. Top level stays the accuracy-coded record, matching zeroshot/,
+# finetuned/, original/ and c2st/; stimcoded/ holds the stimulus-coded story end to end.
+#
+# condition_only is the design the PPC itself argued for: dropping u_2/u_3/u_1:u_2 cut
+# the nonword median-RT error from 266 ms to 18 ms and the condition quantile deviation
+# from 0.550 to 0.076, while keeping the Speed-Accuracy gap at -0.143 against an
+# observed -0.147. Comparison numbers are in the session log, not derivable from here.
+STIM_PPC_VARIANTS = {"lba_stim_cond": "free",
+                     "lba_stim_cond_conventional": "conventional"}
+STIM_PPC_DATA = Path("outputs/data/real_data/lba_stim_cond/mc/lba_mc_posteriors.npz")
+
+# The 2026-09-15 stimulus-coded zero-shot re-run. It lands in its OWN subtree rather
+# than replacing zeroshot/, because only the zero-shot arm was re-run: finetuned/ and
+# original/ are still accuracy-coded, and a tree where the arms disagree about the
+# data-generating process would make every paired comparison in it meaningless while
+# still looking assembled. Promote it over zeroshot/ once a matching finetuned arm
+# exists. Note the extra A0.5 level (the fixed_A value) and the 7th scenario.
+STIM_SRC = Path("outputs/figures/model_class/cf/paired_lba_stimcoded")
+STIM_A = "A0.5"
+STIM_EXTRA_SCENARIOS = ["ppc_design"]
+
 # arm -> (families, filename infix). zeroshot covers LBA only.
 ARMS = {"zeroshot": (["lba"], "mid1"),
         "finetuned": (["cdm", "ddm", "lba", "rdm"], "ft"),
@@ -80,10 +105,18 @@ def ppc_tidy(rest: str) -> str:
     return f"rt_{rest}" if rest.startswith("ppc_") else rest
 
 
-def plan_ppc() -> tuple[list[tuple[Path, Path]], list[Path]]:
-    """Real-data PPC jobs: (source, destination) pairs plus allowlist rejects."""
+def plan_ppc(variants=None, data=None, dest_root=None) -> tuple[list[tuple[Path, Path]], list[Path]]:
+    """Real-data PPC jobs: (source, destination) pairs plus allowlist rejects.
+
+    Parameterised so the accuracy-coded and stimulus-coded applications go through the
+    SAME allowlist and rename rules; two copies of this would be two chances for the
+    trees to disagree about what a plot is called.
+    """
+    variants = variants if variants is not None else PPC_VARIANTS
+    data = data if data is not None else PPC_DATA
+    dest_root = dest_root if dest_root is not None else FINALS / "ppc"
     jobs, skipped = [], []
-    for variant, dest_name in PPC_VARIANTS.items():
+    for variant, dest_name in variants.items():
         d = PPC_SRC / variant
         if not d.is_dir():
             continue
@@ -91,11 +124,11 @@ def plan_ppc() -> tuple[list[tuple[Path, Path]], list[Path]]:
             rest = src.name.replace("lba_mc_", "")
             if not ppc_kept(rest):
                 skipped.append(src); continue
-            jobs.append((src, FINALS / "ppc" / dest_name / ppc_tidy(rest)))
+            jobs.append((src, dest_root / dest_name / ppc_tidy(rest)))
     # One posteriors file, not one per variant: both PPCs were simulated from the
     # same draws, so duplicating it would imply two fits where there is one.
-    if PPC_DATA.exists():
-        jobs.append((PPC_DATA, FINALS / "ppc" / "posteriors.npz"))
+    if data.exists():
+        jobs.append((data, dest_root / "posteriors.npz"))
     return jobs, skipped
 
 
@@ -143,9 +176,46 @@ def plan():
     if readme.exists():
         jobs.append((readme, FINALS / "paired_validation_notes.md"))
 
+    # Both stimulus-coded arms plus their paired comparison, under one subtree. The
+    # arms spell their files differently -- zeroshot nests A<fixed_A>/<scen>/mid_rdm
+    # with infix `mid1`, finetuned is lba/<scen> with infix `ft` -- so the infix and
+    # the directory are named per arm rather than assumed to match.
+    for arm, adir, infix in (("zeroshot", STIM_SRC / "zeroshot" / STIM_A, "mid1"),
+                             ("finetuned", STIM_SRC / "finetuned" / "lba", "ft")):
+        if not adir.is_dir():
+            continue
+        for scen in SCENARIOS + STIM_EXTRA_SCENARIOS:
+            cdir = adir / scen / "mid_rdm" if arm == "zeroshot" else adir / scen
+            if not cdir.is_dir():
+                continue
+            for src in sorted(cdir.iterdir()):
+                rest = src.name.replace(f"lba_{scen}_{infix}_", "")
+                if not kept(rest):
+                    skipped.append(src)
+                    continue
+                jobs.append((src, FINALS / "stimcoded" / arm / scen / tidy(rest)))
+        # Posterior draws: what every paired downstream artifact reads.
+        pdir = (STIM_SRC / "zeroshot" / STIM_A / "predictions" if arm == "zeroshot"
+                else STIM_SRC / "finetuned" / "predictions")
+        if pdir.is_dir():
+            for src in sorted(pdir.glob("*.npz")):
+                jobs.append((src, FINALS / "stimcoded" / "predictions" / arm / src.name))
+
+    cmp_dir = STIM_SRC / "compare"
+    if cmp_dir.is_dir():
+        for src in sorted(cmp_dir.iterdir()):
+            if src.suffix in {".pdf", ".csv"}:
+                jobs.append((src, FINALS / "stimcoded" / "compare"
+                             / src.name.replace("lba_stim_", "")))
+
     ppc_jobs, ppc_skipped = plan_ppc()
     jobs += ppc_jobs
     skipped += ppc_skipped
+
+    stim_ppc, stim_skipped = plan_ppc(STIM_PPC_VARIANTS, STIM_PPC_DATA,
+                                      FINALS / "stimcoded" / "ppc")
+    jobs += stim_ppc
+    skipped += stim_skipped
     return jobs, skipped
 
 

@@ -85,7 +85,7 @@ RDM_CONDITIONS = [
 # Imported, NOT redeclared. The PPC must simulate from the same design the apply
 # script fitted; a private copy here would drift silently and the mismatch would
 # surface only as a bad-looking predictive.
-from .lba_mc_cf_apply import LBA_DESIGN_CONFIG
+from .lba_mc_cf_apply import LBA_DESIGN_CONFIG, LBA_DESIGNS
 
 CDM_CONDITIONS = [
     ("speed",       "u_1", {-0.5: "Unspeeded", 0.5: "Speeded"}),
@@ -147,6 +147,11 @@ MODEL_REGISTRY = {
         # is the start-point range rather than the mean distance travelled, so the
         # simulator would reinterpret the fitted parameter instead of erroring.
         "model_kwargs":  {"fixed_A": 0.5},
+        # Declared so collect_ppc builds a simulation context at all: that branch is
+        # gated on num_alternatives being present, and favored_idx rides along inside
+        # it. 2 is what prepare_params would default to, so this adds the per-trial
+        # favored_idx pass-through and changes nothing else.
+        "num_alternatives":    2,
         "link_fun":      lba_link_fun,
         "conditions":    LBA_CONDITIONS,
         "mf_param_key":        "intrinsic_params",
@@ -225,10 +230,14 @@ def _simulate_subject(model, link_funs, intrinsic_params, design_matrix, posteri
 
 def collect_ppc(
     model_name, variant, n_ppc_samples=None, seed=0, no_contamination=False,
-    fixed_natural=None, posteriors_path=None,
+    fixed_natural=None, posteriors_path=None, design=None,
 ):
     rng = np.random.default_rng(seed)
     cfg = MODEL_REGISTRY[model_name]
+    if design and design != "full":
+        # Copy, never mutate: MODEL_REGISTRY is module state and an in-place edit would
+        # leak into any later call in the same process.
+        cfg = {**cfg, "design_config": LBA_DESIGNS[design]}
 
     # Load real data
     subject_data, subject_ids = cfg["loader"](cfg["data_path"])
@@ -242,6 +251,18 @@ def collect_ppc(
     post_file = (Path(posteriors_path) if posteriors_path else
                  DATA_DIR / model_name / variant / f"{model_name}_{variant}_posteriors.npz")
     post_npz = np.load(post_file, allow_pickle=True)
+    # The npz records the design it was fitted with (design_name, written since
+    # 2026-09-16). A mismatch relabels the coefficient rows without changing their
+    # shape, so nothing downstream can catch it -- check here rather than trust the
+    # caller to pass matching flags to two scripts. Older files lack the field.
+    if "design_name" in post_npz.files:
+        fitted = str(post_npz["design_name"])
+        want = design or "full"
+        if fitted != want:
+            raise SystemExit(
+                f"{post_file} was fitted with design={fitted!r} but the PPC was asked "
+                f"for design={want!r}. Pass --design {fitted}.")
+        logging.info(f"design={fitted} (matches the fitted posteriors)")
     posteriors = post_npz["posteriors"]   # (n_subjects, n_samples, n_rows, n_params_or_global)
     n_samples_available = posteriors.shape[1]
 
@@ -398,7 +419,7 @@ def _cache_key(**kw):
 
 def collect_ppc_cached(model_name, variant, n_ppc_samples, seed, no_contamination,
                        cache_dir=CACHE_DIR, refresh=False, fixed_natural=None,
-                       posteriors_path=None):
+                       posteriors_path=None, design=None):
     """collect_ppc with an on-disk cache of its simulated draws.
 
     Simulating 72 subjects x 500 draws takes minutes; re-plotting the same draws
@@ -415,6 +436,10 @@ def collect_ppc_cached(model_name, variant, n_ppc_samples, seed, no_contaminatio
                      # canonical cache valid instead of invalidating all of them.
                      **({"posteriors_path": str(posteriors_path)}
                         if posteriors_path else {}),
+                     # ADDITIVE, same reason: the design changes what is simulated but
+                     # is absent from every cache written before it existed, so adding
+                     # it unconditionally would invalidate all of them.
+                     **({"design": design} if design and design != "full" else {}),
                      num_alternatives=MODEL_REGISTRY[model_name].get("num_alternatives"),
                      max_num_regressors=MAX_NUM_REGRESSORS,
                      max_num_categories=MAX_NUM_CATEGORIES,
@@ -429,7 +454,7 @@ def collect_ppc_cached(model_name, variant, n_ppc_samples, seed, no_contaminatio
     result = collect_ppc(
         model_name=model_name, variant=variant, n_ppc_samples=n_ppc_samples,
         seed=seed, no_contamination=no_contamination, fixed_natural=fixed_natural,
-        posteriors_path=posteriors_path,
+        posteriors_path=posteriors_path, design=design,
     )
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("wb") as fh:
@@ -1658,6 +1683,9 @@ def parse_args():
     p.add_argument("--model", type=str, required=True,
                    choices=["ddm", "rdm", "cdm", "lba"])
     p.add_argument("--variant", type=str, default="mf", choices=["mf", "mc"])
+    p.add_argument("--design", type=str, default="full", choices=sorted(LBA_DESIGNS),
+                   help="LBA only. MUST match the --design the posteriors were fitted "
+                        "with: they record it as design_name, which this checks.")
     p.add_argument("--n_ppc_samples", type=int, default=None,
                    help="Posterior draws to simulate from. Default: all draws stored in "
                         "the npz. Pass a smaller number only for a deliberate quick look — "
@@ -1740,6 +1768,7 @@ def main():
             no_contamination=args.no_contamination,
             fixed_natural=fixed_natural,
             posteriors_path=args.posteriors,
+            design=args.design,
         )
     else:
         obs_pooled, ppc_pooled, conditions, obs_ch, ppc_ch = collect_ppc_cached(
@@ -1752,6 +1781,7 @@ def main():
             refresh=args.refresh_cache,
             fixed_natural=fixed_natural,
             posteriors_path=args.posteriors,
+            design=args.design,
         )
     plot_ppc(obs_pooled, ppc_pooled, conditions, args.model, args.variant, outdir,
              draw_lines=not args.no_ppc_lines, max_lines=args.ppc_max_lines,

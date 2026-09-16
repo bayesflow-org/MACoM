@@ -44,7 +44,7 @@ from cogformer.simulator.benchmarks.ssms.priors import (
 from cogformer.simulator.benchmarks.ssms.link_funs import (
     ddm_link_fun, rdm_link_fun, cdm_link_fun, lba_link_fun)
 
-from ..configs import (MODELS as _BASE_MODELS, LBA_CONFIG,
+from ..configs import (MODELS as _BASE_MODELS, LBA_CONFIG, LBA_PPC_DESIGN_CONFIG,
                        GLOBAL_PARAMS, GLOBAL_VARIABLE_NAMES)
 from ..utils import add_global_params, build_encoder_input_dim, chunked_sample
 from .data_utils import (
@@ -59,13 +59,45 @@ from .data_utils import (
 # Only the condition x frequency interaction is carried: it is the theoretically
 # interesting one (does the speed-accuracy tradeoff change with evidence quality), and
 # every added interaction costs block_width**2 = 9 design columns.
+# Derived from the canonical table in experiments/configs.py rather than restated, so
+# the simulated val scenario ("ppc_design") and this real-data fit cannot drift -- the
+# same reason ppc.py imports this name instead of declaring its own copy. configs.py
+# defines it without pi (module convention); the real-data application DOES estimate
+# contamination, so pi joins the intercept row here, exactly as add_global_params does
+# for the simulated configs.
 LBA_DESIGN_CONFIG = {
-    "1":       ["v", "v_diff", "a", "tau", "s_v", "s_tau", "pi"],
-    "u_1":     ["v", "v_diff", "a", "tau"],   # condition   (binary +/-0.5)
-    "u_2":     ["v", "v_diff", "a", "tau"],   # freq_band   (3-level categorical)
-    "u_3":     ["v", "v_diff", "a", "tau"],   # lexicality  (binary +/-0.5)
-    "u_1:u_2": ["v", "v_diff", "a", "tau"],
+    k: (list(v) + GLOBAL_PARAMS if k == "1" else list(v))
+    for k, v in LBA_PPC_DESIGN_CONFIG.items()
 }
+
+# Every parameter on the intercept row, no regressors. A DIAGNOSTIC alternative to the
+# full design, not a replacement: it asks what the fit looks like when the model is not
+# asked to track condition, frequency or their interaction.
+#
+# Under STIMULUS coding this does NOT discard the lexicality manipulation. Which
+# accumulator the stimulus favours is per-trial CONTEXT (favored_idx), not a design
+# column, so word/nonword structure still reaches both encoder and simulator; what is
+# dropped is how the drift advantage VARIES with frequency band and speed instruction.
+# Under accuracy coding the same change would have removed lexicality entirely.
+LBA_DESIGN_CONFIG_INTERCEPT = {"1": list(LBA_DESIGN_CONFIG["1"])}
+
+# Intercept plus the speed/accuracy contrast, nothing else. The middle ground between
+# the two above, and the one the PPC argues for: intercept_only fits RT better than the
+# full design everywhere EXCEPT by condition, where it is structurally blind -- it
+# predicts a Speed-Accuracy median gap of -0.000 against an observed -0.147. u_1 is what
+# carries that gap.
+#
+# Dropping u_3 (lexicality) is principled rather than merely expedient under stimulus
+# coding: which accumulator the stimulus favours already reaches the model as per-trial
+# context, so u_3 only adds a second, collinear route to the same manipulation.
+LBA_DESIGN_CONFIG_CONDITION = {
+    "1": list(LBA_DESIGN_CONFIG["1"]),
+    "u_1": list(LBA_DESIGN_CONFIG["u_1"]),
+}
+
+LBA_DESIGNS = {"full": LBA_DESIGN_CONFIG,
+               "intercept_only": LBA_DESIGN_CONFIG_INTERCEPT,
+               "condition_only": LBA_DESIGN_CONFIG_CONDITION}
 
 
 def parse_args():
@@ -73,6 +105,11 @@ def parse_args():
     p.add_argument("--data", type=str, default="./data/data_application_lba.csv")
     p.add_argument("--checkpoint", type=str, required=True)
     p.add_argument("--outdir", type=str, default="./outputs/data/real_data/lba/mc/")
+    p.add_argument("--design", type=str, default="full", choices=sorted(LBA_DESIGNS),
+                   help="Which design to fit. ppc.py takes the same flag and MUST be "
+                        "given the matching value: the posteriors carry no record of "
+                        "which design produced them, so a mismatch reindexes the "
+                        "coefficient rows silently.")
     p.add_argument("--lba_fixed_A", type=float, default=0.5,
                    help="MUST match the finetuned checkpoint (0.5). Changes what `a` "
                         "means rather than erroring if wrong.")
@@ -199,8 +236,15 @@ def main():
 
     adapter = Adapter()
 
+    # The mask decides which coefficient cells are ACTIVE, so it has to be built from
+    # the same design as the design matrix. Built from the full config while the matrix
+    # was intercept-only, it would mark regressor rows active with no columns behind
+    # them -- a silent reindexing, not an error.
+    design_config = LBA_DESIGNS[args.design]
+    logging.info(f"design={args.design}: rows {list(design_config)}")
+
     local_mask_flat = build_real_param_mask(
-        design_config=LBA_DESIGN_CONFIG,
+        design_config=design_config,
         intrinsic_params=lba_local_params,
         max_num_regressors=args.max_num_regressors,
         max_num_categories=args.max_num_categories,
@@ -224,7 +268,7 @@ def main():
                       "u_1:u_2": d["u_1:u_2"]}
         dm = build_real_design_matrix(
             regressors=regressors,
-            design_config=LBA_DESIGN_CONFIG,
+            design_config=design_config,
             max_num_regressors=args.max_num_regressors,
             max_num_categories=args.max_num_categories,
             keep_intercept=args.keep_intercept,
@@ -236,9 +280,13 @@ def main():
             n_params=n_global_params,
             max_num_regressors=args.max_num_regressors,
             max_num_categories=args.max_num_categories,
-            design_config=LBA_DESIGN_CONFIG,
+            design_config=design_config,
             num_alternatives=2,
             model_id=lba_model_id,
+            # Without this the Adapter fills the channel with zeros and raises
+            # nothing, telling the encoder accumulator 0 is favoured on every trial
+            # while the stimulus-coded choices say otherwise.
+            favored_idx=d["favored_idx"],
         )
         adapted = adapter.adapt(batch, device=device)
 
@@ -265,7 +313,10 @@ def main():
         lba_intrinsic_params=np.array(lba_local_params),
         lba_variable_names=np.array(_LBA_WITH_PI["variable_names"]),
         lba_local_to_global=np.array(model_class.local_to_global["LBA"]),
-        design_config_keys=np.array(list(LBA_DESIGN_CONFIG.keys())),
+        # The design ACTUALLY fitted, not the full one: this field is the only record
+        # the npz carries of how its coefficient rows are laid out.
+        design_config_keys=np.array(list(design_config.keys())),
+        design_name=np.array(args.design),
         lba_fixed_A=np.float32(args.lba_fixed_A),
     )
     logging.info(f"[saved] {out_path}  shape={posteriors.shape}")

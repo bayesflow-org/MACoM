@@ -107,6 +107,13 @@ def parse_args():
     p.add_argument("--dropout", type=float, default=0.0)
     p.add_argument("--layer_dropout", type=float, default=0.0)
     p.add_argument("--model_embed_dim", type=int, default=8)
+    p.add_argument("--families", nargs="+", default=None,
+                   choices=["LBA", "DDM", "RDM", "CDM"],
+                   help="Restrict the validated families (default: all four). The "
+                        "three trained families are only needed for the FORGETTING "
+                        "comparison against the original-checkpoint arm; a run that "
+                        "only asks what finetuning did to LBA itself pays 25 cases "
+                        "for 7 without it.")
     p.add_argument("--time_embedding_dim", type=int, default=32)
     p.add_argument("--pos_embedding_dim", type=int, default=32)
     p.add_argument("--self_attn_padding_mask", action=argparse.BooleanOptionalAction,
@@ -222,6 +229,10 @@ def main():
         "RDM": _MODELS_WITH_PI["rdm"],
         "CDM": _MODELS_WITH_PI["cdm"],
     }
+    if args.families:
+        family_configs = {k: v for k, v in family_configs.items()
+                          if k in set(args.families)}
+        logging.info(f"families restricted to {sorted(family_configs)}")
 
     for model_name, model_cfg in family_configs.items():
         mf = model_families[model_name]
