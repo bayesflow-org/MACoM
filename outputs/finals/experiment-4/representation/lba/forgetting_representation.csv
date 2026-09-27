@@ -1,5 +1,0 @@
-family,trained_on_by_ft,rsa_orig_vs_ft,cka_orig_vs_ft,noise_ceiling_rsa,noise_ceiling_cka
-lba,True,0.9819,0.9863,0.9768,0.9801
-ddm,False,0.9924,0.9918,0.9762,0.9765
-rdm,False,0.9914,0.9922,0.9584,0.9611
-cdm,False,0.9956,0.9953,0.9786,0.9788
