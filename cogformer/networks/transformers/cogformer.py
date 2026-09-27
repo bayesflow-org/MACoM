@@ -8,6 +8,9 @@ from tqdm.auto import tqdm
 
 from cogformer.networks.transformers.encoder import Encoder
 from cogformer.networks.transformers.decoder import Decoder
+from cogformer.networks.transformers.multihead_attention_block import MultiheadAttentionBlock
+from cogformer.networks.transformers.pooling_by_multihead_attention import PoolingByMultiheadAttention
+from cogformer.networks.mlp.ffn import FFN
 from cogformer.utils.ode_solver import ode_step
 
 
@@ -45,8 +48,19 @@ class CogFormer(nn.Module):
             self_attn_padding_mask: bool = True,
             output_conditioning: str = "linear",
             block_conditioning: str = "film",
+            gated_residual: bool = False,
+            pre_pool_ffn: bool = False,
+            weight_init: str = "default",
     ):
         super().__init__()
+        # gated_residual / pre_pool_ffn / weight_init="orthogonal" port BayesFlow's
+        # 2.0.13 attention defaults (zero-init residual scales, rFF before PMA pooling,
+        # orthogonal kernels). All default OFF, i.e. the architecture every existing
+        # checkpoint was trained with. The first two add parameters, so loading a
+        # checkpoint with the wrong setting fails in load_state_dict rather than
+        # silently; weight_init only affects a fresh model and is invisible at load.
+        assert weight_init in ("default", "orthogonal"), \
+            f"weight_init must be 'default' or 'orthogonal', got {weight_init!r}"
 
         self.model_embedding = (
             nn.Embedding(num_models, model_embed_dim) if num_models is not None else None
@@ -66,6 +80,8 @@ class CogFormer(nn.Module):
             layer_design=encoder_layer_design,
             layer_kwargs=encoder_layer_kwargs,
             expansion_factor=ffn_expansion_factor,
+            gated_residual=gated_residual,
+            pre_pool_ffn=pre_pool_ffn,
         )
 
         self.decoder = Decoder(
@@ -90,7 +106,36 @@ class CogFormer(nn.Module):
             self_attn_padding_mask=self_attn_padding_mask,
             output_conditioning=output_conditioning,
             block_conditioning=block_conditioning,
+            gated_residual=gated_residual,
         )
+
+        if weight_init == "orthogonal":
+            self._orthogonal_init()
+
+    def _orthogonal_init(self):
+        """Orthogonal kernels in every attention and FFN projection, and the PMA seeds.
+
+        Matches BayesFlow's kernel_initializer="orthogonal" scope: attention and FFN
+        weights only. Embeddings, input/output projections and FiLM layers keep their
+        defaults. nn.MultiheadAttention packs Q/K/V into one (3E, E) in_proj_weight
+        when kdim == embed_dim; each E x E slice is initialised separately so Q, K and
+        V are each orthogonal, as BayesFlow's three separate Dense layers are.
+        """
+        for m in self.modules():
+            if isinstance(m, MultiheadAttentionBlock):
+                a = m.attn
+                if a.in_proj_weight is not None:
+                    for w in a.in_proj_weight.data.chunk(3, dim=0):
+                        nn.init.orthogonal_(w)
+                else:
+                    for w in (a.q_proj_weight, a.k_proj_weight, a.v_proj_weight):
+                        nn.init.orthogonal_(w)
+                nn.init.orthogonal_(a.out_proj.weight)
+            elif isinstance(m, FFN):
+                for lin in (m.gate_proj, m.up_proj, m.down_proj):
+                    nn.init.orthogonal_(lin.weight)
+            elif isinstance(m, PoolingByMultiheadAttention):
+                nn.init.orthogonal_(m.seed.data[0])
 
     def forward(self, params, input_data, param_indices, regressor_indices, params_mask=None, model_ids=None):
 

@@ -30,7 +30,7 @@ dependencies = [
 # aDDM arms are run at that branch's retuned network defaults. Pinned to a
 # commit rather than the branch name so `uv sync` cannot silently move it.
 [tool.uv.sources]
-bayesflow = { git = "https://github.com/bayesflow-org/bayesflow.git", rev = "6842dcee3c0afaa319a0b578617bf5740061bc35" }
+bayesflow = { git = "https://github.com/bayesflow-org/bayesflow.git", rev = "391acaf1e15a487e265e96bb06e8e837328cae8b" }
 
 #[project.optional-dependencies]
 #dev = [

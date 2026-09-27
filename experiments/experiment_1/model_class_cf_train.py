@@ -416,6 +416,15 @@ def parse_args():
                              "Pass --no-self_attn_padding_mask to drop it: ~1.48x faster/step "
                              "(FlashAttention fires) with near-neutral recovery per the A/B ablation. "
                              "Finetune/inference scripts must be run with the matching flag.")
+    # BayesFlow 2.0.13 attention defaults, off by default (see CogFormer.__init__).
+    # Only this script exposes them. Every other script builds CogFormer with the class
+    # defaults, so a checkpoint trained with --gated_residual or --pre_pool_ffn fails
+    # loudly in load_state_dict elsewhere until those defaults are flipped.
+    parser.add_argument("--gated_residual", action=argparse.BooleanOptionalAction, default=False,
+                        help="Zero-initialised learnable scale on every attention/FFN residual branch.")
+    parser.add_argument("--pre_pool_ffn", action=argparse.BooleanOptionalAction, default=False,
+                        help="Gated row-wise FFN on the encoder tokens before PMA pooling.")
+    parser.add_argument("--weight_init", type=str, default="default", choices=["default", "orthogonal"])
     parser.add_argument("--encoder_embed_dim", type=int, default=64)
     parser.add_argument("--ffn_expansion_factor", type=float, default=4.0)
     parser.add_argument("--seed_dim", type=int, default=128)
@@ -564,6 +573,9 @@ if __name__ == "__main__":
         "decoder_layer_design": "mixed_attention",
         "decoder_layer_kwargs": {"mab_first": True},
         "self_attn_padding_mask": args.self_attn_padding_mask,
+        "gated_residual": args.gated_residual,
+        "pre_pool_ffn": args.pre_pool_ffn,
+        "weight_init": args.weight_init,
     }
 
     logging.info(

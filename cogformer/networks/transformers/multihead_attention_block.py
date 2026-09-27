@@ -30,6 +30,10 @@ class MultiheadAttentionBlock(nn.Module):
         expansion_factor: FFN intermediate width multiplier (before 2/3 GLU scaling)
         glu_variant:      gated activation for the FFN sublayer; one of
                           "swiglu", "geglu", "reglu", "liglu"
+        gate_attention:   scale the attention branch by a learnable scalar that
+                          starts at 0 (ReZero-style), so the block starts as the
+                          identity on that branch. Mirrors BayesFlow >= 2.0.13.
+        gate_ffn:         same, for the FFN branch.
     """
     def __init__(
         self,
@@ -40,6 +44,8 @@ class MultiheadAttentionBlock(nn.Module):
         dropout: float = 0.0,
         expansion_factor: float = 4.0,
         glu_variant: str = "swiglu",
+        gate_attention: bool = False,
+        gate_ffn: bool = False,
     ):
         super().__init__()
 
@@ -70,6 +76,9 @@ class MultiheadAttentionBlock(nn.Module):
             dropout=dropout,
         )
 
+        self.attn_scale = nn.Parameter(torch.zeros(())) if gate_attention else None
+        self.ffn_scale = nn.Parameter(torch.zeros(())) if gate_ffn else None
+
     def forward(self,
         query: torch.Tensor,
         key: torch.Tensor,
@@ -92,9 +101,14 @@ class MultiheadAttentionBlock(nn.Module):
             key_padding_mask=key_padding_mask,
             need_weights=False,
         )
+        if self.attn_scale is not None:
+            attn_out = self.attn_scale * attn_out
         out = query + attn_out
 
         normed = self.norm_ffn(out) if self.norm_ffn is not None else out
-        out = out + self.ffn(normed)
+        ffn_out = self.ffn(normed)
+        if self.ffn_scale is not None:
+            ffn_out = self.ffn_scale * ffn_out
+        out = out + ffn_out
 
         return out

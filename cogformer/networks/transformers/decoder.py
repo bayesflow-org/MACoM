@@ -38,6 +38,7 @@ class Decoder(nn.Module):
             self_attn_padding_mask: bool = True,
             output_conditioning: str = "linear",
             block_conditioning: str = "film",
+            gated_residual: bool = False,
     ):
         super().__init__()
         assert num_layers >= 1, "num_layers must be >= 1"
@@ -83,6 +84,7 @@ class Decoder(nn.Module):
                         layer_norm=layer_norm,
                         dropout=dropout,
                         expansion_factor=expansion_factor,
+                        gated_residual=gated_residual,
                         **layer_kwargs
                     )
                 case "mixed_attention":
@@ -94,6 +96,7 @@ class Decoder(nn.Module):
                         layer_norm=layer_norm,
                         dropout=dropout,
                         expansion_factor=expansion_factor,
+                        gated_residual=gated_residual,
                         **layer_kwargs
                     )
                 case "cross_attention":
@@ -105,6 +108,7 @@ class Decoder(nn.Module):
                         layer_norm=layer_norm,
                         dropout=dropout,
                         expansion_factor=expansion_factor,
+                        gated_residual=gated_residual,
                     )
                 case "custom_attention":
                     self.layers = custom_attention_layers(
@@ -115,6 +119,7 @@ class Decoder(nn.Module):
                         layer_norm=layer_norm,
                         dropout=dropout,
                         expansion_factor=expansion_factor,
+                        gated_residual=gated_residual,
                         **layer_kwargs
                     )
         else:
@@ -126,6 +131,7 @@ class Decoder(nn.Module):
                 layer_norm=layer_norm,
                 dropout=dropout,
                 expansion_factor=expansion_factor,
+                gated_residual=gated_residual,
                 **layer_kwargs
             )
 

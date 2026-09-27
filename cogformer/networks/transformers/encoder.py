@@ -25,6 +25,8 @@ class Encoder(nn.Module):
         layer_design: str = None,
         layer_kwargs: dict = None,
         expansion_factor: float = 4.0,
+        gated_residual: bool = False,
+        pre_pool_ffn: bool = False,
     ):
         super().__init__()
         assert num_layers >= 1, "num_layers must be >= 1"
@@ -42,6 +44,7 @@ class Encoder(nn.Module):
                         layer_norm=layer_norm,
                         dropout=dropout,
                         expansion_factor=expansion_factor,
+                        gated_residual=gated_residual,
                         **layer_kwargs
                     )
                 case "mixed_attention":
@@ -53,6 +56,7 @@ class Encoder(nn.Module):
                         layer_norm=layer_norm,
                         dropout=dropout,
                         expansion_factor=expansion_factor,
+                        gated_residual=gated_residual,
                         **layer_kwargs
                     )
                 case "custom_attention":
@@ -64,6 +68,7 @@ class Encoder(nn.Module):
                         layer_norm=layer_norm,
                         dropout=dropout,
                         expansion_factor=expansion_factor,
+                        gated_residual=gated_residual,
                         **layer_kwargs
                     )
         else:
@@ -74,6 +79,7 @@ class Encoder(nn.Module):
                     layer_norm=layer_norm,
                     dropout=dropout,
                     expansion_factor=expansion_factor,
+                    gated_residual=gated_residual,
                 ) for _ in range(num_layers)]
             )
 
@@ -87,6 +93,8 @@ class Encoder(nn.Module):
             layer_norm=layer_norm,
             dropout=dropout,
             expansion_factor=expansion_factor,
+            pre_pool_ffn=pre_pool_ffn,
+            gated_residual=gated_residual,
         )
 
     def forward(self, x, attn_mask=None):

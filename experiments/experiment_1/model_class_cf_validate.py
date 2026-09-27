@@ -159,6 +159,10 @@ def parse_args():
                    help="Must match the flag the checkpoint was trained with. Use "
                         "--no-self_attn_padding_mask for checkpoints trained mask-off.")
 
+    # Must match the training run; see model_class_cf_train. The first two add
+    # parameters, so a mismatch fails in load_state_dict.
+    p.add_argument("--gated_residual", action=argparse.BooleanOptionalAction, default=False)
+    p.add_argument("--pre_pool_ffn", action=argparse.BooleanOptionalAction, default=False)
     add_seed_arg(p)
     return p.parse_args()
 
@@ -419,6 +423,8 @@ def main():
         decoder_layer_design="mixed_attention",
         decoder_layer_kwargs={"mab_first": True},
         self_attn_padding_mask=args.self_attn_padding_mask,  # must match training run
+        gated_residual=args.gated_residual,
+        pre_pool_ffn=args.pre_pool_ffn,
     ).to(device)
 
     ckpt_path = Path(args.checkpoint)

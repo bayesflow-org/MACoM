@@ -123,7 +123,30 @@ class ModelFamilyBF(bf.simulators.Simulator):
     _active = None
     slice_active_target = True   # set False to reproduce the pre-2026-09-10 target
 
+    # PER-PROCESS RESEED. keras' PyDataset with use_multiprocessing FORKS a fresh
+    # worker pool every epoch, and each fork inherits the parent's numpy RNG state --
+    # which never advances, because the parent does not simulate. Measured 2026-09-27
+    # (4 workers x 6 batches x 3 epochs): every worker emitted the SAME batch
+    # sequence, and every epoch replayed the previous one exactly. At 20 workers x 100
+    # batches x 64 the baseline therefore trained on ~5 distinct batches (~320
+    # datasets) for its whole run. That is the overconfidence -- calibration error
+    # 0.4, contraction 0.997, getting WORSE with epochs -- that the comments below
+    # attribute to training length: it was overfitting a tiny fixed set. The one
+    # checkpoint trained before the worker pool existed (ddm/intercept_only,
+    # 2026-09-02) validates at calibration error ~0.03.
+    #
+    # CogFormer's own loader (experiments.utils.make_sim_loader) is NOT affected:
+    # spawn + persistent workers, verified 16/16 distinct batches.
+    _rng_pid = None
+
+    def _reseed_if_forked(self):
+        pid = os.getpid()
+        if self._rng_pid != pid:
+            self._rng_pid = pid
+            np.random.seed(int.from_bytes(os.urandom(4), "little"))
+
     def sample(self, batch_size, num_obs=500, **kwargs):
+        self._reseed_if_forked()
         if isinstance(batch_size, tuple):
             batch_size = batch_size[0]
 
