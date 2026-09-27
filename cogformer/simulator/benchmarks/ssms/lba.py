@@ -226,9 +226,9 @@ class LBA(Model):
         context = {"num_alternatives": num_alternatives}
         # Drawn per trial for EVERY K including 2. A constant favoured accumulator is
         # accuracy coding; a varying one is stimulus coding, and the encoder already
-        # sees per-trial favored_idx from RDM (build_random_context draws K in 2..4, so
-        # ~2/3 of RDM batches vary it), which is what makes this in-distribution for the
-        # model-class checkpoint rather than a new kind of input.
+        # sees per-trial favored_idx from RDM (which varies it for every K, including
+        # 2), which is what makes this in-distribution for the model-class checkpoint
+        # rather than a new kind of input.
         context["favored_idx"] = np.random.randint(0, num_alternatives, size=num_obs)
         return context
 

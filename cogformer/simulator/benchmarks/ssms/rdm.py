@@ -170,15 +170,10 @@ class RDM(Model):
     This implementation uses response coding where drift rates are specified
     directly for each accumulator without reference to stimulus correctness.
 
-    For 2 alternatives:
-        - v: base drift rate for accumulator 0
-        - v_diff: drift difference (accumulator 1 gets v + v_diff)
-        - When v_diff > 0, response 1 is favored
-        - When v_diff < 0, response 0 is favored
-
-    For K > 2 alternatives (requires context):
+    For any K >= 2 alternatives (stimulus coding):
         - v: base drift rate applied to all accumulators
         - v_diff: added to accumulator specified by context['favored_idx']
+          (required for K > 2; defaults to accumulator 1 for K = 2)
     """
 
     def __init__(self, dt: float = 5e-4, max_steps: int = 20000, decay: float = 0.0, pi: float = 0.0):
@@ -208,9 +203,8 @@ class RDM(Model):
 
         context : dict, optional
             num_alternatives : number of accumulators (default: 2)
-            favored_idx : which accumulator gets the boost (default: 1 for 2-alt)
-                For K > 2 alternatives, this specifies which accumulator
-                receives v + v_diff while others receive v.
+            favored_idx : which accumulator receives v + v_diff on each trial while
+                the others receive v. Required for K > 2; defaults to 1 for 2-alt.
         """
         context = context or {}
 
@@ -227,9 +221,21 @@ class RDM(Model):
         pi     = as_1d(params.get("pi", self.pi), num_obs)
 
         if num_alternatives == 2:
+            # STIMULUS CODING, matching LBA: v_diff goes to the accumulator named per
+            # trial by context['favored_idx']. This branch used to hardcode
+            # `v[:, 1] = v_base + v_diff` (accumulator 1 favoured on every trial), i.e.
+            # accuracy coding. Accuracy coding is still reachable by passing
+            # favored_idx = ones, which is also the default when none is given.
+            favored = np.asarray(
+                context.get("favored_idx", np.ones(num_obs, dtype=np.int32))
+            ).reshape(-1)
+            if favored.shape[0] != num_obs:
+                raise ValueError(
+                    f"favored_idx length {favored.shape[0]} != num_obs {num_obs}"
+                )
             v = np.zeros((num_obs, 2), dtype=np.float64)
-            v[:, 0] = v_base
-            v[:, 1] = v_base + v_diff
+            v[:, :] = v_base[:, None]
+            v[np.arange(num_obs), favored.astype(np.int64)] += v_diff
         else:
             if "favored_idx" not in context:
                 raise ValueError(
@@ -253,17 +259,14 @@ class RDM(Model):
     def build_context(num_obs: int, num_alternatives: int = 2) -> dict[str, np.ndarray]:
         """Build context for RDM simulation."""
         context = {"num_alternatives": num_alternatives}
-        if num_alternatives == 2:
-            # For 2-alt the simulation always boosts accumulator 1, so record that
-            # explicitly so the encoder can see it as a per-trial feature.
-            context["favored_idx"] = np.ones(num_obs, dtype=np.int32)
-        else:
-            context["favored_idx"] = np.random.randint(0, num_alternatives, size=num_obs)
+        # Drawn per trial for EVERY K including 2 (stimulus coding), as in LBA. A
+        # constant favoured accumulator would be accuracy coding.
+        context["favored_idx"] = np.random.randint(0, num_alternatives, size=num_obs)
         return context
 
     @staticmethod
     def build_default_context(num_obs: int) -> dict[str, np.ndarray]:
-        """Build default context (2 alternatives, accumulator 1 always favored)."""
+        """Build default context (2 alternatives, favoured accumulator drawn per trial)."""
         return RDM.build_context(num_obs, num_alternatives=2)
 
     @staticmethod
