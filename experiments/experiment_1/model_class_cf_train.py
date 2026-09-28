@@ -1,11 +1,13 @@
 import os
 import torch
 import torch.distributed as dist
+from datetime import timedelta
 try:
     import wandb
 except Exception:
     wandb = None
 import logging
+import time
 import argparse
 from pathlib import Path
 from tqdm.auto import tqdm
@@ -33,7 +35,7 @@ from ..utils import (add_global_params, build_encoder_input_dim, chunked_sample,
                      infer_free_fixed_intrinsics, ModelClassDataset, make_sim_loader, train_step,
                      add_architecture_args, add_training_args, recommend_sim_workers,
                      add_sim_backend_arg, apply_sim_backend, add_decoder_groups_arg,
-                     compile_cogformer,
+                     compile_cogformer, init_wandb, wandb_run_id_from,
                      resolve_val_scenario)
 from ..timing import RunTimer
 
@@ -188,26 +190,39 @@ class CogFormerTrainer:
         saved_scheduler_state = None
         if resume and full_ckpt_path.exists():
             ckpt = torch.load(full_ckpt_path, map_location=device)
+            # Checkpoints hold the UNWRAPPED state dict (saved via .module), so load into
+            # the unwrapped model: under DDP the wrapper expects "module."-prefixed keys.
+            target = getattr(self.net, "module", self.net)
             if isinstance(ckpt, dict) and "state_dict" in ckpt:
-                self.net.load_state_dict(ckpt["state_dict"])
+                target.load_state_dict(ckpt["state_dict"])
                 start_epoch = ckpt.get("epoch", resume_start_epoch)
                 saved_optimizer_state = ckpt.get("optimizer_state")
                 saved_scheduler_state = ckpt.get("scheduler_state")
             else:
                 # old format: raw state_dict OrderedDict
-                self.net.load_state_dict(ckpt)
+                target.load_state_dict(ckpt)
                 start_epoch = resume_start_epoch
             logging.info(f"[rank {self.rank}] resumed from epoch {start_epoch}, checkpoint: {full_ckpt_path}")
 
         # ── optimizer + scheduler (LR resumes at the right point) ─────────────
+        # Invariant of a fresh run: while training epoch e, scheduler.last_epoch == e and
+        # lr == lr_e. A checkpoint is written at the END of epoch e, before that epoch's
+        # scheduler.step(), so it holds (last_epoch = e, lr_e) with "epoch" = e + 1.
+        # Resume therefore loads the optimizer FIRST (it carries initial_lr and lr_e),
+        # builds a fresh scheduler, loads its state, and takes the one missing step.
+        # (Constructing it with last_epoch=start_epoch-1 before loading the optimizer, as
+        # this used to, raises KeyError 'initial_lr' on current torch: resume never worked.)
         optimizer = AdamW(self.net.parameters(), lr=train_config["learning_rate"], fused=True)
-        scheduler = CosineAnnealingLR(
-            optimizer, T_max=train_config["epochs"], last_epoch=start_epoch - 1
-        )
         if saved_optimizer_state is not None:
             optimizer.load_state_dict(saved_optimizer_state)
+        scheduler = CosineAnnealingLR(optimizer, T_max=train_config["epochs"])
         if saved_scheduler_state is not None:
             scheduler.load_state_dict(saved_scheduler_state)
+            scheduler.step()
+        else:
+            # Old-format checkpoint (weights only): replay the schedule from lr_0.
+            for _ in range(start_epoch):
+                scheduler.step()
 
         global_step = start_epoch * train_config["steps_per_epoch"]
 
@@ -221,6 +236,7 @@ class CogFormerTrainer:
                 miniters=100,
                 disable=self.rank != 0,
             )
+            epoch_t0 = time.time()
             for _ in range(train_config["steps_per_epoch"]):
                 adapted_cpu = next(loader_iter)
                 adapted = {
@@ -237,6 +253,12 @@ class CogFormerTrainer:
                 pbar.set_postfix(loss=f"{loss:.4f}", lr=f"{current_lr:.2e}")
                 pbar.update(1)
 
+            if self.use_wandb:
+                epoch_s = time.time() - epoch_t0
+                wandb.log({"perf/epoch_s": epoch_s,
+                           "perf/steps_per_s": train_config["steps_per_epoch"] / epoch_s},
+                          step=global_step - 1)
+
             is_early_val = self.early_val_epoch is not None and (epoch + 1) == self.early_val_epoch
             if (epoch + 1) % self.val_epoch_interval == 0 or is_early_val:
                 if self.is_distributed:
@@ -249,6 +271,7 @@ class CogFormerTrainer:
                         "epoch": epoch + 1,
                         "optimizer_state": optimizer.state_dict(),
                         "scheduler_state": scheduler.state_dict(),
+                        "wandb_run_id": wandb.run.id if (self.use_wandb and wandb.run) else None,
                     }, full_ckpt_path)
                     self.val_step(val_config, global_step, fig_path)
                 if self.is_distributed:
@@ -267,6 +290,7 @@ class CogFormerTrainer:
                 "epoch": train_config["epochs"],
                 "optimizer_state": optimizer.state_dict(),
                 "scheduler_state": scheduler.state_dict(),
+                "wandb_run_id": wandb.run.id if (self.use_wandb and wandb.run) else None,
             }, full_ckpt_path)
             logging.info(f"[saved] {full_ckpt_path}")
 
@@ -298,7 +322,7 @@ class CogFormerTrainer:
             batch_size = config["batch_size"]
 
             pred_set = chunked_sample(
-                self.net, adapted,
+                getattr(self.net, "module", self.net), adapted,   # DDP wrapper has no .sample()
                 num_samples=config["fm_num_samples"],
                 steps=config["fm_sample_steps"],
                 solver=config.get("fm_solver", "euler"),
@@ -496,7 +520,9 @@ if __name__ == "__main__":
     local_rank = int(os.environ.get("LOCAL_RANK", -1))
     is_distributed = local_rank >= 0
     if is_distributed:
-        dist.init_process_group("nccl")
+        # Rank 0 validates + checkpoints while the other ranks wait at a barrier; the NCCL
+        # default (10 min) is shorter than a validation pass can take.
+        dist.init_process_group("nccl", timeout=timedelta(hours=3))
         world_size = dist.get_world_size()
         rank = dist.get_rank()
         device = torch.device(f"cuda:{local_rank}")
@@ -640,13 +666,6 @@ if __name__ == "__main__":
         cogformer = DDP(cogformer, device_ids=[local_rank])
 
     use_wandb = args.use_wandb and (rank == 0)
-    if use_wandb:
-        wandb.init(
-            project="cogformer-model-class",
-            tags=["CogFormer", "ModelClass", "DDM", "RDM", "CDM"],
-            config={**train_config, "cogformer": cogformer_config,
-                    "total_batch_size": args.train_batch_size, "world_size": world_size},
-        )
 
     # checkpoint name encodes total batch size, not per-process local_batch
     checkpoint_path = (
@@ -667,6 +686,18 @@ if __name__ == "__main__":
         f"_h{cogformer_config['decoder_num_heads']}"
         f"_p{cogformer_config['proj_dim']}"
     )
+
+    if use_wandb:
+        init_wandb(
+            project="cogformer-model-class",
+            name=(f"mc_r{max_num_regressors}c{max_num_categories}_b{args.train_batch_size}"
+                  f"_e{args.epochs}" + (f"_{world_size}gpu" if world_size > 1 else "")),
+            tags=["CogFormer", "ModelClass", "DDM", "RDM", "CDM"],
+            config={**train_config, "cogformer": cogformer_config,
+                    "total_batch_size": args.train_batch_size, "world_size": world_size,
+                    "checkpoint": str(Path(CHECKPOINT_DIR) / checkpoint_path)},
+            run_id=wandb_run_id_from(Path(CHECKPOINT_DIR) / checkpoint_path) if args.resume else None,
+        )
 
     val_scenario_tags = (
         {t.strip() for t in args.val_scenario_tags.split(",")}

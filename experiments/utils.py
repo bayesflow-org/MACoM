@@ -309,6 +309,48 @@ def plan_token_groups(adapted: dict, num_groups: int) -> dict:
     return out
 
 
+def _git_commit() -> str:
+    import subprocess
+    try:
+        sha = subprocess.run(["git", "rev-parse", "--short", "HEAD"], capture_output=True,
+                             text=True, check=True).stdout.strip()
+        dirty = subprocess.run(["git", "diff", "--quiet", "HEAD"]).returncode != 0
+        return sha + ("-dirty" if dirty else "")
+    except Exception:
+        return "unknown"
+
+
+def init_wandb(project: str, name: str, config: dict, tags: list[str],
+               run_id: str | None = None):
+    """Start (or, given ``run_id``, continue) a wandb run for a CogFormer training.
+
+    run_id comes from the checkpoint being resumed (trainers store ``wandb.run.id`` in
+    every checkpoint), so an interrupted training keeps ONE continuous run instead of a
+    new one per restart -- while a fresh training can never attach to an old run.
+    Records what the numbers depend on beyond the hyperparameters: simulation backend,
+    host and git commit (``-dirty`` if the tree had uncommitted changes).
+    """
+    import socket
+    import wandb
+    from cogformer.simulator.model import _default_backend
+    return wandb.init(
+        project=project, name=name, tags=tags, id=run_id,
+        resume="allow" if run_id else None,
+        config={**config,
+                "sim_backend": os.environ.get("COGFORMER_SIM_BACKEND") or _default_backend(),
+                "git_commit": _git_commit(), "host": socket.gethostname()},
+    )
+
+
+def wandb_run_id_from(checkpoint_path) -> str | None:
+    """The wandb run id stored in a checkpoint, if resuming from one that has it."""
+    from pathlib import Path
+    if checkpoint_path is None or not Path(checkpoint_path).exists():
+        return None
+    ckpt = torch.load(checkpoint_path, map_location="cpu", weights_only=False)
+    return ckpt.get("wandb_run_id") if isinstance(ckpt, dict) else None
+
+
 def compile_cogformer(model, mode: str, decoder_groups: int = 0):
     """torch.compile a CogFormer for training.
 

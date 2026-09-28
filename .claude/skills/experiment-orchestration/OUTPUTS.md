@@ -108,6 +108,7 @@ all source trees ─► e{1,1a,2,3,4}_finalize ─► outputs/finals/experiment-
 | `e3_ppc` | `experiment_2/ppc.py` ×2 | figures: PPC free / conventional (s_v=1, s_τ=0) | `outputs/figures/real_data/ppc/lba_stim_cond[_conventional]/lba_mc_<type>_<cond>.pdf` | `ppc/free/`, `ppc/conventional/` |
 | `e3_realdata_validate` | `experiment_2/realdata_validate.py --model lba` (LBA_FT_CKPT) | figures + tables + data: `<plots>` on the real designs | `FIG/TAG_realdata/lba/realdata/lba_realdata_fm_*`, `DATA/TAG_realdata/lba_realdata_cf_pred.npz` | `ppc/validation/` (+ `predictions.npz`) |
 | `e3_finalize` | `finalize_experiment_3.py` | tables | — | `MANIFEST.csv`, `README.md` |
+| `e3_gap_finalize` | `finalize_experiment_3.py` (second pass, in the `gap` group) | tables | — | adds `gap/` once `e3_bf` + `e3_gap_c2st` exist; `e3_finalize` in `main` runs before them and omits it |
 
 ## Experiment 4 — encoder representation (aDDM vsvfixed) → `outputs/finals/experiment-4/`
 

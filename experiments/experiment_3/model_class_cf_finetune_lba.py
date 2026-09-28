@@ -13,6 +13,7 @@ try:
 except Exception:
     wandb = None
 import logging
+import time
 import argparse
 from pathlib import Path
 from tqdm.auto import tqdm
@@ -39,7 +40,7 @@ from ..configs import MODELS as _BASE_MODELS
 from ..utils import (add_global_params, build_encoder_input_dim, chunked_sample,
                      resolve_val_scenario, ModelClassDataset, make_sim_loader,
                      add_sim_backend_arg, apply_sim_backend, recommend_sim_workers,
-                     add_decoder_groups_arg, compile_cogformer)
+                     add_decoder_groups_arg, compile_cogformer, init_wandb)
 from ..timing import RunTimer
 
 
@@ -139,7 +140,8 @@ class LBAFinetuner:
         traj = int(train_config.get("trajectory_interval", 0) or 0)
 
         def _save(epoch_done: int) -> None:
-            payload = {"state_dict": self.net.state_dict(), "epoch": epoch_done}
+            payload = {"state_dict": self.net.state_dict(), "epoch": epoch_done,
+                       "wandb_run_id": wandb.run.id if (self.use_wandb and wandb.run) else None}
             torch.save(payload, checkpoint_dir / checkpoint_path)
             logging.info(f"[saved] {checkpoint_dir / checkpoint_path} (epoch {epoch_done})")
             # An epoch-stamped COPY, kept only at trajectory_interval multiples. The
@@ -168,6 +170,7 @@ class LBAFinetuner:
                 desc=f"Epoch {epoch + 1}/{train_config['epochs']}",
                 miniters=100,
             )
+            epoch_t0 = time.time()
             for _ in range(train_config["steps_per_epoch"]):
                 loss, current_lr = self.train_step(train_config, optimizer, scheduler)
                 if self.use_wandb:
@@ -178,6 +181,11 @@ class LBAFinetuner:
                 global_step += 1
                 pbar.set_postfix(loss=f"{loss:.4f}", lr=f"{current_lr:.2e}")
                 pbar.update(1)
+            if self.use_wandb:
+                epoch_s = time.time() - epoch_t0
+                wandb.log({"perf/epoch_s": epoch_s,
+                           "perf/steps_per_s": train_config["steps_per_epoch"] / epoch_s},
+                          step=global_step - 1)
 
             # Checkpointing is deliberately decoupled from validation. Tying the two
             # together means the save cadence inherits val_interval, which is set by how
@@ -620,11 +628,13 @@ if __name__ == "__main__":
     )
 
     if args.use_wandb:
-        wandb.init(
+        init_wandb(
             project="cogformer-model-class",
+            name=f"lba_finetune_s{args.finetune_scheme}_A{args.lba_fixed_A}_b{args.train_batch_size}_e{args.epochs}",
             tags=["CogFormer", "FineTune", "LBA"],
             config={**train_config, "cogformer": cogformer_config,
-                    "pretrained": args.pretrained_checkpoint},
+                    "pretrained": args.pretrained_checkpoint,
+                    "decoder_groups": args.decoder_groups, "lba_fixed_A": args.lba_fixed_A},
         )
 
     # Prefetching simulation loader for scheme 2 (all four families). Worker processes

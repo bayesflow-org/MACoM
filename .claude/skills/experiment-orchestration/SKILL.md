@@ -26,6 +26,11 @@ bash fetch_fonts.sh                       # Inter fonts for the figure style (on
 - The orchestrator exports `MPLBACKEND=Agg` itself (a dead Xwayland DISPLAY otherwise hangs
   every plotting stage at 0% CPU). Any script run OUTSIDE the orchestrator needs it too.
 - Real data lives in `data/data_application_{ddm,rdm,cdm,lba}.csv` (tracked in git).
+- **wandb tracking is ON by default** (`TRACK_WANDB=1` in shared_config) for the CogFormer
+  trainings (`e1_train`, `e3_finetune`; project `cogformer-model-class`). Each host needs
+  `uv sync --locked --extra tracking` and `wandb login` once; the orchestrator exits at launch
+  otherwise. `WANDB_MODE=offline` logs locally (`wandb sync` later); `USE_WANDB=0` disables.
+  The run id is stored in every checkpoint, so a `--resume` continues the same wandb run.
 - **Simulation runs on the GPU** (Triton kernels for DDM/RDM/CDM/LBA/aDDM,
   `cogformer/simulator/benchmarks/ssms/gpu_kernels.py`). The orchestrator exports
   `COGFORMER_SIM_BACKEND=$SIM_BACKEND` (shared_config: `gpu`) for every stage; `numba` is the
@@ -38,7 +43,7 @@ bash fetch_fonts.sh                       # Inter fonts for the figure style (on
 ```bash
 bash run_experiments.sh --list            # stage table with done/todo markers
 DRY_RUN=1 bash run_experiments.sh all     # print every command, no side effects
-bash run_experiments.sh exp3              # a group: exp1 exp1a exp2 exp3 exp4 finalize all
+bash run_experiments.sh exp3              # a group: main gap gap_train gap_eval exp1..exp4 exp1a finalize all
 bash run_experiments.sh e1_validate e3_compare   # or stage names / numbers
 FORCE=1 bash run_experiments.sh e2_ppc    # ignore completion markers
 ```
@@ -50,11 +55,28 @@ never disagree). Change the recipe THERE, never inline.
 | Group | Stages (in order) | What it produces |
 |---|---|---|
 | exp1 | `e1_data` → `e1_train` → `e1_validate`, `e1_ensemble`, `e1_benchmark`, `e1_design_eig` | shared benchmark data; model-class checkpoint (r4c4, b128 × 15000 ep); per-case, ensemble, benchmark, information-gain figures |
-| exp1a | `e1a_bf` → `e1a_c2st` | 15 BayesFlow baselines (DDM/RDM/CDM × bench5); gap C2ST vs e1_validate |
 | exp2 | `e2_apply`, `e2_refit_svfix` → `e2_ppc`, `e2_validate` | real-data fits, PPCs (+ combined figure), validation on the real subjects' designs |
-| exp3 | `e3_bf`, `e3_zeroshot`, `e3_finetune` → `e3_ft_validate`, `e3_original` (links to e1_validate) → `e3_paired_c2st`, `e3_compare`, `e3_gap_c2st`, `e3_ppc_apply` → `e3_ppc`, `e3_realdata_validate` | LBA zero-shot, 1000-epoch finetune, forgetting C2ST, Δr / calibration plane, LBA amortization gap, stimulus-coded real-data fit + PPC + validation |
+| exp3 | `e3_zeroshot`, `e3_finetune` → `e3_ft_validate`, `e3_original` (links to e1_validate) → `e3_paired_c2st`, `e3_compare`, `e3_ppc_apply` → `e3_ppc`, `e3_realdata_validate` | LBA zero-shot, 1000-epoch finetune, forgetting C2ST, Δr / calibration plane, stimulus-coded real-data fit + PPC + validation |
 | exp4 | `e4_probe` → `e4_compare` → `e4_representation` | 5-param (vsvfixed) aDDM probe, both arms; shared-validation C2ST; RSA/CKA + 5-family MDS |
+| gap (last) | `gap_train` = `e1a_bf`, `e3_bf` → `gap_eval` = `e1a_c2st`, `e3_gap_c2st`, `e1a_finalize`, `e3_gap_finalize` | the amortization gap: 15 DDM/RDM/CDM + 5 LBA BayesFlow baselines, their C2STs vs e1_validate / e3_ft_validate, finals 1a and experiment-3 `gap/` |
 | finalize | `e{1,1a,2,3,4}_finalize` | copy allowlisted outputs into `outputs/finals/`, write MANIFEST + README |
+
+**The amortization gap is separate and runs last.** `main` (= exp1 -> exp4) never reads a
+gap output (verified with `DRY_RUN=1 ... main`: no BayesFlow input is needed). `e3_finalize`
+runs inside `main` and simply omits `gap/`; `e3_gap_finalize` re-assembles experiment-3 once
+the gap exists (finalize copies, never deletes). `gap_train` needs only `e1_data`, so it can
+train CONCURRENTLY with `main` -- but only on its own GPU (BF is GPU-bound; sharing a card
+just time-slices both). Typical launch:
+
+```bash
+bash run_experiments.sh e1_data                        # the shared test set, first
+CUDA_VISIBLE_DEVICES=0 setsid nohup bash run_experiments.sh main      > logs/main.out 2>&1 < /dev/null &
+CUDA_VISIBLE_DEVICES=1 setsid nohup bash run_experiments.sh gap_train > logs/gap_train.out 2>&1 < /dev/null &
+# when both are done (gap_eval needs e1_validate and e3_ft_validate from main):
+bash run_experiments.sh gap_eval                       # the last box to tick
+```
+
+On a single-GPU host just run `bash run_experiments.sh` (all): main first, gap last.
 
 **[OUTPUTS.md](OUTPUTS.md) maps every stage to its outputs**: for each checkpoint, generated
 dataset, figure and table it names the responsible script, the working location it is written
@@ -116,6 +138,12 @@ setsid nohup bash run_experiments.sh exp1 > logs/exp1_$(date +%Y%m%d_%H%M).out 2
   process and a slow one print the same last line. Treat > ~40 min without a write as suspect
   (validation can go quiet ~20 min per case while sampling).
 - Poll sparsely (about every 2 h) and report completion/failure, not routine progress.
+- Multi-GPU training: `NPROC=2 CUDA_VISIBLE_DEVICES=0,1 bash run_experiments.sh e1_train`
+  launches e1_train with torchrun (DDP). The total batch stays 128 (64 per card), so the
+  budget and objective are unchanged. Estimated ~15-20 h on 2x RTX 6000 Ada vs ~23 h on one.
+  UNTESTED with 2 ranks (only 1-rank torchrun here): first run a short
+  `DRY_EPOCHS=3 NPROC=2 ... e1_train` on the target host, then delete its checkpoint --
+  a dry run writes under the real filename, and `--resume` would pick it up.
 - GPU selection: `CUDA_VISIBLE_DEVICES=<id> bash run_experiments.sh ...`. BF stages add
   `XLA_PYTHON_CLIENT_PREALLOCATE=false` so jax does not grab 75% of a shared card.
 - A failed stage aborts the run; fix the cause and re-run the same selection — completed

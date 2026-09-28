@@ -62,3 +62,9 @@ LBA_FIXED_A=0.5
 # 128, matching the model-class and BayesFlow batch (decided 2026-09-28; was 256).
 LBA_FT_BATCH=128
 LBA_FT_CKPT="./outputs/checkpoints/model_class/cf/lba_finetune/cogformer_lba_finetune_s2_A${LBA_FIXED_A}_l${DEC_LAYERS}_h${HEADS}_p${PROJ}_s${SEEDS}_d${MC_DIM}_b${LBA_FT_BATCH}_e${LBA_FT_EPOCHS}_t${STEPS}.pt"
+
+# Track every CogFormer training (e1_train, e3_finetune) in wandb project
+# "cogformer-model-class". The orchestrator refuses to start without credentials
+# (`wandb login`, or WANDB_API_KEY); WANDB_MODE=offline logs locally for a later
+# `wandb sync`. Override per launch with USE_WANDB=0.
+TRACK_WANDB=1

@@ -15,10 +15,13 @@
 # group is therefore always safe.
 #
 # ── USAGE ─────────────────────────────────────────────────────────────────────
-#   bash run_experiments.sh                    # every stage, dependency order
+#   bash run_experiments.sh                    # every stage, dependency order (gap last)
+#   bash run_experiments.sh main               # experiments 1 -> 4 WITHOUT the amortization gap
+#   bash run_experiments.sh gap_train          # the 20 BayesFlow baselines (needs only e1_data;
+#                                              #   run concurrently on another GPU / host)
+#   bash run_experiments.sh gap                # gap_train + gap_eval (C2STs, finalize 1a, 3/gap)
 #   bash run_experiments.sh finalize           # just rebuild outputs/finals/
 #   bash run_experiments.sh exp2               # one experiment, produce + finalize
-#   bash run_experiments.sh exp1a              # the expensive gap arm, on its own
 #   bash run_experiments.sh e1_validate e1_finalize
 #   bash run_experiments.sh 9 12               # by number (see --list)
 #   bash run_experiments.sh --list             # print the stage table and exit
@@ -28,9 +31,12 @@
 #   SKIP_PREFLIGHT=1 ...                       # bypass input checks
 #
 # ── ENVIRONMENT ───────────────────────────────────────────────────────────────
-#   USE_WANDB=1        enable wandb logging on training stages
+#   USE_WANDB=0|1      wandb tracking of CogFormer training (default TRACK_WANDB=1, shared_config)
 #   NUM_SIM_WORKERS=N  parallel simulation workers
 #   DRY_EPOCHS=N       truncate training stages (smoke test)
+#   NPROC=N            train e1_train data-parallel on N GPUs (torchrun). The total batch
+#                      stays MC_TRAIN_BATCH (N x MC_TRAIN_BATCH/N per card), so the
+#                      simulation budget is unchanged. Pick cards with CUDA_VISIBLE_DEVICES.
 #   GPU0, GPU1         CUDA device ids for the two-card stages (default 0 and 1)
 #
 # ── RESUME ────────────────────────────────────────────────────────────────────
@@ -101,9 +107,24 @@ RUN_ID="$(date +%Y%m%d_%H%M%S)"
 LOG_DIR="logs/finals/${RUN_ID}"
 mkdir -p "$LOG_DIR"
 
-WANDB=();  [[ -n "${USE_WANDB:-}"       ]] && WANDB=(--use_wandb)
+USE_WANDB="${USE_WANDB:-$TRACK_WANDB}"
+WANDB=();  [[ "$USE_WANDB" == 1 ]] && WANDB=(--use_wandb)
+# Fail at launch, not hours into a detached run, when tracking is on but this host
+# cannot log to wandb.
+if [[ "$USE_WANDB" == 1 && -z "${DRY_RUN:-}" && "${WANDB_MODE:-}" != offline ]]; then
+    if ! "$PY" -c "import wandb, sys; sys.exit(0 if wandb.api.api_key else 1)" 2>/dev/null; then
+        echo "wandb tracking is on (TRACK_WANDB=1) but this host has no wandb credentials." >&2
+        echo "  run 'wandb login' (uv sync --locked --extra tracking), or WANDB_MODE=offline, or USE_WANDB=0" >&2
+        exit 1
+    fi
+fi
 SIMW=();   [[ -n "${NUM_SIM_WORKERS:-}" ]] && SIMW=(--num_sim_workers "$NUM_SIM_WORKERS")
 DRY=();    [[ -n "${DRY_EPOCHS:-}"      ]] && DRY=(--dry_run_epochs "$DRY_EPOCHS")
+# e1_train launcher: plain python, or torchrun (via torch.distributed.run) for NPROC > 1.
+MC_LAUNCH=("$PY" -m)
+if [[ "${NPROC:-1}" -gt 1 ]]; then
+    MC_LAUNCH=("$PY" -m torch.distributed.run --standalone --nproc_per_node "$NPROC" -m)
+fi
 # One backend for every stage (see shared_config.sh). jax must not preallocate: with GPU
 # simulation, torch holds a CUDA context in the same process as every jax stage.
 export COGFORMER_SIM_BACKEND="$SIM_BACKEND"
@@ -191,8 +212,8 @@ stage_e1_data() {
 # its last save instead of restarting a 58-hour job.
 marker_e1_train() { echo "${MC_CKPT}.done"; }
 stage_e1_train() {
-    run "ModelClass CF train (r${MC_MAX_REG}c${MC_MAX_CAT}, b${MC_TRAIN_BATCH}, e${MC_EPOCHS})" -- \
-        "$PY" -m experiments.experiment_1.model_class_cf_train \
+    run "ModelClass CF train (r${MC_MAX_REG}c${MC_MAX_CAT}, b${MC_TRAIN_BATCH}, e${MC_EPOCHS}, ${NPROC:-1} GPU)" -- \
+        "${MC_LAUNCH[@]}" experiments.experiment_1.model_class_cf_train \
             "${MC_ARCH[@]}" "${MC_GEOM[@]}" \
             --checkpoint_dir "$MC_CKPT_DIR" \
             --min_num_obs "$MIN_OBS" --max_num_obs "$MAX_OBS" \
@@ -303,7 +324,7 @@ stage_e1a_bf() {
                 "$PY" -m experiments.experiment_1a.model_family_bf_train \
                     --model "$fam" --case "$case" \
                     --epochs "$MF_BF_EPOCHS" --steps_per_epoch "$STEPS" --batch_size "$MF_BF_BATCH" \
-                    "${DRY[@]}" "${WANDB[@]}" || return 1
+                    "${DRY[@]}" || return 1
             # XLA_PYTHON_CLIENT_PREALLOCATE=false: jax otherwise grabs 75% of the
             # card on a shared box.
             need "${BENCH_DATA}/.done" "stage e1_data" || return 1
@@ -605,7 +626,7 @@ stage_e3_bf() {
             "$PY" -m experiments.experiment_1a.model_family_bf_train \
                 --model lba --case "$case" \
                 --epochs "$MF_BF_EPOCHS" --steps_per_epoch "$STEPS" --batch_size "$MF_BF_BATCH" \
-                "${DRY[@]}" "${WANDB[@]}" || return 1
+                "${DRY[@]}" || return 1
         run "BF baseline validate lba/${case}" -- \
             env XLA_PYTHON_CLIENT_PREALLOCATE=false \
             "$PY" -m experiments.experiment_1a.model_family_bf_validate \
@@ -719,6 +740,15 @@ stage_e3_ppc() {
 marker_e3_finalize() { echo ""; }
 stage_e3_finalize() {
     run "assemble outputs/finals/experiment-3" -- \
+        "$PY" -m experiments.finalize_experiment_3
+}
+
+# Re-assembles experiment-3 once the LBA amortization gap exists. e3_finalize runs in the
+# main sequence BEFORE the gap stages and simply leaves gap/ out (finalize copies only the
+# sources that exist, and never deletes), so this second pass adds gap/ in place.
+marker_e3_gap_finalize() { echo ""; }
+stage_e3_gap_finalize() {
+    run "re-assemble outputs/finals/experiment-3 with gap/" -- \
         "$PY" -m experiments.finalize_experiment_3
 }
 
@@ -839,19 +869,27 @@ stage_e4_finalize() {
 # ══════════════════════════════════════════════════════════════════════════════
 # stage table
 # ══════════════════════════════════════════════════════════════════════════════
+# The amortization gap (BayesFlow baselines + gap C2STs) is fully separable: no other stage
+# reads its outputs. It runs LAST, so the main sequence (exp1 -> exp4) never waits on 20
+# baseline trainings. gap_train needs only e1_data and can run CONCURRENTLY on another GPU
+# or host; the gap C2STs then need e1_validate (e1a) and e3_ft_validate (e3).
 ALL_STAGES=(
     e1_data e1_train e1_validate e1_ensemble e1_benchmark e1_design_eig e1_finalize
-    e1a_bf e1a_c2st e1a_finalize
     e2_apply e2_refit_svfix e2_ppc e2_validate e2_finalize
-    e3_bf e3_zeroshot e3_finetune e3_ft_validate e3_original e3_paired_c2st
-    e3_compare e3_gap_c2st e3_ppc_apply e3_ppc e3_realdata_validate e3_finalize
+    e3_zeroshot e3_finetune e3_ft_validate e3_original e3_paired_c2st
+    e3_compare e3_ppc_apply e3_ppc e3_realdata_validate e3_finalize
     e4_probe e4_compare e4_representation e4_finalize
+    e1a_bf e3_bf e1a_c2st e3_gap_c2st e1a_finalize e3_gap_finalize
 )
 GROUP_exp1="e1_data e1_train e1_validate e1_ensemble e1_benchmark e1_design_eig e1_finalize"
-GROUP_exp1a="e1a_bf e1a_c2st e1a_finalize"
 GROUP_exp2="e2_apply e2_refit_svfix e2_ppc e2_validate e2_finalize"
-GROUP_exp3="e3_bf e3_zeroshot e3_finetune e3_ft_validate e3_original e3_paired_c2st e3_compare e3_gap_c2st e3_ppc_apply e3_ppc e3_realdata_validate e3_finalize"
+GROUP_exp3="e3_zeroshot e3_finetune e3_ft_validate e3_original e3_paired_c2st e3_compare e3_ppc_apply e3_ppc e3_realdata_validate e3_finalize"
 GROUP_exp4="e4_probe e4_compare e4_representation e4_finalize"
+GROUP_main="$GROUP_exp1 $GROUP_exp2 $GROUP_exp3 $GROUP_exp4"
+GROUP_gap_train="e1a_bf e3_bf"
+GROUP_gap_eval="e1a_c2st e3_gap_c2st e1a_finalize e3_gap_finalize"
+GROUP_gap="$GROUP_gap_train $GROUP_gap_eval"
+GROUP_exp1a="e1a_bf e1a_c2st e1a_finalize"
 GROUP_finalize="e1_finalize e1a_finalize e2_finalize e3_finalize e4_finalize"
 
 expand_group() {
@@ -859,6 +897,8 @@ expand_group() {
         exp1) echo "$GROUP_exp1" ;;  exp1a) echo "$GROUP_exp1a" ;;
         exp2) echo "$GROUP_exp2" ;;
         exp3) echo "$GROUP_exp3" ;;  exp4) echo "$GROUP_exp4" ;;
+        main) echo "$GROUP_main" ;;
+        gap) echo "$GROUP_gap" ;;  gap_train) echo "$GROUP_gap_train" ;;  gap_eval) echo "$GROUP_gap_eval" ;;
         finalize) echo "$GROUP_finalize" ;;
         all)  echo "${ALL_STAGES[*]}" ;;
         *) return 1 ;;
@@ -878,7 +918,7 @@ print_table() {
         i=$((i+1))
     done
     echo
-    echo "groups: exp1 exp1a exp2 exp3 exp4 finalize all"
+    echo "groups: main (exp1 exp2 exp3 exp4)  gap (gap_train gap_eval)  exp1a  finalize  all"
 }
 
 # ── selection ─────────────────────────────────────────────────────────────────
