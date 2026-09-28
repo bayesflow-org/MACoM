@@ -138,12 +138,10 @@ setsid nohup bash run_experiments.sh exp1 > logs/exp1_$(date +%Y%m%d_%H%M).out 2
   process and a slow one print the same last line. Treat > ~40 min without a write as suspect
   (validation can go quiet ~20 min per case while sampling).
 - Poll sparsely (about every 2 h) and report completion/failure, not routine progress.
-- Multi-GPU training: `NPROC=2 CUDA_VISIBLE_DEVICES=0,1 bash run_experiments.sh e1_train`
-  launches e1_train with torchrun (DDP). The total batch stays 128 (64 per card), so the
-  budget and objective are unchanged. Estimated ~15-20 h on 2x RTX 6000 Ada vs ~23 h on one.
-  UNTESTED with 2 ranks (only 1-rank torchrun here): first run a short
-  `DRY_EPOCHS=3 NPROC=2 ... e1_train` on the target host, then delete its checkpoint --
-  a dry run writes under the real filename, and `--resume` would pick it up.
+- Multi-GPU training (`NPROC=2`, torchrun/DDP) works but is SLOWER than one card: measured
+  on starrail (2x RTX 6000 Ada, 2026-09-28), so the final run uses `NPROC=1`. Per-card batch
+  64 plus a gradient all-reduce over PCIe every step costs more than the second GPU adds.
+  Use the second card for another job (e.g. a BF baseline) instead.
 - GPU selection: `CUDA_VISIBLE_DEVICES=<id> bash run_experiments.sh ...`. BF stages add
   `XLA_PYTHON_CLIENT_PREALLOCATE=false` so jax does not grab 75% of a shared card.
 - A failed stage aborts the run; fix the cause and re-run the same selection — completed

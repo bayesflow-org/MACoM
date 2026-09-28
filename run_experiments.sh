@@ -34,6 +34,7 @@
 #   USE_WANDB=0|1      wandb tracking of CogFormer training (default TRACK_WANDB=1, shared_config)
 #   NUM_SIM_WORKERS=N  parallel simulation workers
 #   DRY_EPOCHS=N       truncate training stages (smoke test)
+#   BF_FAMILIES="a b"  limit e1a_bf to these families (split baselines across hosts)
 #   NPROC=N            train e1_train data-parallel on N GPUs (torchrun). The total batch
 #                      stays MC_TRAIN_BATCH (N x MC_TRAIN_BATCH/N per card), so the
 #                      simulation budget is unchanged. Pick cards with CUDA_VISIBLE_DEVICES.
@@ -311,7 +312,13 @@ stage_e1_design_eig() {
 # baselines train on the distribution they are tested on.
 marker_e1a_bf() { echo "${BF_DATA_DIR}/rdm_interaction_data.npz"; }
 stage_e1a_bf() {
-    for fam in "${FAMILIES[@]}"; do
+    # BF_FAMILIES="ddm cdm" restricts this stage to a subset, to split the baselines
+    # across hosts; the per-case skip below makes the split resumable either way.
+    local fams=(${BF_FAMILIES:-${FAMILIES[*]}})
+    for fam in "${fams[@]}"; do
+        [[ " ${FAMILIES[*]} " == *" $fam "* ]] || { echo "unknown BF family '$fam' (expected: ${FAMILIES[*]})" >&2; return 1; }
+    done
+    for fam in "${fams[@]}"; do
         for case in "${GAP_CASES[@]}"; do
             # Per-case resume: the stage marker only names the LAST case, so without
             # this an interruption at case 14 would retrain all 15 (~8 h each at b128).

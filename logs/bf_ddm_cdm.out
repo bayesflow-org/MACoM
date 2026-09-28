@@ -1,0 +1,8 @@
+════════════════════════════════════════════════════════════════
+ CogFormer-2 — finals pipeline   run 20260928_162659
+ stages : e1a_bf
+ logs   : logs/finals/20260928_162659/
+════════════════════════════════════════════════════════════════
+
+── e1a_bf
+    · BF baseline train ddm/intercept_only
