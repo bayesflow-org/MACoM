@@ -4,8 +4,8 @@ The sweep in ``ddm_design_eig.py`` costs ~4 GPU-hours, so changing how its figur
 LOOKS must not require running it again. Everything the figure draws is either in
 ``design_eig.csv`` or derivable from ``design_draws.npz``.
 
-    python -m experiments.design_opt.replot_design_eig \\
-        --datadir outputs/finals/experiment_1/information_gain
+    python -m experiments.experiment_1.replot_design_eig \\
+        --datadir outputs/finals/experiment-1/information_gain
 
 ``nrmse_se`` is bootstrapped from the saved draws when the CSV predates it, so runs
 made before the SE column existed still get a shaded band. The plotting function is

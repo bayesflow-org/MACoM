@@ -161,6 +161,19 @@ def build_subject_batch(
     num_obs = rts.shape[0]
 
     max_num_cols = len(param_mask) // n_params
+
+    # Refine to REALIZED support, exactly as training does (ModelFamily.sample:
+    # "Refine by realized support"): a coefficient whose design column is all-zero is
+    # not an estimation target. build_real_param_mask marks whole category blocks, so
+    # for a +/-0.5 contrast at max_num_categories=4 it also marked the block's two
+    # never-populated columns -- and the full 3x3 interaction block -- active. Measured
+    # 2026-09-27 on DDM's real design: 16 mask rows active against 4 realized columns
+    # (0, 1, 4, 7), where training marks exactly those 4. The extra ~60 query cells
+    # were a pattern the decoder never saw, sitting in joint attention with the real
+    # coefficients. Their values multiply zero columns, so PPCs were unaffected.
+    realized = (np.abs(np.asarray(design_matrix)) > 0).any(axis=0)
+    param_mask = (np.asarray(param_mask, dtype=np.float32).reshape(max_num_cols, n_params)
+                  * realized[:, None]).reshape(-1)
     codes = build_position_codes(design_config, max_num_categories=max_num_categories)
     position_codes = np.zeros((max_num_cols, 4), dtype=np.int64)
     position_codes[:codes.shape[0]] = codes

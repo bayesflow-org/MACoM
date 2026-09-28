@@ -11,7 +11,7 @@ the parameter-space construction are imported rather than copied, so a replot an
 real run cannot drift apart.
 
     python -m experiments.experiment_1.replot_ensemble \\
-        --datadir outputs/figures/model_class/cf/r4c4_b256_e10000_ensemble
+        --datadir outputs/figures/model_class/cf/r4c4_b128_e15000_ensemble
 """
 import argparse
 import json

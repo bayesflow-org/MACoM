@@ -27,7 +27,15 @@ from cogformer.diagnostics.metric.adaptive_metrics import (
 from cogformer.utils.plot_utils import bf_colors
 
 from ..configs import MODELS as _BASE_MODELS
-from ..utils import add_global_params, reshape_bf_to_cf, seed_case
+from ..utils import add_global_params, reshape_bf_to_cf, seed_case, stimulus_channels, benchmark_mix_opts
+
+
+def bf_conditions(sims: dict) -> dict:
+    """The summary network's per-trial inputs, incl. favored_idx when the family has it.
+    Must mirror model_family_bf_train.summary_keys: the checkpoint's adapter
+    concatenates exactly those keys and fails on a missing one."""
+    keys = ["rts", "choices", "design_matrices", "favored_idx"]
+    return {k: sims[k] for k in keys if k in sims}
 
 
 _BF_DIRS = {
@@ -62,6 +70,7 @@ class ModelFamilyBF(bf.simulators.Simulator):
         if case not in case_configs:
             raise ValueError(f"Unknown case: {case}. Must be one of {list(case_configs.keys())}")
         self.case = case
+        self.model_key = model_key
         self.config = case_configs[case]
         self.link_fn = model_cfg["link_fn"]
         self.model_family = ModelFamily(
@@ -100,6 +109,8 @@ class ModelFamilyBF(bf.simulators.Simulator):
             sample_kwargs["fixed_config"] = True
         if self.config["design_config"] is not None:
             sample_kwargs["design_config"] = self.config["design_config"]
+        # Same design generator as CogFormer's benchmark validation of this case.
+        sample_kwargs.update(benchmark_mix_opts(self.model_key, self.case))
         samples = self.model_family.batch_sample(
             batch_size=batch_size,
             num_obs=num_obs,
@@ -113,13 +124,19 @@ class ModelFamilyBF(bf.simulators.Simulator):
         if self.config["squeeze_outputs"]:
             param_matrices = param_matrices.squeeze(axis=1)
             param_masks = param_masks.squeeze(axis=1)
-        return {
+        out = {
             "design_matrices": samples["design_matrices"],
             "rts": samples["sim_data"]["rts"],
             "choices": samples["sim_data"]["choices"],
             "params": param_matrices,
             "masks": param_masks,
         }
+        out.update(stimulus_channels(samples))
+        # Kept as an attribute, not a returned key: every returned key reaches the
+        # BayesFlow adapter. The benchmark-data writer saves it for the CogFormer loader.
+        self.last_num_alternatives = np.asarray(samples.get("num_alternatives",
+                                                            np.full(batch_size, 2)))
+        return out
 
 
 def test(model_key: str, case: str):
@@ -152,7 +169,7 @@ def test(model_key: str, case: str):
     approximator = keras.saving.load_model(checkpoint_path)
     val_sims = simulator.sample(100)
     post_draws = approximator.sample(
-        conditions={"rts": val_sims["rts"], "choices": val_sims["choices"], "design_matrices": val_sims["design_matrices"]},
+        conditions=bf_conditions(val_sims),
         num_samples=100,
     )
     print(f"Targets: {val_sims['params'].shape}, Estimates: {post_draws['params'].shape}")
@@ -160,7 +177,7 @@ def test(model_key: str, case: str):
 
 def main(model_key: str, case: str, batch_size: int = 200, num_samples: int = 200,
          skip_posteriors: bool = False, skip_log_gamma: bool = True, seed: int = 0,
-         tag: str = ""):
+         tag: str = "", bench_dir: str | None = None):
     model_cfg = MODELS[model_key]
     model_name = model_key
     case_config = model_cfg["case_configs"][case]
@@ -201,9 +218,25 @@ def main(model_key: str, case: str, batch_size: int = 200, num_samples: int = 20
     # that a re-pairing still passes. Seeding by identity (not by position) also
     # makes a single case reproducible without running the whole sweep.
     seed_case(seed, model_key, case)
-    val_sims = simulator.sample(batch_size)
+    if bench_dir is not None:
+        # The SHARED benchmark datasets (experiment_1/benchmark_data.py): the same files
+        # every CogFormer arm scores, which is what makes the gap exactly paired. A
+        # re-simulation here would not be -- the seed does not pin RTs or designs.
+        src = np.load(Path(bench_dir) / f"{model_key}_{case}_data.npz")
+        val_sims = {"design_matrices": src["design_matrices"], "rts": src["rts"],
+                    "choices": src["choices"], "params": src["true_set"],
+                    "masks": src["param_masks"]}
+        if "favored_idx" in src.files:
+            val_sims["favored_idx"] = src["favored_idx"][..., None]
+        if "num_alternatives" in src.files:
+            val_sims["num_alternatives"] = src["num_alternatives"]
+        batch_size = val_sims["rts"].shape[0]
+        logging.info(f"[{case}] scoring shared datasets from {bench_dir} (n={batch_size})")
+    else:
+        val_sims = simulator.sample(batch_size)
+        val_sims["num_alternatives"] = simulator.last_num_alternatives
     post_draws = approximator.sample(
-        conditions={"rts": val_sims["rts"], "choices": val_sims["choices"], "design_matrices": val_sims["design_matrices"]},
+        conditions=bf_conditions(val_sims),
         num_samples=num_samples,
     )
     targets = val_sims["params"]
@@ -250,6 +283,10 @@ def main(model_key: str, case: str, batch_size: int = 200, num_samples: int = 20
         pred_set=pred_full,
         design_matrices=val_sims["design_matrices"],
         param_masks=val_sims["masks"],
+        # Stimulus identity travels WITH the data: the paired CogFormer run reads this
+        # npz, and without favored_idx it would score stimulus-coded choices blind.
+        **({"favored_idx": val_sims["favored_idx"][..., 0]} if "favored_idx" in val_sims else {}),
+        num_alternatives=val_sims["num_alternatives"],
     )
     logging.info(f"Saved data to {data_dir}")
 
@@ -414,6 +451,9 @@ if __name__ == "__main__":
                              "CSV / figures directory to match, so an experimental run "
                              "cannot overwrite a production baseline.")
     parser.add_argument("--skip_posteriors", action="store_true")
+    parser.add_argument("--data_dir", type=str, default=None,
+                        help="Score the shared benchmark datasets in this directory "
+                             "(<model>_<case>_data.npz) instead of simulating.")
     parser.add_argument("--skip_log_gamma", action="store_true", default=True)
     parser.add_argument("--include_log_gamma", dest="skip_log_gamma", action="store_false")
     args = parser.parse_args()
@@ -432,4 +472,5 @@ if __name__ == "__main__":
             skip_log_gamma=args.skip_log_gamma,
             seed=args.seed,
             tag=args.tag,
+            bench_dir=args.data_dir,
         )

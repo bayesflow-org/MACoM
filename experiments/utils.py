@@ -507,3 +507,100 @@ def reshape_bf_to_cf(
 
     assert flat_pos == num_active, f"Expected {num_active} active params but mapped {flat_pos}."
     return result
+
+
+def stimulus_channels(samples) -> dict:
+    """Per-trial stimulus identity, for families whose choices are STIMULUS-CODED.
+
+    RDM and LBA draw the favoured accumulator per trial (favored_idx). A choice is only
+    informative about the drift DIFFERENCE given which accumulator the stimulus
+    favoured, so a network that sees rts/choices without it cannot learn v_diff: its
+    choices look like coin flips. Until 2026-09-27 the BF baselines dropped it, while
+    CogFormer's encoder always receives it as an input channel -- a baseline handicap,
+    not an amortization cost. Returned as (B, N, 1) float so it concatenates with rts
+    and choices; empty for families that carry no per-trial stimulus (DDM, CDM).
+    """
+    ptc = samples.get("per_trial_context") or {}
+    if "favored_idx" not in ptc:
+        return {}
+    return {"favored_idx": np.asarray(ptc["favored_idx"], dtype=np.float32)[..., None]}
+
+
+def benchmark_mix_opts(model_key: str, case: str) -> dict:
+    """Design-generator options for a bench case, from the family's val_scenarios.
+
+    The BayesFlow baselines and CogFormer's benchmark validation must draw the SAME
+    design distribution for a case, or the amortization gap measures a distribution
+    shift as well as amortization. Until 2026-09-27 they did not: val_scenarios pins
+    regressed / fixed_regressed / interaction to continuous regressors
+    (categorical_regressors=[], SD 1.0), while the BF simulator used batch_sample's
+    default mixed generator (2-level categorical or continuous, continuous SD ~0.83).
+    Measured: per-dataset mean RT differed at p <= 0.007 in exactly those cases.
+    Reading the options from val_scenarios keeps a single definition of each case.
+    """
+    from .configs import MODELS
+    for name, _dc, opts in MODELS[model_key].get("val_scenarios", []):
+        if name == case:
+            return {k: opts[k] for k in ("discrete_prob", "categorical_regressors") if k in opts}
+    return {}
+
+
+def load_bf_validation_data(
+    data_path,
+    design_config: dict,
+    intrinsic_params: list,
+    model_id: int,
+    batch_size: int,
+    max_dm_cols: int | None = None,
+) -> dict:
+    """Load BF-generated validation data into full (batch, n_rows * n_local) param space.
+
+    BF stores params in two formats depending on the case:
+      - Intercept-only cases: (batch, n_local) — only intercept row params
+      - Cases with regression rows: (batch, n_rows * n_local) — full grid already
+
+    max_dm_cols: if provided, zero-pads design matrices to this width (needed for
+    model class encoder which expects fixed-width input across all cases).
+    """
+    dataset = np.load(data_path, allow_pickle=True)
+    rts = dataset["rts"]
+    choices = dataset["choices"]
+    design_matrices = dataset["design_matrices"]
+    flat_params = dataset["true_set"]
+    flat_masks = dataset["param_masks"]
+
+    if max_dm_cols is not None and design_matrices.shape[-1] < max_dm_cols:
+        pad_width = max_dm_cols - design_matrices.shape[-1]
+        design_matrices = np.pad(design_matrices, ((0, 0), (0, 0), (0, pad_width)))
+
+    n_local = len(intrinsic_params)
+    n_rows = len(design_config)
+    full_size = n_rows * n_local
+
+    if flat_params.shape[1] == full_size:
+        # BF stored as full (n_rows * n_local) grid — use directly
+        pm_full = flat_params.copy()
+        pmask_full = flat_masks.copy()
+    else:
+        # BF stored only intercept-row params — pad remaining rows with zeros
+        pm_full = np.zeros((batch_size, full_size), dtype=flat_params.dtype)
+        pmask_full = np.zeros((batch_size, full_size), dtype=flat_masks.dtype)
+        pm_full[:, :flat_params.shape[1]] = flat_params
+        pmask_full[:, :flat_masks.shape[1]] = flat_masks
+
+    out = {
+        "sim_data": {"rts": rts, "choices": choices},
+        "design_matrices": design_matrices,
+        "param_matrices": pm_full,
+        "param_masks": pmask_full,
+        "model_ids": np.full(batch_size, model_id, dtype=np.int64),
+    }
+    # Stimulus identity for stimulus-coded families (RDM): the adapter feeds
+    # favored_idx and num_alternatives to the encoder as per-trial channels. Without
+    # them it substitutes zeros / K=2 and the encoder reads stimulus-coded choices
+    # blind. Files written before 2026-09-27 lack both keys and load as before.
+    if "favored_idx" in dataset.files:
+        out["per_trial_context"] = {"favored_idx": np.asarray(dataset["favored_idx"])}
+    if "num_alternatives" in dataset.files:
+        out["num_alternatives"] = np.asarray(dataset["num_alternatives"])
+    return out

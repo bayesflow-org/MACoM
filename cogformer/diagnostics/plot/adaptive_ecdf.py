@@ -2,7 +2,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 from scipy.stats import beta as beta_dist
 from cogformer.simulator.design_utils import build_parameter_mask, build_design_matrix, build_random_design_config, expand_design_config_to_mask, build_row_labels
-from cogformer.utils.plot_utils import cogformer_cm_colors
+from cogformer.utils.plot_utils import cogformer_cm_colors, place_legend_below
 
 
 def compute_ecdf_bands(
@@ -94,9 +94,9 @@ def adaptive_ecdf(
     variable_names : list of str
         Column (parameter) names for subplot titles.
     intrinsic_params : list of str, optional
-        Intrinsic parameter names (passed to ContextManager if mask not provided).
+        Intrinsic parameter names (used to build the mask if not provided).
     parameter_mask : np.ndarray, optional
-        Boolean mask of shape (num_rows, num_cols). Built from ContextManager if None.
+        Boolean mask of shape (num_rows, num_cols). Built with build_parameter_mask if None.
     max_num_categories : int, optional, default: 2
         Maximum number of categories (used for row layout).
     intercept_color : str
@@ -183,7 +183,7 @@ def adaptive_ecdf(
     num_cols    = len(col_idx)
 
     if figsize is None:
-        figsize = (3.2 * num_cols, 2.9 * num_rows)
+        figsize = (3.2 * num_cols, 3.2 * num_rows)
 
     fig, axarr = plt.subplots(num_rows, num_cols, figsize=figsize, squeeze=False)
 
@@ -200,6 +200,10 @@ def adaptive_ecdf(
 
         for c_f in range(num_cols):
             ax = axarr[r_f, c_f]
+            # Square BY CONSTRUCTION, active and N/A cells alike: the box aspect is fixed
+            # independently of figsize and of the margins tight_layout leaves, which is
+            # what made single-row (intercept-only) grids and 1x1 global panels drift.
+            ax.set_box_aspect(1)
 
             # Masked cell -> N/A tile
             if parameter_mask[r_f, c_f] != 1.0:
@@ -278,16 +282,11 @@ def adaptive_ecdf(
 
     fig.tight_layout()
     if legend_handles is not None:
-        fig.legend(
-            legend_handles,
-            legend_labels,
-            loc="lower center",
-            ncol=len(legend_handles),
-            fontsize=legend_fontsize,
-            bbox_to_anchor=(0.5, 0),
-            bbox_transform=fig.transFigure,
-        )
-        fig.subplots_adjust(bottom=0.1)
+        # Below the measured extent of the bottom row's labels (see place_legend_below).
+        # The old fixed subplots_adjust(bottom=0.1) overrode tight_layout's margin and,
+        # on single-row grids, put the legend on top of the x-axis label.
+        place_legend_below(fig, legend_handles, legend_labels,
+                           ncol=len(legend_handles), fontsize=legend_fontsize)
     return fig
 
 

@@ -43,23 +43,27 @@ MC_MODELS = {
 }
 
 
+BENCH5 = ["intercept_only", "fixed", "regressed", "fixed_regressed", "interaction"]
+
+
 def parse_args():
     p = argparse.ArgumentParser()
-    p.add_argument("--zero_shot_lba_pred_dir", type=str,
-                   default="./outputs/data/generalization/model_class_lba/cf/",
-                   help="pred_dir from model_class_lba_cf_validate.py (zero-shot LBA).")
-    p.add_argument("--base_mc_pred_dir", type=str,
-                   default="./outputs/data/model_class/",
-                   help="pred_dir from model_class_cf_validate.py (base DDM/RDM/CDM).")
-    p.add_argument("--finetuned_pred_dir", type=str,
-                   default="./outputs/data/model_class/cf/lba_finetune/",
-                   help="pred_dir from model_class_lba_finetune_validate.py.")
-    p.add_argument("--outdir", type=str,
-                   default="./outputs/figures/model_class/cf/lba_comparison/")
-    p.add_argument("--ref_condition", type=str, default="interaction",
-                   help="Benchmark condition used for the delta heatmap (default: interaction).")
-    p.add_argument("--max_num_categories", type=int, default=5)
-    p.add_argument("--skip_log_gamma", action="store_true", default=True)
+    p.add_argument("--zero_shot_dir", type=str, required=True,
+                   help="model_class_lba_cf_validate --outdir, INCLUDING the A<fixed_A> "
+                        "level (holds <scen>/mid_rdm/ and predictions/).")
+    p.add_argument("--finetuned_dir", type=str, required=True,
+                   help="model_class_lba_finetune_validate --outdir (<fam>/<scen>/, predictions/).")
+    p.add_argument("--base_fig_dir", type=str, required=True,
+                   help="Original checkpoint's per-case figures (e1_validate --outdir).")
+    p.add_argument("--base_pred_dir", type=str, required=True,
+                   help="Original checkpoint's predictions (e1_validate --pred_dir).")
+    p.add_argument("--outdir", type=str, required=True)
+    p.add_argument("--scenarios", nargs="+", default=BENCH5,
+                   help="Cases to compare. Default bench5: the cases every arm loads from "
+                        "the shared benchmark files, so each difference is exactly paired.")
+    p.add_argument("--max_num_categories", type=int, default=2,
+                   help="Row layout of the prediction grids. 2 for bench cases scored from "
+                        "the shared files (compact grid: intercept, u_1, u_2, u_1:u_2).")
     return p.parse_args()
 
 
@@ -178,124 +182,68 @@ def plot_delta_metrics(combined: pd.DataFrame, outdir: Path, condition: str,
     return path
 
 
+def _paired(true_a, true_b, what):
+    """Refuse to difference two arms unless they scored the same datasets' parameters."""
+    if true_a.shape != true_b.shape or not np.allclose(true_a, true_b, atol=1e-6):
+        raise SystemExit(f"{what}: true_set differs between arms -- they did not score the "
+                         f"same datasets, so a paired difference would be meaningless")
+
+
 def main():
     args = parse_args()
     outdir = Path(args.outdir)
     outdir.mkdir(parents=True, exist_ok=True)
+    zs, ft = Path(args.zero_shot_dir), Path(args.finetuned_dir)
+    base_fig, base_pred = Path(args.base_fig_dir), Path(args.base_pred_dir)
+    max_cats = args.max_num_categories
+    delta_rows = []
 
-    zero_shot_dir  = Path(args.zero_shot_lba_pred_dir)
-    base_mc_dir    = Path(args.base_mc_pred_dir)
-    finetuned_dir  = Path(args.finetuned_pred_dir)
-    ref            = args.ref_condition
-    max_cats       = args.max_num_categories
+    arms = {"LBA": dict(cfg=_LBA_WITH_PI, labels=("zero-shot", "fine-tuned"),
+                        a_pred=lambda sc: zs / "predictions" / f"lba_{sc}_mid1_cf_pred.npz",
+                        a_csv=lambda sc: zs / sc / "mid_rdm" / f"lba_{sc}_mid1_metrics.csv",
+                        stem="delta_r")}
+    for name, cfg in MC_MODELS.items():
+        m = name.lower()
+        arms[name] = dict(cfg=cfg, labels=("base", "fine-tuned"),
+                          a_pred=lambda sc, m=m: base_pred / f"{m}_{sc}_cf_pred.npz",
+                          a_csv=lambda sc, m=m: base_fig / m / sc / f"{m}_{sc}_fm_metrics.csv",
+                          stem="forgetting_delta_r")
 
-    all_delta_rows = []
-
-    # ── LBA: zero-shot vs. fine-tuned ─────────────────────────────────────────
-    zs_lba_path = zero_shot_dir / f"lba_{ref}_mid1_cf_pred.npz"
-    ft_lba_path = finetuned_dir / f"lba_{ref}_ft_pred.npz"
-
-    if zs_lba_path.exists() and ft_lba_path.exists():
-        pred_zs, true_zs, mask_zs = _load_npz(zs_lba_path)
-        pred_ft, true_ft, mask_ft = _load_npz(ft_lba_path)
-
-        design_config = _LBA_WITH_PI["benchmark_configs"][ref]
-        intrinsic_params = LBA_LOCAL_PARAMS
-        variable_names   = _LBA_WITH_PI["variable_names"]
-
-        r_zs, pm = compute_r_matrix(true_zs, pred_zs, design_config, intrinsic_params, max_cats,
-                                     mask_zs[None])
-        r_ft, _  = compute_r_matrix(true_ft, pred_ft, design_config, intrinsic_params, max_cats,
-                                     mask_ft[None])
-
-        fig = adaptive_correlation_delta(
-            r_zs, r_ft, pm, design_config, intrinsic_params, max_cats,
-            variable_names=variable_names,
-            label_a="zero-shot", label_b="fine-tuned",
-        )
-        fig.suptitle(f"LBA — {ref}", fontsize=14)
-        fig.savefig(outdir / f"lba_{ref}_delta_r.pdf", bbox_inches="tight")
-        plt.close(fig)
-        logging.info(f"[saved] {outdir / f'lba_{ref}_delta_r.pdf'}")
-
-        # metrics delta for LBA across all available conditions
-        for cfg_name in _LBA_WITH_PI["benchmark_configs"]:
-            zs_m = zero_shot_dir / f"lba_{cfg_name}_mid1_cf_pred.npz"
-            ft_m = finetuned_dir / f"lba_{cfg_name}_ft_pred.npz"
-            csv_zs = zero_shot_dir.parent / "figures" / "lba" / cfg_name / f"lba_{cfg_name}_metrics.csv"
-            csv_ft = finetuned_dir.parent / "figures" / "lba" / cfg_name / f"lba_{cfg_name}_ft_metrics.csv"
-            # Try outdir-based paths that validate scripts actually write
-            csv_zs_alt = Path(args.zero_shot_lba_pred_dir).parent.parent / "figures" / \
-                         "generalization" / "model_class_lba" / "cf" / cfg_name / "mid_rdm" / \
-                         f"lba_{cfg_name}_mid1_metrics.csv"
-            csv_ft_alt = Path(args.finetuned_pred_dir).parent.parent / "figures" / \
-                         "model_class" / "cf" / "lba_finetune" / "lba" / cfg_name / \
-                         f"lba_{cfg_name}_ft_metrics.csv"
-            df_zs = _load_metrics_csv(csv_zs) or _load_metrics_csv(csv_zs_alt)
-            df_ft = _load_metrics_csv(csv_ft) or _load_metrics_csv(csv_ft_alt)
-            if df_zs is not None and df_ft is not None:
-                delta = _delta_metrics(df_zs, df_ft, "zero-shot", "fine-tuned")
-                delta.insert(0, "model", "LBA")
-                delta.insert(1, "condition", cfg_name)
-                all_delta_rows.append(delta)
-    else:
-        logging.warning(f"LBA prediction files not found for condition '{ref}'. Skipping LBA delta.")
-
-    # ── DDM / RDM / CDM: base vs. fine-tuned (forgetting) ─────────────────────
-    for model_name, model_cfg in MC_MODELS.items():
-        m = model_name.lower()
-        base_path = base_mc_dir / f"{m}_{ref}_cf_pred.npz"
-        ft_path   = finetuned_dir / f"{m}_{ref}_ft_pred.npz"
-
-        if base_path.exists() and ft_path.exists():
-            pred_base, true_base, mask_base = _load_npz(base_path)
-            pred_ft,   true_ft,   mask_ft   = _load_npz(ft_path)
-
-            design_config    = model_cfg["benchmark_configs"][ref]
-            intrinsic_params = model_cfg["intrinsic_params"]
-            variable_names   = model_cfg["variable_names"]
-
-            r_base, pm = compute_r_matrix(true_base, pred_base, design_config,
-                                           intrinsic_params, max_cats, mask_base[None])
-            r_ft, _    = compute_r_matrix(true_ft,   pred_ft,   design_config,
-                                           intrinsic_params, max_cats, mask_ft[None])
-
-            fig = adaptive_correlation_delta(
-                r_base, r_ft, pm, design_config, intrinsic_params, max_cats,
-                variable_names=variable_names,
-                label_a="base", label_b="fine-tuned",
-            )
-            fig.suptitle(f"{model_name} — {ref} (forgetting)", fontsize=14)
-            fig.savefig(outdir / f"{m}_{ref}_forgetting_delta_r.pdf", bbox_inches="tight")
+    for name, arm in arms.items():
+        m, cfg = name.lower(), arm["cfg"]
+        la, lb = arm["labels"]
+        for sc in args.scenarios:
+            a_path, b_path = arm["a_pred"](sc), ft / "predictions" / f"{m}_{sc}_ft_pred.npz"
+            if not (a_path.exists() and b_path.exists()):
+                logging.warning(f"{name}/{sc}: predictions missing ({a_path} / {b_path}); skipped")
+                continue
+            pred_a, true_a, mask_a = _load_npz(a_path)
+            pred_b, true_b, mask_b = _load_npz(b_path)
+            _paired(true_a, true_b, f"{name}/{sc}")
+            dc = cfg["benchmark_configs"][sc]
+            r_a, pm = compute_r_matrix(true_a, pred_a, dc, cfg["intrinsic_params"], max_cats, mask_a[None])
+            r_b, _ = compute_r_matrix(true_b, pred_b, dc, cfg["intrinsic_params"], max_cats, mask_b[None])
+            fig = adaptive_correlation_delta(r_a, r_b, pm, dc, cfg["intrinsic_params"], max_cats,
+                                             variable_names=cfg["variable_names"],
+                                             label_a=la, label_b=lb)
+            (outdir / m).mkdir(exist_ok=True)
+            fig.savefig(outdir / m / f"{sc}_{arm['stem']}.pdf", bbox_inches="tight")
             plt.close(fig)
-            logging.info(f"[saved] {outdir / f'{m}_{ref}_forgetting_delta_r.pdf'}")
-        else:
-            logging.warning(f"{model_name} prediction files not found for condition '{ref}'. Skipping.")
 
-        # metrics delta across all conditions
-        for cfg_name in model_cfg["benchmark_configs"]:
-            csv_base = base_mc_dir.parent / "figures" / "model_class" / "cf" / m / cfg_name / \
-                       f"{m}_{cfg_name}_fm_metrics.csv"
-            csv_ft   = Path(args.finetuned_pred_dir).parent.parent / "figures" / \
-                       "model_class" / "cf" / "lba_finetune" / m / cfg_name / \
-                       f"{m}_{cfg_name}_ft_metrics.csv"
-            df_base = _load_metrics_csv(csv_base)
-            df_ft   = _load_metrics_csv(csv_ft)
-            if df_base is not None and df_ft is not None:
-                delta = _delta_metrics(df_base, df_ft, "base", "fine-tuned")
-                delta.insert(0, "model", model_name)
-                delta.insert(1, "condition", cfg_name)
-                all_delta_rows.append(delta)
+            df_a = _load_metrics_csv(arm["a_csv"](sc))
+            df_b = _load_metrics_csv(ft / m / sc / f"{m}_{sc}_ft_metrics.csv")
+            if df_a is not None and df_b is not None:
+                d = _delta_metrics(df_a, df_b, la, lb)
+                d.insert(0, "model", name); d.insert(1, "condition", sc)
+                delta_rows.append(d)
 
-    # ── Save combined metrics delta table ──────────────────────────────────────
-    if all_delta_rows:
-        combined = pd.concat(all_delta_rows, axis=0)
-        combined.to_csv(outdir / "delta_metrics.csv")
-        logging.info(f"[saved] {outdir / 'delta_metrics.csv'}")
-        plot_delta_metrics(combined, outdir, condition=ref)
-    else:
-        logging.warning("No metrics CSVs found; delta_metrics.csv not written.")
-
+    if not delta_rows:
+        raise SystemExit("no paired metrics found; nothing to compare")
+    combined = pd.concat(delta_rows, axis=0)
+    combined.to_csv(outdir / "delta_metrics.csv")
+    logging.info(f"[saved] {outdir / 'delta_metrics.csv'}")
+    for sc in args.scenarios:
+        plot_delta_metrics(combined, outdir, condition=sc)
     logging.info("Done.")
 
 

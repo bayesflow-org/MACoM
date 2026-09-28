@@ -19,20 +19,17 @@ WHAT THE GAP IS
 A paired C2ST: for each bench5 case, how distinguishable are the posteriors of the
 case-specific BayesFlow baseline from those of the single amortized ModelClass
 CogFormer? 0.5 = indistinguishable = no gap. Both arms score the SAME simulated
-datasets -- the CogFormer arm comes from the PAIRED validation run (CF_PAIRED), not
-from the per-case run behind experiment-1's per_case/, which simulated its own data.
+datasets -- the shared benchmark files written by e1_data, which experiment 1's
+per-case validation (CF_PAIRED) and the baselines both load.
 
-PROVENANCE WARNING (recorded 2026-09-11)
-----------------------------------------
-The DDM and CDM results in this tree were produced by a run whose SOURCES NO LONGER
-EXIST: outputs/figures/c2st/ and outputs/figures/model_class/cf_paired/ are absent,
-there are zero outputs/data/model_family/*_data.npz, and 1 of 15 BF checkpoints
-survives. RDM was never run at all -- yet amortization_gap.tex quotes RDM numbers,
-so that run happened and its artifacts were lost.
-
-This is why main() carries forward manifest rows whose sources are gone: a plain
-regenerate-from-sources would silently shrink the record from 172 rows to 0 while the
-files stayed on disk. Do not "fix" that by dropping the carry-forward.
+HISTORY
+-------
+The pre-2026-09-27 contents of this tree were produced by BayesFlow baselines that
+trained on ~320 distinct datasets (keras forked its simulation workers with cloned
+RNG state every epoch), hence calibration error ~0.4 and contraction ~0.997. They were
+deleted; model_family_bf_train now reseeds per worker process. main() still carries
+forward manifest rows whose files remain in the tree but whose sources are gone, so a
+partial rebuild never silently shrinks the record.
 
     python -m experiments.finalize_experiment_1a --dry_run
     python -m experiments.finalize_experiment_1a
@@ -47,12 +44,15 @@ import pandas as pd
 # Reuse experiment-1's allowlist and renaming rather than restating them, so the two
 # snapshots cannot drift in what they keep or how they name the global-param panel.
 from experiments.finalize_experiment_1 import git_commit, kept, tidy
+from experiments import shared_config
 
 FINALS = Path("outputs/finals/experiment-1a")
 C2ST = Path("outputs/figures/c2st")
 BF_FIG = Path("outputs/figures/model_family/bf")
 BF_EVAL = Path("outputs/evaluations/model_family/bf")
-CF_PAIRED = Path("outputs/figures/model_class/cf_paired")
+# The CogFormer arm is experiment 1's per-case validation: it scores the same shared
+# benchmark files as the baselines (e1_data), so no separate paired run exists.
+CF_PAIRED = Path("outputs/figures/model_class/cf") / f"{shared_config.get('MC_TAG')}_validate"
 
 FAMILIES = ["ddm", "rdm", "cdm"]
 # bench5. model_family_c2st drops "full", and the BF baselines were never trained on
@@ -127,7 +127,9 @@ def main():
     have_rows = 0
     manifest = FINALS / "MANIFEST.csv"
     if manifest.exists():
-        have_rows = len(pd.read_csv(manifest))
+        # Only rows whose file is still in the tree get carried; count those, not the
+        # raw manifest length, or the dry run over-promises.
+        have_rows = sum((FINALS / d).exists() for d in pd.read_csv(manifest)["destination"])
 
     missing = [f for f in FAMILIES if not (C2ST / f / f"{f}_c2st_summary.csv").exists()]
     if missing:
@@ -156,9 +158,8 @@ def main():
             "renamed_global_to_pi": "_pi" in dest.name and "_global" in src.name,
         })
 
-    # Carry forward rows this run cannot regenerate. See the PROVENANCE WARNING in
-    # the module docstring: for DDM and CDM this is currently the ONLY thing keeping
-    # 172 rows of record attached to 172 files that still exist on disk.
+    # Carry forward rows this run cannot regenerate, as long as their files are still
+    # in the tree (see HISTORY in the module docstring).
     carried = []
     if manifest.exists():
         have = {r["destination"] for r in rows}
@@ -180,7 +181,7 @@ def _family_rows() -> str:
     for fam in FAMILIES:
         d = FINALS / fam
         if not d.is_dir():
-            out.append(f"| {fam.upper()} | — | absent — never run |")
+            out.append(f"| {fam.upper()} | — | not yet produced |")
             continue
         cases = sorted(c.name for c in d.iterdir() if c.is_dir())
         n = sum(1 for _ in d.rglob("*") if _.is_file())
@@ -200,8 +201,7 @@ Assembled {stamp} by `experiments/finalize_experiment_1a.py` at commit `{git_com
 A paired C2ST per bench5 case: how distinguishable are the posteriors of a
 case-specific BayesFlow baseline from those of the single amortized ModelClass
 CogFormer? **0.5 = indistinguishable = no gap.** Both arms score the *same* simulated
-datasets — the CogFormer arm is the PAIRED validation run, not the per-case run
-behind `experiment-1/per_case/`.
+datasets: the shared benchmark files written once by the `e1_data` stage.
 
 ## Layout
 
@@ -227,11 +227,11 @@ it is authored, not copied.
 `<family>/summary.csv` has one row per case with `mean_accuracy` (mean over
 per-parameter cells) and `joint_c2st` (all active cells at once).
 
-The `cf_*` files come from the PAIRED validate run, not from
-`experiment-1/per_case/`. `per_case/` simulated its own datasets; the C2ST re-ran
-validation against the BF simulations so both arms score identical data. Compare
-`bf_*` with `cf_*` here — comparing `bf_*` against `per_case/` would be comparing
-across different data.
+The `cf_*` files are experiment 1's per-case validation of the same cases
+(`experiment-1/per_case/`), which scored those same shared files. So `bf_*`, `cf_*` and
+`experiment-1/per_case/` describe identical datasets and compare directly. (The
+seed alone would NOT make that true: it pins the parameters but not the simulated RTs
+or regressor designs. Loading the saved files is what pairs the arms.)
 
 **Read `joint_c2st`, not `mean_accuracy`.** Both metrics pool draws across all 200
 datasets, and the pooled 1-D marginal of any single parameter is dominated by
@@ -248,40 +248,22 @@ null-calibration machinery in `model_class_paired_c2st.py`, so nothing here is
 baseline-corrected. The joint values are far past any plausible floor (~0.49), but a
 per-cell 0.545 must not be quoted as "0.045 above chance".
 
-**C2ST is direction-blind, and here the direction favours CogFormer.** On identical
-datasets the amortized model beats the per-case BayesFlow baseline on every parameter
-of both families — DDM `v` correlation 0.965 vs 0.817, RMSE 0.209 vs 0.460 — while
-producing *wider* posteriors. The BF baselines are badly overconfident: their own
-diagnostics report calibration error 0.39–0.47 and posterior contraction 0.993–0.999,
-and their posterior SDs are ~10x smaller than their own RMSE. So a large gap here is
-mostly a statement about BF, not a cost of amortization. Budgets differ and are not
-matched: ~51M simulations per BF case against ~256M for the one checkpoint covering
-every case and family.
+**C2ST is direction-blind.** A large value says the two posteriors differ, not which
+one is better. Read it next to `bf_evaluations.csv` and `cf_metrics.csv` (NRMSE,
+calibration error, contraction) on the same datasets.
 
-## Provenance warning
+## Budget
 
-The DDM and CDM files here come from a run whose **sources no longer exist**:
-`outputs/figures/c2st/` and `outputs/figures/model_class/cf_paired/` are absent,
-there are zero `outputs/data/model_family/*_data.npz`, and 1 of 15 BayesFlow
-checkpoints survives. **RDM was never run** — yet `amortization_gap.tex` quotes RDM
-numbers, so that run happened and its artifacts were lost.
-
-Re-deriving any of this is a full rebuild (~15 BayesFlow trainings):
-
-```bash
-bash run_experiments.sh exp1a
-```
-
-`MANIFEST.csv` therefore carries forward rows whose sources are gone. Re-running this
-assembler never removes files it cannot regenerate.
+Matched by construction (decided 2026-09-27): the model-class CogFormer trains on
+{shared_config.get("MC_EPOCHS")} epochs x 100 steps x {shared_config.get("MC_TRAIN_BATCH")} = 192M simulated datasets
+across three families, and each of the 15 BayesFlow baselines on
+{shared_config.get("MF_BF_EPOCHS")} x 100 x {shared_config.get("MF_BF_BATCH")} = 12.8M, i.e. 64M per family on both sides, at the same batch size.
 
 ## Excluded
 
 `full` (dropped by `model_family_c2st`) and `mixed_predictor` (no BF baseline was
 ever trained on it) have no BF arm to compare against, so they are absent by
-construction rather than by omission. The 200-epoch baseline variant lands in
-`e200/` via `experiments/finalize_experiment_1a_e200.py` — a separate budget, kept
-in its own subtree and its own manifest so the two are never mixed.
+construction rather than by omission.
 """)
 
 

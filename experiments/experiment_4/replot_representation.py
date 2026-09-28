@@ -5,7 +5,7 @@ fresh simulation, so re-running it to change how a figure LOOKS costs a GPU pass
 data whose numbers are already settled. Everything the figures draw is a function of
 the two summary tensors, and those are exactly what the run persisted.
 
-    python -m experiments.encoder_rep.replot_representation \\
+    python -m experiments.experiment_4.replot_representation \\
         --npz outputs/finals/experiment-4/representation/varying_values/summaries.npz \\
         --figdir outputs/figures/encoder_rep/representation/varying_values
 

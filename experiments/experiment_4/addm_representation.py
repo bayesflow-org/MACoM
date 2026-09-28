@@ -556,6 +556,26 @@ def plot_app2(df, outpath):
     fig.savefig(outpath, bbox_inches="tight"); plt.close(fig)
 
 
+def _simulate_raw(args, sim, dc, mk):
+    """Simulate n_conditions x n_repeats datasets and assemble the encoder inputs.
+
+    Returns (raw, samples, n_conditions, n_repeats). One `raw` array feeds BOTH encoders,
+    so the frozen and learned summaries describe the same datasets.
+    """
+    logging.info(f"simulating {args.n_conditions} conditions x {args.n_repeats} repeats")
+    samples, reps = simulate_repeats(
+        sim.model_family, sim.model_family.model,
+        n_conditions=args.n_conditions, n_repeats=args.n_repeats, num_obs=args.num_obs,
+        design_config=dc, mask_kwargs=mk,
+        link_fun={k: f for k, f in addm_link_fun().items() if k in INTRINSIC_PARAMS},
+        max_num_regressors=MAX_NUM_REGRESSORS, max_num_categories=MAX_NUM_CATEGORIES,
+        extra_sample_kwargs=CASE_SAMPLE_KWARGS.get(args.case), seed=args.seed)
+    designs = samples["design_matrices"]
+    raw = np.stack([sim.assemble(designs[i:i+1], o["rts"][None], o["choices"][None])[0]
+                    for i, cond in enumerate(reps) for o in cond])
+    return raw, samples, len(reps), len(reps[0])
+
+
 def main():
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
     args = parse_args()
@@ -568,24 +588,27 @@ def main():
                                 first_fixation=args.first_fixation, fix_v=args.fix_v,
                                 fix_s_v=args.fix_s_v)
     dc, mk = resolve_case(args.case, args.fix_v, args.fix_s_v)
-    logging.info(f"simulating {args.n_conditions} conditions x {args.n_repeats} repeats")
-    samples, reps = simulate_repeats(
-        sim.model_family, sim.model_family.model,
-        n_conditions=args.n_conditions, n_repeats=args.n_repeats, num_obs=args.num_obs,
-        design_config=dc, mask_kwargs=mk,
-        link_fun={k: f for k, f in addm_link_fun().items() if k in INTRINSIC_PARAMS},
-        max_num_regressors=MAX_NUM_REGRESSORS, max_num_categories=MAX_NUM_CATEGORIES,
-        extra_sample_kwargs=CASE_SAMPLE_KWARGS.get(args.case), seed=args.seed)
+    # The encoder inputs are SAVED (raw_data.npz) and --raw_data reloads them: --seed pins
+    # the parameters but not the simulated RTs (numba's own RNG), so without the file the
+    # figures could not be rebuilt, or new encoders compared, on the identical datasets.
+    if args.raw_data:
+        rd = np.load(args.raw_data)
+        raw = rd["raw"]
+        samples = {"param_matrices": rd["param_matrices"], "param_masks": rd["param_masks"]}
+        n_cond, n_rep = int(rd["n_conditions"]), int(rd["n_repeats"])
+        logging.info(f"loaded {n_cond} conditions x {n_rep} repeats from {args.raw_data}")
+    else:
+        raw, samples, n_cond, n_rep = _simulate_raw(args, sim, dc, mk)
+        np.savez_compressed(outdir / "raw_data.npz", raw=raw.astype(np.float32),
+                            param_matrices=samples["param_matrices"],
+                            param_masks=samples["param_masks"],
+                            n_conditions=n_cond, n_repeats=n_rep)
+        logging.info(f"[saved] raw datasets -> {outdir / 'raw_data.npz'}")
 
-    designs = samples["design_matrices"]
     frozen_enc = CogFormerEncoderSummary(_load_cogformer(args, device), device)
     baseline_ap = keras.saving.load_model(
         baseline_ckpt_path(args.case, args.first_fixation, args.tag, args.fix_v,
                            args.fix_s_v) + "/model.keras")
-
-    n_cond, n_rep = len(reps), len(reps[0])
-    raw = np.stack([sim.assemble(designs[i:i+1], o["rts"][None], o["choices"][None])[0]
-                    for i, cond in enumerate(reps) for o in cond])
     fro = frozen_enc.summarize_raw(raw).reshape(n_cond, n_rep, -1)
     with torch.no_grad():
         lea = np.asarray(keras.ops.convert_to_numpy(
@@ -678,6 +701,9 @@ def parse_args():
     p.add_argument("--n_null", type=int, default=30,
                    help="Random projections for the dimensionality-matched null.")
     p.add_argument("--seed", type=int, default=0)
+    p.add_argument("--raw_data", type=str, default=None,
+                   help="Reload encoder inputs saved by an earlier run (raw_data.npz) "
+                        "instead of simulating; without it they are simulated and saved.")
     p.add_argument("--cogformer_checkpoint", type=str, required=True)
     p.add_argument("--encoder_device", type=str, default="cuda")
     p.add_argument("--num_models", type=int, default=3)

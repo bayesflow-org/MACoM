@@ -15,22 +15,48 @@ dependencies = [
     # GPU JAX: the BayesFlow baseline trainer runs on the jax backend (keras).
     # cuda13 matches the driver (CUDA 13.0) and torch's cu130 build; both coexist.
     "jax[cuda13]>=0.11.1",
+    "joblib>=1.5.3",
     "jupyter>=1.1.1",
-    "keras>=3.14.0",
+    "keras>=3.15.1",
     "matplotlib>=3.10.9",
     "notebook>=7.4.1",
-    "numba>=0.64.0",
-    "pandas>=3.0.2",
+    "numba>=0.67.0",
+    "numpy>=2.5.3",
+    "pandas>=3.0.6",
+    # Experiment 4's representation analysis (RSA / crossnobis). Not pulled in by any
+    # other dependency, so it must be listed or a fresh `uv sync` cannot run exp 4.
+    "rsatoolbox>=0.3.2",
     "scikit-learn>=1.8.0",
+    "scipy>=1.18.1",
     "seaborn>=0.13.2",
     "torch>=2.10.0",
+    "tqdm>=4.70.1",
 ]
 
-# BayesFlow is taken from the best-defaults branch, not PyPI: the encoder-rep
-# aDDM arms are run at that branch's retuned network defaults. Pinned to a
-# commit rather than the branch name so `uv sync` cannot silently move it.
+[project.optional-dependencies]
+# Experiment tracking. Every import is guarded, so runs work without it.
+tracking = ["wandb>=0.26.1"]
+
+# BayesFlow is pinned to the v2.0.14 release commit (it supersedes the best-defaults
+# branch the aDDM arms were first tuned on). A commit, not a tag or branch, so
+# `uv sync` cannot silently move it.
 [tool.uv.sources]
 bayesflow = { git = "https://github.com/bayesflow-org/bayesflow.git", rev = "391acaf1e15a487e265e96bb06e8e837328cae8b" }
+
+# The lock must reproduce the stack every final-run result was validated on
+# (2026-09-27/28): a numpy/numba change alters the simulated datasets, and jax is the
+# BayesFlow baselines' backend. Where a fresh resolve would pick something newer than
+# what was tested, it is constrained here to the tested version.
+[tool.uv]
+constraint-dependencies = [
+    "jax==0.11.1",
+    "jaxlib==0.11.1",
+    "jax-cuda13-plugin==0.11.1",
+    "jax-cuda13-pjrt==0.11.1",
+    "nvidia-cuda-crt==13.3.73",
+    "nvidia-cuda-nvcc==13.3.73",
+    "nvidia-nvvm==13.3.73",
+]
 
 #[project.optional-dependencies]
 #dev = [

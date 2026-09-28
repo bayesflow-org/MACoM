@@ -68,7 +68,7 @@ from experiments.configs import MODELS as _BASE
 from experiments.utils import add_global_params
 from .representation import simulate_repeats, assemble_input, cka
 from .addm_representation import rdm_of, parameter_rdm, build_dataset
-from .addm_bf_apply import CogFormerEncoderSummary, _load_cogformer
+from .addm_bf_apply import CogFormerEncoderSummary, _load_cogformer, resolve_case, INTRINSIC_PARAMS
 
 SHARED = ["v", "a", "tau", "s_v", "s_tau"]      # present in all five families
 TRAINED = ["ddm", "rdm", "cdm"]
@@ -110,10 +110,21 @@ def _family_cmap(color):
 
 
 def family_setup(key, fixed_A=0.5):
+    """(ModelFamily, intrinsic params, link, design_config, mask kwargs) for one family.
+
+    aDDM is the 5-parameter vsvfixed variant (v and s_v pinned), taken from
+    addm_bf_apply.resolve_case -- the SAME definition the experiment-4 probe trains
+    and validates on, so the pooled geometry and the probe describe one model. Every
+    other family is intercept-only with all of its parameters free.
+    """
     cls, prior_fn, link_fn = SPECS[key]
     if key == "addm":
-        params = ["v", "v_diff", "omega", "a", "tau", "s_v", "s_tau"]
+        params = INTRINSIC_PARAMS
         model = cls(first_fixation="item0")
+        mf = ModelFamily(model=model, prior=prior_fn(), intrinsic_params=params)
+        link = {k: v for k, v in link_fn().items() if k in params}
+        dc, mk = resolve_case("intercept_only", fix_v=True, fix_s_v=True)
+        return mf, params, link, dc, mk
     elif key == "lba":
         # fixed_A pins the start-point range so that `a` is the THRESHOLD, which is
         # what the finetuned checkpoint was trained against. Leaving A free makes `a`
@@ -126,7 +137,9 @@ def family_setup(key, fixed_A=0.5):
         model = cls()
     mf = ModelFamily(model=model, prior=prior_fn(), intrinsic_params=params)
     link = {k: v for k, v in link_fn().items() if k in params}
-    return mf, params, link
+    dc = {"1": params}
+    mk = {"free_intrinsics": params, "fixed_intrinsics": [], "fixed_values": {}}
+    return mf, params, link, dc, mk
 
 
 def simulate_family(key, n_cond, n_rep, num_obs, seed, fixed_A=0.5):
@@ -138,9 +151,7 @@ def simulate_family(key, n_cond, n_rep, num_obs, seed, fixed_A=0.5):
     produce different datasets. Comparing encoder A on dataset X against encoder B on
     dataset Y drives every similarity to ~0 regardless of the encoders.
     """
-    mf, params, link = family_setup(key, fixed_A)
-    dc = {"1": params}
-    mk = {"free_intrinsics": params, "fixed_intrinsics": [], "fixed_values": {}}
+    mf, params, link, dc, mk = family_setup(key, fixed_A)
     samples, reps = simulate_repeats(
         mf, mf.model, n_conditions=n_cond, n_repeats=n_rep, num_obs=num_obs,
         design_config=dc, mask_kwargs=mk, link_fun=link,
@@ -160,7 +171,9 @@ def simulate_family(key, n_cond, n_rep, num_obs, seed, fixed_A=0.5):
 
     raw = np.stack([one(i, obs) for i, cond in enumerate(reps) for obs in cond])
     # Intercept-only design: flat index is row * n_params + param, so the intercept
-    # row's cells are simply the first len(params) entries.
+    # row's cells are simply the first len(params) entries. For vsvfixed aDDM the
+    # pinned v and s_v columns are constant; shared_parameter_rdm standardises with a
+    # +1e-12 guard, so they contribute zeros rather than NaN.
     theta = {p: samples["param_matrices"][:, params.index(p)] for p in SHARED}
     return raw, theta
 
@@ -535,13 +548,25 @@ def main():
     shp = (a.n_conditions, a.n_repeats, -1)
     summ = {"original": {}, "finetuned": {}}
     rows = []
+    # The raw encoder inputs are SAVED, because they cannot be regenerated: --seed does
+    # not fix them (numba's RNG, see simulate_family). --raw_data reloads a saved set so
+    # the figure can be rebuilt, or new encoders compared, on the identical datasets.
+    loaded = np.load(a.raw_data) if a.raw_data else None
+    raw_store = {}
     for fam in POOLED:
-        logging.info(f"[{fam}] simulating {a.n_conditions}x{a.n_repeats} and encoding")
-        # Simulated ONCE and encoded twice. Re-simulating per encoder does not work
-        # even at a fixed seed -- the numba kernels use their own RNG -- and comparing
-        # two encoders on two different datasets drives every similarity to ~0.
-        raw, th = simulate_family(fam, a.n_conditions, a.n_repeats, a.num_obs,
-                                  a.seed, a.fixed_A)
+        if loaded is not None:
+            logging.info(f"[{fam}] loading raw datasets from {a.raw_data}")
+            raw = loaded[f"{fam}__raw"]
+            th = {q: loaded[f"{fam}__theta__{q}"] for q in SHARED}
+        else:
+            logging.info(f"[{fam}] simulating {a.n_conditions}x{a.n_repeats} and encoding")
+            # Simulated ONCE and encoded twice. Re-simulating per encoder does not work
+            # even at a fixed seed -- the numba kernels use their own RNG -- and comparing
+            # two encoders on two different datasets drives every similarity to ~0.
+            raw, th = simulate_family(fam, a.n_conditions, a.n_repeats, a.num_obs,
+                                      a.seed, a.fixed_A)
+        raw_store[f"{fam}__raw"] = raw.astype(np.float32)
+        raw_store.update({f"{fam}__theta__{q}": np.asarray(v) for q, v in th.items()})
         s = enc_orig.summarize_raw(raw).reshape(shp)
         summ["original"][fam] = s
         summ["finetuned"][fam] = enc_ft.summarize_raw(raw).reshape(shp)
@@ -568,6 +593,9 @@ def main():
     fams, M = between_family_cka({f: summ["original"][f] for f in TRAINED + ["addm"]})
     pd.DataFrame(M, index=fams, columns=fams).to_csv(OUT / "app3_between_family_cka.csv",
                                                      float_format="%.4f")
+    if loaded is None:
+        np.savez_compressed(OUT / "app3_raw_data.npz", **raw_store)
+        logging.info(f"[saved] raw datasets -> {OUT / 'app3_raw_data.npz'}")
     np.savez_compressed(
         OUT / "app3_summaries.npz",
         **{f: v for f, v in summ["original"].items()},
@@ -588,6 +616,10 @@ def parse_args():
     p.add_argument("--fixed_A", type=float, default=0.5,
                    help="LBA start-point range, pinned to match the finetuned "
                         "checkpoint. See family_setup.")
+    p.add_argument("--raw_data", type=str, default=None,
+                   help="Reload encoder inputs saved by an earlier run (app3_raw_data.npz) "
+                        "instead of simulating. Without it the raw datasets are simulated "
+                        "and saved there.")
     p.add_argument("--encoder_device", type=str, default="cuda")
     p.add_argument("--num_models", type=int, default=3)
     p.add_argument("--finetuned_num_models", type=int, default=4)

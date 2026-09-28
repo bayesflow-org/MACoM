@@ -2,7 +2,7 @@ import numpy as np
 from scipy.stats import beta
 import matplotlib.pyplot as plt
 from cogformer.simulator.design_utils import build_parameter_mask, expand_design_config_to_mask, build_row_labels
-from cogformer.utils.plot_utils import cogformer_cm_colors
+from cogformer.utils.plot_utils import cogformer_cm_colors, place_legend_below
 
 
 def compute_empirical_coverage(
@@ -188,7 +188,7 @@ def adaptive_coverage(
     num_cols    = len(col_idx)
 
     if figsize is None:
-        figsize = (3.2 * num_cols, 2.9 * num_rows)
+        figsize = (3.2 * num_cols, 3.2 * num_rows)
 
     fig, axarr = plt.subplots(num_rows, num_cols, figsize=figsize, squeeze=False)
 
@@ -202,6 +202,10 @@ def adaptive_coverage(
 
         for c_f in range(num_cols):
             ax = axarr[r_f, c_f]
+            # Square BY CONSTRUCTION, active and N/A cells alike: the box aspect is fixed
+            # independently of figsize and of the margins tight_layout leaves, which is
+            # what made single-row (intercept-only) grids and 1x1 global panels drift.
+            ax.set_box_aspect(1)
 
             # Masked cell -> N/A tile
             if parameter_mask[r_f, c_f] != 1.0:
@@ -293,16 +297,11 @@ def adaptive_coverage(
 
     fig.tight_layout()
     if legend_handles is not None:
-        fig.legend(
-            legend_handles,
-            legend_labels,
-            loc="lower center",
-            ncol=len(legend_handles),
-            fontsize=legend_fontsize,
-            bbox_to_anchor=(0.5, 0),
-            bbox_transform=fig.transFigure,
-        )
-        fig.subplots_adjust(bottom=0.1)
+        # Below the measured extent of the bottom row's labels (see place_legend_below).
+        # The old fixed subplots_adjust(bottom=0.1) overrode tight_layout's margin and,
+        # on single-row grids, put the legend on top of the x-axis label.
+        place_legend_below(fig, legend_handles, legend_labels,
+                           ncol=len(legend_handles), fontsize=legend_fontsize)
     return fig
 
 
@@ -359,7 +358,7 @@ if __name__ == "__main__":
         num_regressors = len(design_config.keys()) - 1
         num_categories = 3
 
-        # This must match ContextManager's row layout:
+        # This must match build_parameter_mask's row layout:
         # rows = 1 (intercept) + num_regressors * (num_categories - 1)
         num_rows = 1 + num_regressors * (num_categories - 1)
         num_cols = num_params

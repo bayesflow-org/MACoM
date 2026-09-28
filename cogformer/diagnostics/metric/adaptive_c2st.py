@@ -185,7 +185,7 @@ def adaptive_c2st(
     max_num_categories : int
         Maximum number of categories, determines the row layout.
     parameter_mask : np.ndarray of shape (num_rows, num_cols), optional
-        Binary mask (1 = active). Built from ContextManager if not provided.
+        Binary mask (1 = active). Built with build_parameter_mask if not provided.
     variable_names : list[str], optional
         Display labels for columns. Falls back to intrinsic_params if not given.
     n_splits : int, optional, default: 5

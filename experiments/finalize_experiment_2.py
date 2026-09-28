@@ -24,10 +24,26 @@ from pathlib import Path
 
 import pandas as pd
 
+from experiments import shared_config
+from experiments.finalize_experiment_1 import kept as val_kept, tidy as val_tidy
+
 FINALS = Path("outputs/finals/experiment-2")
 SRC = Path("outputs/figures/real_data/ppc")
 DATA = Path("outputs/data/real_data")
 FAMILIES = ["ddm", "rdm", "cdm"]
+
+# Real-data-DESIGN validation (realdata_validate.py): simulated data on each family's
+# empirical designs. Filed next to the fit it validates -- <fam>/validation/ for the
+# canonical fit, ddm/sv_fixed/validation/ for the refit -- so each folder pairs a real
+# fit with the check of how well that design identifies it.
+_MC_TAG = shared_config.get("MC_TAG")
+VAL_FIG = Path("outputs/figures/model_class/cf") / f"{_MC_TAG}_realdata"
+VAL_PRED = Path("outputs/data/model_class") / f"{_MC_TAG}_realdata"
+# (family, validation case) -> destination under FINALS
+VAL_CASES = {("ddm", "realdata"): "ddm/validation",
+             ("ddm", "realdata_sv_fixed"): "ddm/sv_fixed/validation",
+             ("rdm", "realdata"): "rdm/validation",
+             ("cdm", "realdata"): "cdm/validation"}
 
 # Constrained PPC variants: same posterior draws as the family's canonical set,
 # differing only in what the forward SIMULATION holds fixed. They land in a labelled
@@ -37,7 +53,6 @@ FAMILIES = ["ddm", "rdm", "cdm"]
 # source dir -> (family, destination subfolder)
 PPC_VARIANTS = {
     "cdm_sv0":      ("cdm", "sv0"),
-    "rdm_nocontam": ("rdm", "nocontam"),
     "ddm_sv0":      ("ddm", "sv0"),
     "ddm_sv_fixed": ("ddm", "sv_fixed"),
 }
@@ -133,6 +148,16 @@ def plan() -> tuple[list[tuple[Path, Path]], list[Path]]:
                 skipped.append(src)
                 continue
             jobs.append((src, FINALS / fam / dest / tidy(rest)))
+    # Real-data-design validation: experiment 1's plot allowlist and naming, plus the
+    # draws (true_set / pred_set) so the figures can be redrawn without re-running.
+    for (fam, case), dest in VAL_CASES.items():
+        cdir = VAL_FIG / fam / case
+        for src in sorted(cdir.glob("*")) if cdir.is_dir() else []:
+            rest = src.name.replace(f"{fam}_{case}_fm_", "")
+            if not val_kept(rest):
+                skipped.append(src); continue
+            jobs.append((src, FINALS / dest / val_tidy(rest)))
+        jobs.append((VAL_PRED / f"{fam}_{case}_cf_pred.npz", FINALS / dest / "predictions.npz"))
     return jobs, excluded + skipped
 
 
@@ -268,7 +293,6 @@ simulation. They are not separate fits, which is why there is deliberately no se
 | `ddm/sv0/` | 0 at simulation | constrained **PPC** (`--fix_natural s_v=0.0`) |
 | `ddm/sv_fixed/` | 0 at fitting | constrained **REFIT** (`--fix_s_v`) |
 | `cdm/sv0/` | 0 at simulation | constrained PPC (`--fix_natural s_v=0.0`) |
-| `rdm/nocontam/` | `pi`=0 at simulation | constrained PPC (`--no_contamination`) |
 
 ### A constrained PPC is not a constrained fit
 
@@ -320,14 +344,7 @@ from the design has its coefficients masked to zero, and the link is still appli
 `shifted_softplus(0) = 0.693`, not 0, because that function never implemented the
 -log(2) shift its name implies.
 
-`cdm/sv0/` asks the simulation-time question of CDM;
-`rdm/nocontam/` isolates the distributional fit from lapse contamination. Which one
-belongs in the paper is a modelling decision and has NOT been made here -- both are
-kept labelled so the constraint stays recoverable from the tree, the same rule
-`experiment-3/ppc/` follows.
-
-`rdm/nocontam/` is on the CORRECTED lineage: it was produced after the 2026-09-11
-`favored_idx` refit, not before it.
+`cdm/sv0/` asks the same simulation-time question of CDM.
 
 ## Why choice quantiles are CDM-only
 
@@ -335,7 +352,7 @@ Not an omission. CDM's response is a continuous angle, so quantiles of theta are
 meaningful the way RT quantiles are. DDM and RDM respond with a binary choice, where
 quantiles carry no information — for those the response-dimension check IS the
 proportion comparison in `choice_ppc_*`. `plot_choice_quantiles` in
-`experiments/real_data/ppc.py` gates on this explicitly and logs a skip.
+`experiments/experiment_2/ppc.py` gates on this explicitly and logs a skip.
 
 ## Naming
 
@@ -364,7 +381,7 @@ posteriors are additionally stale, dated 2026-06-02:
 - **RDM predates the Stroop data.** Every RDM figure here was produced before the
   Stroop dataset landed and will need regenerating once that analysis is settled.
 - **These figures come from uncommitted code.** As of this snapshot
-  `experiments/real_data/ppc.py` carries an uncommitted restyle: per-family
+  `experiments/experiment_2/ppc.py` carries an uncommitted restyle: per-family
   identity colours from `cogformer.utils.plot_utils.FAMILY_PALETTES` (DDM
   magenta, RDM purple-blue, CDM green), one `PPC_CI` interval level replacing a
   mix of 90% and 95% bands, condition names routed through `CONDITION_DISPLAY`,

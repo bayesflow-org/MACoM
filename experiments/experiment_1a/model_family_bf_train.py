@@ -24,7 +24,7 @@ from pathlib import Path
 from cogformer.simulator.model_family import ModelFamily
 
 from ..configs import MODELS as _BASE_MODELS
-from ..utils import recommend_sim_workers
+from ..utils import recommend_sim_workers, stimulus_channels, benchmark_mix_opts
 from ..timing import RunTimer
 
 
@@ -57,6 +57,7 @@ class ModelFamilyBF(bf.simulators.Simulator):
             raise ValueError(f"Unknown case: {case}. Must be one of {list(case_configs.keys())}")
 
         self.case = case
+        self.model_key = model_key
         self.config = case_configs[case]
         self.link_fn = model_cfg["link_fn"]
 
@@ -94,7 +95,7 @@ class ModelFamilyBF(bf.simulators.Simulator):
     #   interaction         28      19      9
     #
     # Slicing to the active cells avoids asking the flow to reproduce dimensions
-    # that are always exactly 0.0, which is what experiments/encoder_rep/
+    # that are always exactly 0.0, which is what experiments/experiment_4/
     # addm_bf_baseline.py does. It is a tidiness win, NOT a fix:
     #
     #   MEASURED (ddm/regressed, 300 epochs, slicing as the only variable):
@@ -159,6 +160,8 @@ class ModelFamilyBF(bf.simulators.Simulator):
             sample_kwargs["fixed_config"] = True
         if self.config["design_config"] is not None:
             sample_kwargs["design_config"] = self.config["design_config"]
+        # Same design generator as CogFormer's benchmark validation of this case.
+        sample_kwargs.update(benchmark_mix_opts(self.model_key, self.case))
 
         samples = self.model_family.batch_sample(
             batch_size=batch_size,
@@ -188,19 +191,30 @@ class ModelFamilyBF(bf.simulators.Simulator):
         if not np.all(param_masks == param_masks[0]):
             raise RuntimeError(f"mask varies within batch for {self.case}")
 
-        return {
+        out = {
             "design_matrices": samples["design_matrices"],
             "rts": samples["sim_data"]["rts"],
             "choices": samples["sim_data"]["choices"],
             "params": param_matrices[:, active] if self.slice_active_target else param_matrices,
             "masks": param_masks,
         }
+        out.update(stimulus_channels(samples))
+        return out
+
+
+def summary_keys(simulator) -> list:
+    """Per-trial inputs to the summary network, decided by what the simulator emits."""
+    keys = ["design_matrices", "rts", "choices"]
+    return keys + (["favored_idx"] if "favored_idx" in simulator.sample(2) else [])
 
 
 def test(model_key: str, case: str):
     model_cfg = MODELS[model_key]
     config = model_cfg["case_configs"][case]
     simulator = ModelFamilyBF(model_key=model_key, case=case)
+    # Full grid for the mask checks below: they multiply params by the (full-grid)
+    # mask, which an active-only target cannot broadcast against.
+    simulator.slice_active_target = False
     samples = simulator.sample(4)
 
     print(f"Model: {model_key.upper()}, Case: {case}")
@@ -233,7 +247,7 @@ def test(model_key: str, case: str):
         bf.Adapter()
         .drop(["masks"])
         .convert_dtype("float64", "float32")
-        .concatenate(["design_matrices", "rts", "choices"], into="summary_variables")
+        .concatenate(summary_keys(simulator), into="summary_variables")
         .rename("params", "inference_variables")
     )
     adapted = adapter(simulator.sample(4))
@@ -275,7 +289,7 @@ def main(model_key: str, case: str, epochs: int = 1000, steps_per_epoch: int = 1
         adapter = adapter.shift("rts", by=2.0).log("rts")
     adapter = (
         adapter
-        .concatenate(["design_matrices", "rts", "choices"], into="summary_variables")
+        .concatenate(summary_keys(simulator), into="summary_variables")
         .rename("params", "inference_variables")
     )
 
@@ -300,7 +314,7 @@ def main(model_key: str, case: str, epochs: int = 1000, steps_per_epoch: int = 1
     # E[t]=0.4, biased toward the noise end and starving the contraction region.
     # CogFormer draws t ~ U(0,1) (decoder.py: `t = torch.rand(...)`), i.e. alpha=0.
     # The two arms of the amortization-gap comparison were therefore optimising
-    # DIFFERENT objectives. experiments/encoder_rep/addm_bf_baseline.py already
+    # DIFFERENT objectives. experiments/experiment_4/addm_bf_baseline.py already
     # names alpha=0.5 as "the leading suspect" for a calibration failure in the
     # other BayesFlow baseline in this repo. Pass 0.0 to match CogFormer.
     fm_kwargs = {}

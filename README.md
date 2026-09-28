@@ -16,10 +16,14 @@ Repository for the Nature Communications paper on meta-amortized cognitive model
 **Option A — reproducible install with [uv](https://docs.astral.sh/uv/) (recommended)**
 
 ```bash
-uv sync
+uv sync --locked                    # add --extra tracking for wandb logging
 ```
 
-This uses `uv.lock` to pin all transitive dependencies to the exact versions tested.
+`--locked` installs exactly `uv.lock`, and fails rather than re-resolving if the lock
+and `pyproject.toml` disagree. The lock reproduces the stack every reported result was
+validated on (BayesFlow 2.0.14 at a pinned commit, numpy 2.5.3, numba 0.67, keras 3.15,
+jax 0.11.1, torch 2.11). Keep every machine on it: a numpy/numba change alters the
+simulated datasets, so results from different stacks are not directly comparable.
 
 **Option B — standard pip**
 

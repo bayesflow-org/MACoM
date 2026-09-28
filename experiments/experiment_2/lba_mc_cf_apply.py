@@ -23,7 +23,7 @@ THREE THINGS THAT DIFFER FROM THE OTHER APPLY SCRIPTS, all load-bearing:
    and dies in load_state_dict. run_lba.sh omits these flags entirely, which is why
    the finetune could never be launched through it.
 
-    python -m experiments.real_data.lba_mc_cf_apply --checkpoint "$LBA_FT_CKPT"
+    python -m experiments.experiment_2.lba_mc_cf_apply --checkpoint "$LBA_FT_CKPT"
 """
 import argparse
 import logging

@@ -206,8 +206,18 @@ class ModelFamily:
         coefficient_prior: str = "cell_means",
         design_generator_kwargs: dict | None = None,
         coefficient_prior_kwargs: dict | None = None,
+        design_matrix: np.ndarray | None = None,
+        category_counts: dict[str, int] | None = None,
     ):
         """
+        design_matrix : optional FIXED design, ``(num_obs, n_cols)`` in exactly the layout
+            ``build_design_matrix`` produces for this (design_config, max_num_regressors,
+            max_num_categories). Replaces ONLY the design draw: the coefficient prior,
+            realized-support mask, fixed-value injection, context and simulation are the
+            training code path unchanged. Used to validate on an empirical design (the
+            real subjects' regressors), which the generators cannot reproduce.
+            Requires ``category_counts`` ({regressor: realized dummy columns}, as
+            build_design_matrix returns) and ``categorical_regressors``.
         design_generator : ``"mixture"`` (default, latent-class / nominal categories) or
             ``"quantile"`` (the pre-2026-07 shared-latent construction). See
             :func:`design_utils.build_design_matrix`.
@@ -254,21 +264,36 @@ class ModelFamily:
         if context is None and hasattr(self.model, 'build_default_context'):
             context = self.model.build_default_context(num_obs=num_obs)
 
-        design_matrix, actual_col_counts, design_diagnostics = build_design_matrix(
-            design_config=design_config,
-            num_obs=num_obs,
-            context=context,
-            discrete_prob=discrete_prob,
-            min_num_categories=min_num_categories,
-            max_num_categories=max_num_categories,
-            main_discrete_mask=explicit_main_mask,
-            eta=eta,
-            category_concentration=category_concentration,
-            return_category_counts=True,
-            return_diagnostics=True,
-            generator=design_generator,
-            **(design_generator_kwargs or {}),
-        )
+        if design_matrix is not None:
+            if category_counts is None or categorical_regressors is None:
+                raise ValueError("a fixed design_matrix needs category_counts and "
+                                 "categorical_regressors (they drive the prior and mask)")
+            design_matrix = np.asarray(design_matrix, dtype=np.float32)
+            if design_matrix.shape[0] != num_obs:
+                raise ValueError(f"design_matrix has {design_matrix.shape[0]} rows, "
+                                 f"num_obs={num_obs}")
+            actual_col_counts = dict(category_counts)
+            main_keys = [k for k in design_config if k != "1" and ":" not in k]
+            design_diagnostics = {
+                "categorical_keys": [k for k in main_keys if k in categorical_regressors],
+                "continuous_keys": [k for k in main_keys if k not in categorical_regressors],
+            }
+        else:
+            design_matrix, actual_col_counts, design_diagnostics = build_design_matrix(
+                design_config=design_config,
+                num_obs=num_obs,
+                context=context,
+                discrete_prob=discrete_prob,
+                min_num_categories=min_num_categories,
+                max_num_categories=max_num_categories,
+                main_discrete_mask=explicit_main_mask,
+                eta=eta,
+                category_concentration=category_concentration,
+                return_category_counts=True,
+                return_diagnostics=True,
+                generator=design_generator,
+                **(design_generator_kwargs or {}),
+            )
 
         # Rebuild the mask with actual category counts so that rows corresponding to
         # unused category levels (zero-padded design matrix columns) are excluded.

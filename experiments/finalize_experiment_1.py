@@ -29,13 +29,16 @@ from pathlib import Path
 
 import pandas as pd
 
+from experiments import shared_config
+
 FINALS = Path("outputs/finals/experiment-1")
 FIG = Path("outputs/figures/model_class/cf")
 DATA = Path("outputs/data/model_class")
-DESIGN_OPT = Path("outputs/data/design_opt/ddm")
-BASE = "r4c4_b256_e10000"
-CKPT = Path(f"outputs/checkpoints/model_class/cf/{BASE}/"
-            f"cogformer_model_class_fm_l8_h8_p256_s32_d128_b256_e10000_t100.pt")
+# Run identity comes from shared_config.sh, the same file the orchestrator sources, so
+# a recipe change there cannot leave this assembler reading the previous run's tree.
+BASE = shared_config.get("MC_TAG")
+CKPT = Path(shared_config.get("MC_CKPT"))
+DESIGN_OPT = Path(f"outputs/data/design_opt/{BASE}/ddm")
 
 FAMILIES = ["ddm", "rdm", "cdm"]
 CASES = ["intercept_only", "fixed", "regressed", "fixed_regressed",

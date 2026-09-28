@@ -481,7 +481,7 @@ def lba_colors():
     CDM 4.94), dark-mid separation 2.81 (band 2.44-2.98) and mid-light 2.14.
 
     ``cogformer_cm_colors`` is NOT removed -- it is still the default colour inside
-    ``adaptive_recovery``, ``adaptive_coverage`` and ``adaptive_pair_posterior``.
+    ``adaptive_recovery`` and ``adaptive_coverage``.
     """
     colors = {
         "intercept": "#5E3410",
@@ -536,3 +536,33 @@ def family_line_fill(family: str) -> tuple[str, str]:
     """
     c = family_colors(family)
     return c["main_effect"], c["interaction"]
+
+
+def place_legend_below(fig, handles, labels=None, axes=None, gap_pt: float = 8.0, **kwargs):
+    """Legend centred under the plot grid, clear of its tick and axis labels BY CONSTRUCTION.
+
+    Call AFTER all layout (tight_layout, subplots_adjust, packing). It measures where the
+    lowest artist of the given axes actually ends -- tick labels and x-axis label included,
+    via each axes' tight bbox -- and anchors the legend's TOP gap_pt points below that.
+    The previous pattern (legend at the figure's bottom edge + subplots_adjust(bottom=0.1))
+    reserved a fixed FRACTION of the figure: too little on single-row grids (the legend
+    landed on the x-axis label), too much on tall ones. This holds at any grid height.
+
+    The legend may extend below the figure; every caller saves with bbox_inches="tight",
+    which takes it in. Centred on the axes' horizontal extent, not the figure's, so a side
+    strip (e.g. mask thumbnails) does not pull it off-centre.
+    """
+    axes = [ax for ax in (axes if axes is not None else fig.axes) if ax.get_visible()]
+    fig.canvas.draw()
+    renderer = fig.canvas.get_renderer()
+    boxes = [ax.get_tightbbox(renderer) for ax in axes]
+    to_fig = fig.transFigure.inverted()
+    y_bottom = to_fig.transform((0, min(b.y0 for b in boxes)))[1]
+    x_left = to_fig.transform((min(b.x0 for b in boxes), 0))[0]
+    x_right = to_fig.transform((max(b.x1 for b in boxes), 0))[0]
+    gap = gap_pt / 72.0 / fig.get_figheight()
+    # By keyword when there are no labels: a lone positional list is read as LABELS.
+    hl = {"handles": handles} if labels is None else {"handles": handles, "labels": labels}
+    return fig.legend(**hl, loc="upper center",
+                      bbox_to_anchor=((x_left + x_right) / 2, y_bottom - gap),
+                      bbox_transform=fig.transFigure, **kwargs)

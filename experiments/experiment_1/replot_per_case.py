@@ -12,8 +12,8 @@ which phase 2 writes before any plotting happens. The plotting itself is
 and a real run cannot drift apart.
 
     python -m experiments.experiment_1.replot_per_case \\
-        --pred_dir outputs/data/model_class/r4c4_b256_e10000_validate \\
-        --outdir   outputs/figures/model_class/cf/r4c4_b256_e10000_validate
+        --pred_dir outputs/data/model_class/r4c4_b128_e15000_validate \\
+        --outdir   outputs/figures/model_class/cf/r4c4_b128_e15000_validate
 
 Posterior pairplots are never redrawn: they are per-dataset, the finalized tree
 excludes them by allowlist, and there are 10 per case.
@@ -126,7 +126,11 @@ def main():
                     "disagree -- check --max_num_regressors/--max_num_categories.")
 
             logging.info(f"drawing {tag} -> {outdir}")
-            plot_case(case, colors, a.max_num_categories, a.max_num_regressors,
+            # The saved layout wins: shared-benchmark cases are stored in the compact
+            # grid, which --max_num_categories (the training count) would mislabel.
+            plot_cats = int(d["max_num_categories"]) if "max_num_categories" in d.files \
+                else a.max_num_categories
+            plot_case(case, colors, plot_cats, a.max_num_regressors,
                       skip_posteriors=True, skip_log_gamma=a.skip_log_gamma)
             drawn += 1
 

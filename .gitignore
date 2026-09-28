@@ -98,7 +98,7 @@ ipython_config.py
 #   Similar to Pipfile.lock, it is generally recommended to include uv.lock in version control.
 #   This is especially recommended for binary packages to ensure reproducibility, and is more
 #   commonly ignored for libraries.
-uv.lock
+# uv.lock is COMMITTED on purpose: it pins the validated stack for every machine.
 
 # poetry
 #   Similar to Pipfile.lock, it is generally recommended to include poetry.lock in version control.
@@ -243,7 +243,9 @@ outputs/figures/model_class/*
 !outputs/figures/model_class/cf
 outputs/figures/model_class/cf/**/*.npz
 
-.claude/
+# .claude: skills are SHARED across hosts (tracked); settings.local.json is machine-local.
+.claude/*
+!.claude/skills/
 .claude/settings.local.json
 
 wandb/
@@ -261,3 +263,6 @@ datasets/
 # checkout is meant to fetch, which is the part that has to survive in git.
 cogformer/utils/fonts/*.ttf
 cogformer/utils/fonts/*.otf
+
+# macOS Finder metadata
+.DS_Store

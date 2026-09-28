@@ -1,16 +1,18 @@
 """Assemble outputs/finals/experiment-3 -- LBA zero-shot inference and finetuning.
 
-Source is the canonical three-arm paired validation at
-`outputs/figures/model_class/cf/paired_lba_20260816/`, consolidated 2026-08-17.
+Final-run layout (2026-09-27): everything is STIMULUS-CODED and comes from one lineage
+-- the model-class checkpoint named by MC_TAG in shared_config.sh and its 1000-epoch LBA
+finetune. The DDM/RDM/CDM bench5 cases of every arm score the shared benchmark files
+(e1_data), so comparisons on those cases are exactly paired. Sources:
+
+    <FIG_MC>/<MC_TAG>_lba/{zeroshot,finetuned,original,c2st}   three-arm validation
+    outputs/figures/real_data/ppc/lba_stim_cond[_conventional] real-data PPC
 
 ALLOWLIST, NOT SWEEP
 --------------------
-Unlike the experiment-1/2 assemblers, this one copies only files whose stem is in
-KEEP. The source validate script emits 10 posterior pairplots per case by default
-(`--skip_posteriors` defaults to False), and a sweep-everything copier would pull
-them in silently whenever someone re-runs without the flag. Naming the four wanted
-plot types makes the tree's contents a deliberate choice rather than a side effect
-of which flags a run happened to pass.
+Only files whose stem is in KEEP are copied. The validate scripts emit 10 posterior
+pairplots per case by default (`--skip_posteriors` defaults to False), and a
+sweep-everything copier would pull them in whenever someone re-runs without the flag.
 
     python -m experiments.finalize_experiment_3 --dry_run
     python -m experiments.finalize_experiment_3
@@ -24,62 +26,53 @@ from pathlib import Path
 
 import pandas as pd
 
+from experiments import shared_config
+
 FINALS = Path("outputs/finals/experiment-3")
-SRC = Path("outputs/figures/model_class/cf/paired_lba_20260816")
-# Finetuning trajectory: diagnostics at epochs 0/500/1000/1500/2000, evaluated on
-# identical seeded datasets. Separate source tree because it is a different KIND of
-# result from the three-arm paired validation -- the arms are endpoints, this is the
-# path between them -- and is produced by its own script.
-TRAJ_SRC = Path("outputs/figures/model_class/cf/lba_trajectory")
-# LBA applied to the empirical lexical-decision data (17 subjects). It lives HERE
-# rather than in experiment-2 because experiment-2 is the DDM/RDM/CDM real-data tree
-# -- the three families the model class was trained on -- while LBA is the held-out
-# family this experiment is about. Same checkpoint as the finetuned arm above.
+MC_TAG = shared_config.get("MC_TAG")
+FIG_MC = Path("outputs/figures/model_class/cf")
+SRC = FIG_MC / f"{MC_TAG}_lba"
+# The zero-shot validator nests one level per fixed_A value (A0.5/) and one per
+# embedding-initialisation variant (mid_rdm/: LBA's row copied from RDM's).
+ZS_A = f"A{format(float(shared_config.get('LBA_FIXED_A')), 'g')}"
+# LBA applied to the empirical lexical-decision data. It lives HERE rather than in
+# experiment-2 because experiment-2 is the DDM/RDM/CDM real-data tree, while LBA is
+# the held-out family this experiment is about. Same checkpoint as finetuned/.
 PPC_SRC = Path("outputs/figures/real_data/ppc")
-PPC_DATA = Path("outputs/data/real_data/lba/mc/lba_mc_posteriors.npz")
-# variant -> destination subdirectory under ppc/. Two PPCs were run from the SAME
-# posterior draws, differing only in what the forward simulation holds fixed:
-#   free          -- s_v and s_tau as the model estimated them
-#   conventional  -- s_v=1.0, s_tau=0.0, the standard LBA identifiability constraint
-# Both are kept, in labelled subtrees, because which one belongs in the paper is a
-# modelling decision and a single unlabelled `ppc/` would make it unrecoverable.
-PPC_VARIANTS = {"lba": "free", "lba_conventional": "conventional"}
+PPC_DATA = Path("outputs/data/real_data/lba_stim_cond/mc/lba_mc_posteriors.npz")
+# Two PPCs from the SAME posterior draws, differing only in what the forward
+# simulation holds fixed. Both kept, in labelled subtrees, because which one belongs
+# in the paper is still open.
+PPC_VARIANTS = {"lba_stim_cond": "free", "lba_stim_cond_conventional": "conventional"}
 # Same allowlist and rename as finalize_experiment_2, so the two real-data trees
 # name the same plot the same way.
 PPC_KEEP = ("ppc", "choice_ppc", "rt_quantiles", "rt_qq", "choice_quantiles")
 
-# The STIMULUS-CODED real-data application, filed under stimcoded/ rather than over
-# ppc/. The two differ in three ways at once -- coding, checkpoint (100-epoch
-# stimulus-coded vs 2000-epoch accuracy-coded) and design (intercept + condition vs the
-# full 5-row design) -- so they are not two renderings of one result and must not share
-# a directory. Top level stays the accuracy-coded record, matching zeroshot/,
-# finetuned/, original/ and c2st/; stimcoded/ holds the stimulus-coded story end to end.
-#
-# condition_only is the design the PPC itself argued for: dropping u_2/u_3/u_1:u_2 cut
-# the nonword median-RT error from 266 ms to 18 ms and the condition quantile deviation
-# from 0.550 to 0.076, while keeping the Speed-Accuracy gap at -0.143 against an
-# observed -0.147. Comparison numbers are in the session log, not derivable from here.
-STIM_PPC_VARIANTS = {"lba_stim_cond": "free",
-                     "lba_stim_cond_conventional": "conventional"}
-STIM_PPC_DATA = Path("outputs/data/real_data/lba_stim_cond/mc/lba_mc_posteriors.npz")
+# LBA amortization gap: BayesFlow LBA baselines vs the FINETUNED checkpoint, on the
+# LBA cases of the shared benchmark files. Same layout as experiment-1a's per-family
+# trees so the two gap studies read the same way.
+GAP_C2ST = Path("outputs/figures/c2st/lba")
+GAP_BF_FIG = Path("outputs/figures/model_family/bf/lba")
+GAP_BF_EVAL = Path("outputs/evaluations/model_family/bf")
+GAP_CASES = ["intercept_only", "fixed", "regressed", "fixed_regressed", "interaction"]
 
-# The 2026-09-15 stimulus-coded zero-shot re-run. It lands in its OWN subtree rather
-# than replacing zeroshot/, because only the zero-shot arm was re-run: finetuned/ and
-# original/ are still accuracy-coded, and a tree where the arms disagree about the
-# data-generating process would make every paired comparison in it meaningless while
-# still looking assembled. Promote it over zeroshot/ once a matching finetuned arm
-# exists. Note the extra A0.5 level (the fixed_A value) and the 7th scenario.
-STIM_SRC = Path("outputs/figures/model_class/cf/paired_lba_stimcoded")
-STIM_A = "A0.5"
-STIM_EXTRA_SCENARIOS = ["ppc_design"]
+# Real-data-DESIGN validation (experiment_2/realdata_validate.py --model lba): simulated
+# data on the real subjects' designs, filed beside the real-data fit it validates.
+VAL_FIG = FIG_MC / f"{MC_TAG}_realdata" / "lba" / "realdata"
+VAL_PRED = Path("outputs/data/model_class") / f"{MC_TAG}_realdata" / "lba_realdata_cf_pred.npz"
 
 # arm -> (families, filename infix). zeroshot covers LBA only.
 ARMS = {"zeroshot": (["lba"], "mid1"),
         "finetuned": (["cdm", "ddm", "lba", "rdm"], "ft"),
         "original": (["cdm", "ddm", "rdm"], "fm")}
-SCENARIOS = ["intercept_only", "fixed", "regressed", "fixed_regressed",
-             "interaction", "mixed_predictor"]
 KEEP = {"recovery", "coverage", "ecdf", "metrics"}
+
+
+def _subdirs(d: Path) -> list[Path]:
+    """Scenario folders as they exist on disk. Discovered, not listed, so the tree
+    follows whatever val_scenarios the validators ran rather than a copy of the list."""
+    return sorted(x for x in d.iterdir() if x.is_dir() and x.name != "predictions") \
+        if d.is_dir() else []
 
 
 def tidy(rest: str) -> str:
@@ -136,21 +129,21 @@ def plan():
     jobs, skipped = [], []
     for arm, (families, infix) in ARMS.items():
         for fam in families:
-            for scen in SCENARIOS:
-                # zeroshot nests one extra level (a single variant dir) and has no
-                # family level, since it is LBA-only; flatten both away.
-                cands = ([SRC / arm / scen / d for d in ("mid_rdm",)]
-                         if arm == "zeroshot" else [SRC / arm / fam / scen])
-                for cdir in cands:
-                    if not cdir.is_dir():
+            if arm == "zeroshot":
+                root = SRC / arm / ZS_A
+                cases = [(sd.name, sd / "mid_rdm") for sd in _subdirs(root)]
+            else:
+                cases = [(sd.name, sd) for sd in _subdirs(SRC / arm / fam)]
+            for scen, cdir in cases:
+                if not cdir.is_dir():
+                    continue
+                for src in sorted(cdir.iterdir()):
+                    rest = src.name.replace(f"{fam}_{scen}_{infix}_", "")
+                    if not kept(rest):
+                        skipped.append(src)
                         continue
-                    for src in sorted(cdir.iterdir()):
-                        rest = src.name.replace(f"{fam}_{scen}_{infix}_", "")
-                        if not kept(rest):
-                            skipped.append(src)
-                            continue
-                        jobs.append((src, FINALS / arm / fam / scen / tidy(rest)))
-        pdir = SRC / arm / "predictions"
+                    jobs.append((src, FINALS / arm / fam / scen / tidy(rest)))
+        pdir = (SRC / arm / ZS_A / "predictions") if arm == "zeroshot" else (SRC / arm / "predictions")
         if pdir.is_dir():
             for src in sorted(pdir.glob("*.npz")):
                 jobs.append((src, FINALS / "predictions" / arm / src.name))
@@ -163,59 +156,39 @@ def plan():
             name = name.replace(f"{rel.parts[0]}_", "", 1)
         jobs.append((src, FINALS / "c2st" / rel.parent / name))
 
-    # Trajectory: the figure plus BOTH backing CSVs. The per-scenario file matters
-    # because the family mean hides real disagreement between scenarios (LBA's
-    # per-scenario NRMSE spans 0.20-0.48 at epoch 0), and a reader who only has the
-    # summary cannot recover that.
-    if TRAJ_SRC.is_dir():
-        for src in sorted(TRAJ_SRC.iterdir()):
-            if src.suffix in {".pdf", ".csv"}:
-                jobs.append((src, FINALS / "trajectory" / src.name))
+    # compare/: paired deltas (Δr heatmaps per family/case, metric-delta table and
+    # figures) and the LBA calibration plane. Copied with their relative layout.
+    cmp_dir = SRC / "compare"
+    for src in sorted(cmp_dir.rglob("*")) if cmp_dir.is_dir() else []:
+        if src.is_file() and src.suffix in {".pdf", ".csv"}:
+            jobs.append((src, FINALS / "compare" / src.relative_to(cmp_dir)))
 
-    readme = SRC / "README.md"
-    if readme.exists():
-        jobs.append((readme, FINALS / "paired_validation_notes.md"))
+    # gap/: C2ST summary + per-case C2ST, and the BF arm's diagnostics per case. The
+    # CogFormer arm's diagnostics for the same datasets are finetuned/lba/<case>/.
+    jobs.append((GAP_C2ST / "lba_c2st_summary.csv", FINALS / "gap" / "summary.csv"))
+    for case in GAP_CASES:
+        cdir = GAP_C2ST / case
+        for src in sorted(cdir.glob(f"lba_{case}_*_c2st.csv")) if cdir.is_dir() else []:
+            jobs.append((src, FINALS / "gap" / case / src.name[len(f"lba_{case}_"):]))
+        bdir = GAP_BF_FIG / case
+        for src in sorted(bdir.glob("*")) if bdir.is_dir() else []:
+            rest = src.name.replace(f"lba_family_{case}_bf_", "")
+            if not kept(rest):
+                skipped.append(src); continue
+            jobs.append((src, FINALS / "gap" / case / f"bf_{tidy(rest)}"))
+        jobs.append((GAP_BF_EVAL / f"lba_families_bf_{case}_evaluations.csv",
+                     FINALS / "gap" / case / "bf_evaluations.csv"))
 
-    # Both stimulus-coded arms plus their paired comparison, under one subtree. The
-    # arms spell their files differently -- zeroshot nests A<fixed_A>/<scen>/mid_rdm
-    # with infix `mid1`, finetuned is lba/<scen> with infix `ft` -- so the infix and
-    # the directory are named per arm rather than assumed to match.
-    for arm, adir, infix in (("zeroshot", STIM_SRC / "zeroshot" / STIM_A, "mid1"),
-                             ("finetuned", STIM_SRC / "finetuned" / "lba", "ft")):
-        if not adir.is_dir():
-            continue
-        for scen in SCENARIOS + STIM_EXTRA_SCENARIOS:
-            cdir = adir / scen / "mid_rdm" if arm == "zeroshot" else adir / scen
-            if not cdir.is_dir():
-                continue
-            for src in sorted(cdir.iterdir()):
-                rest = src.name.replace(f"lba_{scen}_{infix}_", "")
-                if not kept(rest):
-                    skipped.append(src)
-                    continue
-                jobs.append((src, FINALS / "stimcoded" / arm / scen / tidy(rest)))
-        # Posterior draws: what every paired downstream artifact reads.
-        pdir = (STIM_SRC / "zeroshot" / STIM_A / "predictions" if arm == "zeroshot"
-                else STIM_SRC / "finetuned" / "predictions")
-        if pdir.is_dir():
-            for src in sorted(pdir.glob("*.npz")):
-                jobs.append((src, FINALS / "stimcoded" / "predictions" / arm / src.name))
-
-    cmp_dir = STIM_SRC / "compare"
-    if cmp_dir.is_dir():
-        for src in sorted(cmp_dir.iterdir()):
-            if src.suffix in {".pdf", ".csv"}:
-                jobs.append((src, FINALS / "stimcoded" / "compare"
-                             / src.name.replace("lba_stim_", "")))
+    for src in sorted(VAL_FIG.glob("*")) if VAL_FIG.is_dir() else []:
+        rest = src.name.replace("lba_realdata_fm_", "")
+        if not kept(rest):
+            skipped.append(src); continue
+        jobs.append((src, FINALS / "ppc" / "validation" / tidy(rest)))
+    jobs.append((VAL_PRED, FINALS / "ppc" / "validation" / "predictions.npz"))
 
     ppc_jobs, ppc_skipped = plan_ppc()
     jobs += ppc_jobs
     skipped += ppc_skipped
-
-    stim_ppc, stim_skipped = plan_ppc(STIM_PPC_VARIANTS, STIM_PPC_DATA,
-                                      FINALS / "stimcoded" / "ppc")
-    jobs += stim_ppc
-    skipped += stim_skipped
     return jobs, skipped
 
 
@@ -262,145 +235,87 @@ def main():
     print(f"\nwrote {len(rows)} files -> {FINALS}")
 
 
-def _traj_note() -> str:
-    """State plainly whether the trajectory is complete, rather than letting a partial
-    curve sit in a frozen tree looking finished."""
-    import glob as _glob
-    figs = _glob.glob(str(FINALS / "trajectory" / "lba_finetuning_trajectory*.pdf"))
-    full = any(f.endswith("lba_finetuning_trajectory.pdf") for f in figs)
-    if full:
-        return "Complete: all five checkpoints (0/500/1000/1500/2000)."
-    eps = sorted({e for f in figs for e in re.findall(r"ep([0-9-]+)", f)})
-    return ("**INTERIM — the evaluation is still running.** Epochs present: "
-            f"{', '.join(eps) if eps else 'none'}. The remaining checkpoints are still "
-            "being scored; this figure will be replaced by the five-epoch version.")
-
-
 def write_readme(n, n_skipped):
     (FINALS / "README.md").write_text(f"""# Experiment 3 — LBA zero-shot inference and finetuning
 
-Frozen snapshot of the three-arm paired validation. Assembled
-{datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%SZ')} by
+Assembled {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%SZ')} by
 `experiments/finalize_experiment_3.py` — {n} files. Git commit `{git_commit()}`.
+Model-class run `{MC_TAG}`; `MANIFEST.csv` records per-file provenance.
 
-`paired_validation_notes.md` is the original run's write-up and carries the headline
-tables; `MANIFEST.csv` records per-file provenance.
+Everything here is **stimulus-coded** (`favored_idx` drawn per trial, for LBA and for
+RDM at every K) and comes from ONE lineage: the model-class checkpoint above, its
+{shared_config.get("LBA_FT_EPOCHS")}-epoch LBA finetune. The DDM/RDM/CDM bench5 cases of every arm
+score the shared benchmark files (e1_data), so comparisons on those cases are exactly
+paired.
+
+## Arms
+
+| folder | checkpoint evaluated | families |
+|---|---|---|
+| `zeroshot/` | original, pre-finetune (LBA row copied from RDM's) | LBA only |
+| `finetuned/` | LBA-finetuned | LBA + DDM/CDM/RDM |
+| `original/` | original, pre-finetune | DDM/CDM/RDM |
+| `c2st/` | original vs finetuned, paired (forgetting) | DDM/CDM/RDM |
+| `gap/` | BayesFlow LBA baselines vs finetuned, paired (amortization gap) | LBA, 5 bench cases |
+| `compare/` | paired deltas: zero-shot->finetuned (LBA), original->finetuned (others) | 4 families, 5 bench cases |
+| `predictions/` | — | posterior draws per arm |
+
+Each case folder holds `recovery`, `coverage`, `ecdf`, `metrics` as PDF (plus
+`metrics.csv`) and their `_pi` global-parameter companions.
+
+**Read `c2st/forgetting_c2st_summary.csv` alongside aggregate NRMSE, not instead of
+it.** Pooled per-cell and matched-sample C2ST approach their null by construction when
+both models are calibrated; the per-dataset columns (`perds_*`) are the ones that can
+show a posterior moved. Always read `excess` over the empirical null, not raw `c2st`.
+
+## compare/ — what finetuning changed, as paired differences
+
+`<family>/<case>_delta_r.pdf` (LBA: finetuned minus zero-shot) and
+`<family>/<case>_forgetting_delta_r.pdf` (DDM/RDM/CDM: finetuned minus original) map the
+change in recovery correlation per coefficient. `delta_metrics.csv` and
+`delta_metrics_<case>.pdf` give per-parameter NRMSE and calibration-error deltas
+(negative = better). `lba_calibration_plane.pdf` draws each LBA cell's move from
+zero-shot to finetuned in (posterior contraction, calibration error) -- how the
+improvement happens, which the mean NRMSE cannot show. Every difference is on
+identical datasets; the comparison script refuses unpaired inputs.
+
+## gap/ — LBA amortization gap
+
+The held-out family's counterpart of experiment-1a: a case-specific BayesFlow baseline
+per bench5 case against the FINETUNED checkpoint (LBA has no original-checkpoint arm).
+Both score the LBA cases of the shared benchmark files, and the baselines train at the
+same per-case budget as experiment-1a's. `summary.csv` has one row per case; read
+`joint_c2st`, not `mean_accuracy`. `<case>/bf_*` are the baseline's diagnostics; the
+CogFormer arm's for the same datasets are `finetuned/lba/<case>/`.
 
 ## ppc/ — LBA on empirical data
 
-Posterior predictive checks for the finetuned checkpoint applied to the empirical
-lexical-decision dataset (17 subjects, 500 stored draws each). It sits in experiment 3
-rather than experiment 2 because experiment 2 is the DDM/RDM/CDM real-data tree — the
-three families the model class was trained on — while LBA is the held-out family this
-experiment exists to study. Same checkpoint as `finetuned/`.
-
-**Two variants, same posterior draws.** They differ only in what the forward
-simulation holds fixed:
+The finetuned checkpoint applied to the empirical lexical-decision data, with the
+`condition_only` design (intercept + speed/accuracy condition). Lexicality needs no
+regressor under stimulus coding: it reaches the model as `favored_idx`.
 
 | folder | s_v | s_tau | what it is |
 |---|---|---|---|
 | `ppc/free/` | estimated | estimated | the model's own fit, simulated as-is |
 | `ppc/conventional/` | 1.0 | 0.0 | the standard LBA identifiability constraint |
 
-`posteriors.npz` is stored ONCE, at `ppc/`, not per variant: both PPCs read the same
-draws, so duplicating it would imply two fits where there is one.
+Both read the same draws; `posteriors.npz` is stored once, at `ppc/`. Which variant
+belongs in the paper is an open modelling decision, which is why both are kept.
 
-Which variant belongs in the paper is a modelling decision and has NOT been made here.
-Both are kept in labelled subtrees precisely so that decision stays visible — a single
-unlabelled `ppc/` would make the constraint unrecoverable from the tree.
-
-Plot names follow experiment 2 exactly, so the same check is called the same thing in
-both real-data trees: `rt_ppc_*` (RT distribution), `choice_ppc_*` (choice
-proportions), `rt_qq_*`, `rt_quantiles_*`, `choice_quantiles_*`, suffixed by condition
-(`condition`, `frequency`, `lexicality`).
-
-## trajectory/ — finetuning path, NOT just its endpoints
-
-{_traj_note()}
-
-The three arms above are ENDPOINTS: pre-finetune and post-finetune. `trajectory/` adds
-the path between them, evaluating diagnostics at epochs 0/500/1000/1500/2000 of a
-re-run finetune. It answers a question the endpoints assert but cannot show: whether
-LBA's gain is gradual or front-loaded, and whether the three trained families drift at
-any point rather than only at the end.
-
-- `lba_finetuning_trajectory*.pdf` — NRMSE, posterior contraction and calibration
-  error against epoch, one line per family. Note contraction runs the OPPOSITE way to
-  the other two (higher is better), which is stated on each panel.
-- `trajectory_summary.csv` — the plotted means, aggregated over parameters then over
-  scenarios.
-- `trajectory_per_scenario.csv` — one row per (epoch, family, scenario, metric). Kept
-  because the family mean hides genuine disagreement between scenarios: LBA's
-  per-scenario NRMSE spans 0.20-0.48 at epoch 0.
-
-Epoch 0 is not "untrained": it is the pre-finetune checkpoint with LBA's embedding row
-warm-started by COPYING RDM's, which is exactly the zero-shot condition. Every epoch was
-scored on IDENTICAL datasets (`seed_case` with a fixed seed), verified by byte-comparing
-`true_set` across epochs, so movement along a line is the checkpoint changing and not
-the test set.
-
-**Lineage warning.** The trajectory comes from a SECOND finetune run (2026-09-09,
-seeded), while `finetuned/` above still comes from the 2026-08-14 run, which set no
-seed. The two are therefore not the same model, and the trajectory's endpoint will not
-exactly equal the `finetuned/` numbers. Reconciling them -- rebuilding the arms from the
-seeded lineage -- is pending.
-
-## Arms
-
-| folder | checkpoint evaluated | families |
-|---|---|---|
-| `zeroshot/` | original, pre-finetune | LBA only |
-| `finetuned/` | LBA-finetuned | LBA + DDM/CDM/RDM |
-| `original/` | original, pre-finetune | DDM/CDM/RDM |
-| `c2st/` | both, compared | DDM/CDM/RDM, 5 scenarios |
-| `predictions/` | — | posterior draws per arm |
-
-Each case folder holds `recovery`, `coverage`, `ecdf`, `metrics` as PDF (plus
-`metrics.csv`) and their `_pi` global-parameter companions.
-
-## Headline
-
-LBA mean NRMSE 0.2386 → 0.1237 (**-48.2%**); the three original families move
-+0.3% / +1.0% / +0.5%.
-
-**Read that second number alongside `c2st/forgetting_c2st_summary.csv`, not instead
-of it.** Aggregate NRMSE barely moves, but the per-dataset C2ST columns in that file
-report `perds_mean_excess` of 0.24-0.37 over the null with `perds_frac_excess_gt_05`
-at 0.985-1.0 — on essentially every dataset the finetuned and original posteriors are
-distinguishable. The matched-sample C2ST in the same file shows excess of only
-0.009-0.021, which is the expected degeneracy: both models are calibrated, so pooled
-draws approach the prior and the test goes to its null by construction. The two
-statistics are not in conflict, but "no catastrophic forgetting" is a stronger claim
-than aggregate NRMSE alone supports.
-
-**The NRMSE metric is also not precise enough to carry that claim.**
-`bf.diagnostics.metrics.root_mean_squared_error` is STOCHASTIC: three calls on
-byte-identical arrays return
-
-    [1.0041 0.2435 1.0260 0.1322 ...]
-    [1.0088 0.2446 1.0172 0.1329 ...]
-    [0.9887 0.2427 1.0222 0.1347 ...]
-
-i.e. roughly 1-2% spread run to run. (`posterior_contraction` on the same arrays is
-deterministic to 4 dp, so this is the RMSE estimator, not the data.) The +0.3% / +1.0%
-/ +0.5% movements reported for CDM/DDM/RDM therefore sit INSIDE the metric's own
-noise: they cannot distinguish "no forgetting" from "a small amount of forgetting" in
-either direction. Any re-derivation of those numbers should average over repeated
-calls, or use contraction, which is reproducible.
+`ppc/validation/` checks how well this design identifies the parameters: recovery,
+coverage, calibration on data SIMULATED with the real subjects' designs (condition
+coding, trial counts, per-trial word/nonword stimulus), true parameters from the
+training prior. Same script and figures as experiment-2's `<family>/validation/`.
 
 ## Excluded
 
-{n_skipped} posterior pairplots ({n_skipped} files, 10 per case in `original/`) were
-deleted at source and are excluded here. This assembler uses an ALLOWLIST of plot
-stems rather than copying directory contents, so a future run that forgets
-`--skip_posteriors` cannot reintroduce them silently.
+{n_skipped} files outside the allowlist (posterior pairplots and similar).
 
 ## Naming
 
 Family/scenario/arm infixes (`_fm_`, `_ft_`, `_mid1_`) are stripped — the path already
-carries them. `_global` is renamed `_pi`; that panel is the global-parameter view,
-which today is exactly pi. The zeroshot arm's single extra variant level (`mid_rdm/`)
-is flattened.
+carries them. `_global` is renamed `_pi`. The zero-shot arm's `A<fixed_A>/` and
+`mid_rdm/` levels are flattened.
 """)
 
 

@@ -180,6 +180,7 @@ def ensemble_coverage(
                     alpha=0.7, color="gray"
                 )
                 ax.set_xlabel("Interval width" if r_i == n_kept - 1 else "", fontsize=label_fontsize)
+                ax.set_box_aspect(1)   # N/A tiles square too, like the active cells
                 continue
 
             # Draw the reference line once per active cell
@@ -320,6 +321,7 @@ def global_ensemble_coverage(
                 ax.text(0.5, 0.5, "N/A", transform=ax.transAxes, ha="center", va="center",
                         fontsize=18, weight="bold", alpha=0.7, color="gray")
                 ax.set_title(labels[k], fontsize=title_fontsize)
+                ax.set_box_aspect(1)   # N/A tiles square too, like the active cells
                 continue
             r = int(rows_k[0])  # global params live on the intercept row
 

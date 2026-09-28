@@ -51,9 +51,8 @@ def adaptive_posterior(
     toggleable dashed vertical lines: prior mean, posterior mean, and ground
     truth (requires ``targets``).
 
-    Pairwise posterior correlations previously shown as 2D KDE panels in the
-    old pairplot version of this function now live in
-    :func:`cogformer.diagnostics.plot.adaptive_sample_correlation.adaptive_sample_correlation`.
+    Pairwise posterior correlations (the 2D KDE panels of the old pairplot version)
+    are no longer drawn; the dedicated sample-correlation plot was removed as unused.
 
     ``global_params`` is not yet supported here (global-parameter diagnostics
     are being reworked separately); pass it as ``None``.

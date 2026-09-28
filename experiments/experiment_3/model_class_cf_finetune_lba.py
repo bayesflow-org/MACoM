@@ -154,6 +154,12 @@ class LBAFinetuner:
         optimizer = AdamW(self.net.parameters(), lr=train_config["learning_rate"])
         scheduler = CosineAnnealingLR(optimizer, T_max=train_config["epochs"])
 
+        # The trajectory's first point is the model BEFORE any LBA step: the 4-family
+        # net as initialised from the pretrained checkpoint, i.e. the zero-shot state.
+        # Nothing else writes it (only saved when --trajectory_interval is set).
+        if traj:
+            _save(0)
+
         for epoch in range(train_config["epochs"]):
             pbar = tqdm(
                 total=train_config["steps_per_epoch"],

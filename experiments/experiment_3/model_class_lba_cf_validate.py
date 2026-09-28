@@ -45,7 +45,8 @@ from cogformer.utils.plot_utils import cogformer_mc_colors
 
 from ..configs import MODELS as _BASE_MODELS, LBA_CONFIG
 from ..utils import (add_global_params, infer_free_fixed_intrinsics, build_encoder_input_dim,
-                     chunked_sample, resolve_val_scenario, seed_case, add_seed_arg)
+                     chunked_sample, resolve_val_scenario, seed_case, add_seed_arg,
+                     load_bf_validation_data)
 
 
 GLOBAL_PARAMS = ["pi"]
@@ -158,6 +159,11 @@ def parse_args():
                    help="Must match the flag the --checkpoint (MC base) was trained with. Use "
                         "--no-self_attn_padding_mask for a mask-off checkpoint.")
 
+    p.add_argument("--data_dir", type=str, default=None,
+                   help="Shared benchmark datasets (<family>_<case>_data.npz, the e1_data "
+                        "stage). LBA cases found there are LOADED, so the zero-shot, "
+                        "finetuned and BayesFlow arms score identical datasets; cases not "
+                        "there fall back to seeded simulation.")
     add_seed_arg(p)
     return p.parse_args()
 
@@ -314,28 +320,53 @@ def main():
         free_intr, fixed_intr, fixed_vals = infer_free_fixed_intrinsics(
             design_config, LBA_LOCAL_PARAMS, _LBA_WITH_PI["default_fixed_values"]
         )
-        test_samples = lba_family.batch_sample(
-            design_config=design_config,
-            batch_size=args.batch_size,
-            num_obs=args.num_obs,
-            mask_randomizer_kwargs={
-                "free_intrinsics": free_intr,
-                "fixed_intrinsics": fixed_intr,
-                "fixed_values": fixed_vals,
-                "global_params": GLOBAL_PARAMS,
-            },
-            flatten_param_outputs=True,
-            fixed_config=True,
-            link_fun=lba_link_fn,
-            # Scenarios pin their own (usually narrower) category count, so the design
-            # matrix must be padded back to the training width or the encoder input dim
-            # will not match the checkpoint.
-            pad_to_max_num_categories=training_max_cats,
-            **{**model_family_config,
-               "max_num_categories": max_cats,
-               "min_num_categories": min_cats,
-               **mix_opts},
-        )
+        # Shared benchmark data first (see --data_dir); the seed pins parameters but not
+        # the simulated RTs, so only LOADING pairs this arm with the finetuned and BF ones.
+        data_path = (Path(args.data_dir) / f"lba_{cfg_name}_data.npz"
+                     if args.data_dir is not None else None)
+        if data_path is not None and not data_path.exists():
+            print(f"LBA / {cfg_name}: not in {args.data_dir}; simulating (seeded)")
+            data_path = None
+        if data_path is not None:
+            test_samples = load_bf_validation_data(
+                data_path=data_path, design_config=design_config,
+                intrinsic_params=LBA_LOCAL_PARAMS, model_id=0,   # overwritten per eval id
+                batch_size=args.batch_size,
+                max_dm_cols=build_encoder_input_dim(
+                    max_num_regressors=args.max_num_regressors,
+                    max_num_categories=args.max_num_categories,
+                    keep_intercept=args.keep_intercept) - 5,
+            )
+            # Same three fields, same reasons, as model_class_lba_finetune_validate's
+            # paired branch: training regressor ceiling, the scenario's category count
+            # (the shared grid has len(design_config) rows), and the design config so
+            # the adapter can rebuild position codes.
+            test_samples["max_num_regressors"] = args.max_num_regressors
+            test_samples["max_num_categories"] = max_cats
+            test_samples["design_configs"] = [design_config] * args.batch_size
+        else:
+            test_samples = lba_family.batch_sample(
+                design_config=design_config,
+                batch_size=args.batch_size,
+                num_obs=args.num_obs,
+                mask_randomizer_kwargs={
+                    "free_intrinsics": free_intr,
+                    "fixed_intrinsics": fixed_intr,
+                    "fixed_values": fixed_vals,
+                    "global_params": GLOBAL_PARAMS,
+                },
+                flatten_param_outputs=True,
+                fixed_config=True,
+                link_fun=lba_link_fn,
+                # Scenarios pin their own (usually narrower) category count, so the design
+                # matrix must be padded back to the training width or the encoder input dim
+                # will not match the checkpoint.
+                pad_to_max_num_categories=training_max_cats,
+                **{**model_family_config,
+                   "max_num_categories": max_cats,
+                   "min_num_categories": min_cats,
+                   **mix_opts},
+            )
         pm_global, mask_global = lift_lba_to_global(
             test_samples["param_matrices"],
             test_samples["param_masks"],
@@ -351,6 +382,9 @@ def main():
             "cfg_name": cfg_name, "design_config": design_config,
             "test_samples": test_samples, "true_set": true_set,
             "params_mask": params_mask, "n_rows": n_rows,
+            # Row layout for LABELLING: compact (the scenario's count) when loaded from
+            # the shared benchmark files, padded to training otherwise.
+            "plot_cats": max_cats if data_path is not None else args.max_num_categories,
         })
 
     # Phase 2: run all ODE integrations (config × eval_id)
@@ -380,6 +414,7 @@ def main():
                 "model_id": model_id, "id_label": id_label,
                 "true_set": cd["true_set"], "pred_set": pred_set,
                 "params_mask": cd["params_mask"], "outdir": outdir,
+                "plot_cats": cd["plot_cats"],
             })
 
     # Phase 3: save predictions and generate figures
@@ -396,6 +431,7 @@ def main():
         np.savez(
             pred_dir / f"{tag}_cf_pred.npz",
             pred_set=pred_set, true_set=true_set, params_mask=params_mask,
+            max_num_categories=case["plot_cats"],   # row layout, for replots
         )
         logging.info(f"[saved] {pred_dir / f'{tag}_cf_pred.npz'}")
 
@@ -410,7 +446,7 @@ def main():
             true=true_set, pred=pred_set,
             design_config=design_config,
             intrinsic_params=intrinsic_params,
-            max_num_categories=args.max_num_categories,
+            max_num_categories=case["plot_cats"],
             max_num_regressors=args.max_num_regressors,
             parameter_mask=params_mask,
             variable_names=variable_names,
@@ -427,7 +463,7 @@ def main():
             true=true_set, pred=pred_set,
             design_config=design_config,
             intrinsic_params=intrinsic_params,
-            max_num_categories=args.max_num_categories,
+            max_num_categories=case["plot_cats"],
             max_num_regressors=args.max_num_regressors,
             global_params=GLOBAL_PARAMS,
             parameter_mask=params_mask,
@@ -442,7 +478,7 @@ def main():
             true=true_set, pred=pred_set,
             design_config=design_config,
             intrinsic_params=intrinsic_params,
-            max_num_categories=args.max_num_categories,
+            max_num_categories=case["plot_cats"],
             max_num_regressors=args.max_num_regressors,
             parameter_mask=params_mask,
             variable_names=variable_names,
@@ -459,7 +495,7 @@ def main():
             true=true_set, pred=pred_set, design_config=design_config,
             variable_names=variable_names, global_params=GLOBAL_PARAMS,
             intrinsic_params=intrinsic_params, parameter_mask=params_mask,
-            max_num_categories=args.max_num_categories,
+            max_num_categories=case["plot_cats"],
             max_num_regressors=args.max_num_regressors,
         )
         if cov_glob is not None:
@@ -470,7 +506,7 @@ def main():
             true=true_set, pred=pred_set,
             design_config=design_config,
             intrinsic_params=intrinsic_params,
-            max_num_categories=args.max_num_categories,
+            max_num_categories=case["plot_cats"],
             max_num_regressors=args.max_num_regressors,
             parameter_mask=params_mask,
             variable_names=variable_names,
@@ -488,7 +524,7 @@ def main():
             true=true_set, pred=pred_set, design_config=design_config,
             variable_names=variable_names, global_params=GLOBAL_PARAMS,
             intrinsic_params=intrinsic_params, parameter_mask=params_mask,
-            max_num_categories=args.max_num_categories, difference=True,
+            max_num_categories=case["plot_cats"], difference=True,
             max_num_regressors=args.max_num_regressors,
         )
         if ecdf_glob is not None:
@@ -499,7 +535,7 @@ def main():
             true=true_set, pred=pred_set,
             design_config=design_config,
             intrinsic_params=intrinsic_params,
-            max_num_categories=args.max_num_categories,
+            max_num_categories=case["plot_cats"],
             max_num_regressors=args.max_num_regressors,
             parameter_mask=params_mask,
             variable_names=variable_names,
@@ -515,7 +551,7 @@ def main():
         # Global parameters (e.g. pi): separate metric heatmap.
         metrics_glob = plot_global_metrics(
             true=true_set, pred=pred_set, design_config=design_config,
-            intrinsic_params=intrinsic_params, max_num_categories=args.max_num_categories,
+            intrinsic_params=intrinsic_params, max_num_categories=case["plot_cats"],
             max_num_regressors=args.max_num_regressors,
             global_params=GLOBAL_PARAMS, parameter_mask=params_mask,
             variable_names=variable_names, skip_log_gamma=args.skip_log_gamma,
@@ -528,7 +564,7 @@ def main():
             true=true_set, pred=pred_set,
             design_config=design_config,
             intrinsic_params=intrinsic_params,
-            max_num_categories=args.max_num_categories,
+            max_num_categories=case["plot_cats"],
             max_num_regressors=args.max_num_regressors,
             parameter_mask=params_mask,
             variable_names=variable_names,
@@ -541,7 +577,7 @@ def main():
         # Global parameters (e.g. pi): separate metrics CSV.
         metrics_glob_df = compute_global_metrics(
             true=true_set, pred=pred_set, design_config=design_config,
-            intrinsic_params=intrinsic_params, max_num_categories=args.max_num_categories,
+            intrinsic_params=intrinsic_params, max_num_categories=case["plot_cats"],
             max_num_regressors=args.max_num_regressors,
             global_params=GLOBAL_PARAMS, parameter_mask=params_mask,
             variable_names=variable_names, skip_log_gamma=args.skip_log_gamma,

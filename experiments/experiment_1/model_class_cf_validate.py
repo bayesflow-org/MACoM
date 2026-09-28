@@ -29,7 +29,7 @@ from cogformer.diagnostics.metric.adaptive_metrics import (
 from cogformer.utils.plot_utils import cogformer_mc_colors
 
 from ..configs import MODELS as _BASE_MODELS
-from ..utils import (add_global_params, infer_free_fixed_intrinsics, build_encoder_input_dim,
+from ..utils import (load_bf_validation_data, add_global_params, infer_free_fixed_intrinsics, build_encoder_input_dim,
                      chunked_sample, resolve_val_scenario, seed_case, add_seed_arg)
 
 GLOBAL_PARAMS = ["pi"]
@@ -40,58 +40,6 @@ _MODELS_WITH_PI = {
     for m, cfg in _BASE_MODELS.items()
     if m != "lba"
 }
-
-
-def load_bf_validation_data(
-    data_path: Path,
-    design_config: dict,
-    intrinsic_params: list,
-    model_id: int,
-    batch_size: int,
-    max_dm_cols: int | None = None,
-) -> dict:
-    """Load BF-generated validation data into full (batch, n_rows * n_local) param space.
-
-    BF stores params in two formats depending on the case:
-      - Intercept-only cases: (batch, n_local) — only intercept row params
-      - Cases with regression rows: (batch, n_rows * n_local) — full grid already
-
-    max_dm_cols: if provided, zero-pads design matrices to this width (needed for
-    model class encoder which expects fixed-width input across all cases).
-    """
-    dataset = np.load(data_path, allow_pickle=True)
-    rts = dataset["rts"]
-    choices = dataset["choices"]
-    design_matrices = dataset["design_matrices"]
-    flat_params = dataset["true_set"]
-    flat_masks = dataset["param_masks"]
-
-    if max_dm_cols is not None and design_matrices.shape[-1] < max_dm_cols:
-        pad_width = max_dm_cols - design_matrices.shape[-1]
-        design_matrices = np.pad(design_matrices, ((0, 0), (0, 0), (0, pad_width)))
-
-    n_local = len(intrinsic_params)
-    n_rows = len(design_config)
-    full_size = n_rows * n_local
-
-    if flat_params.shape[1] == full_size:
-        # BF stored as full (n_rows * n_local) grid — use directly
-        pm_full = flat_params.copy()
-        pmask_full = flat_masks.copy()
-    else:
-        # BF stored only intercept-row params — pad remaining rows with zeros
-        pm_full = np.zeros((batch_size, full_size), dtype=flat_params.dtype)
-        pmask_full = np.zeros((batch_size, full_size), dtype=flat_masks.dtype)
-        pm_full[:, :flat_params.shape[1]] = flat_params
-        pmask_full[:, :flat_masks.shape[1]] = flat_masks
-
-    return {
-        "sim_data": {"rts": rts, "choices": choices},
-        "design_matrices": design_matrices,
-        "param_matrices": pm_full,
-        "param_masks": pmask_full,
-        "model_ids": np.full(batch_size, model_id, dtype=np.int64),
-    }
 
 
 def get_benchmark_design_configs():
@@ -484,13 +432,16 @@ def main():
                 all_intrinsics=intrinsic_params,
                 default_fixed_values=default_fixed_values,
             )
-            if args.data_dir is not None:
-                data_path = Path(args.data_dir) / f"{model_name.lower()}_{cfg_name}_data.npz"
-                if not data_path.exists():
-                    print(f"Skipping {model_name} / {cfg_name}: paired mode needs "
-                          f"{data_path}, which does not exist (val_scenarios covers "
-                          f"cases the BF baselines do not, e.g. mixed_predictor).")
-                    continue
+            # Shared benchmark data (the e1_data stage) covers the bench5 cases of
+            # DDM/RDM/CDM. Cases it does not cover -- mixed_predictor, every LBA case --
+            # fall through to seeded simulation rather than being skipped, so a run with
+            # --data_dir still produces every scenario.
+            data_path = (Path(args.data_dir) / f"{model_name.lower()}_{cfg_name}_data.npz"
+                         if args.data_dir is not None else None)
+            if data_path is not None and not data_path.exists():
+                print(f"{model_name} / {cfg_name}: not in {args.data_dir}; simulating (seeded)")
+                data_path = None
+            if data_path is not None:
                 # Must equal build_encoder_input_dim's design_cols, or the encoder gets
                 # the wrong width (the old formula multiplied interaction blocks by
                 # block_width instead of block_width**2: 31 cols instead of 67, and the
@@ -567,6 +518,12 @@ def main():
                 "params_mask": params_mask, "n_rows": n_rows, "outdir": outdir,
                 # Contrast-coded regressors for row labeling (e.g. mixed_predictor's u_1)
                 "categorical_regressors": mix_opts.get("categorical_regressors"),
+                # The grid's OWN row layout, for labelling. Shared benchmark files load
+                # as the compact grid (the scenario's category count, 2 for bench5);
+                # self-simulated cases are padded to the training count. Labelling a
+                # compact grid at the training count names u_2 / u_1:u_2 as extra
+                # categories of u_1.
+                "plot_cats": max_cats if data_path is not None else args.max_num_categories,
             })
 
     # Phase 2: run all ODE integrations
@@ -594,12 +551,14 @@ def main():
             pred_dir / f"{tag}_cf_pred.npz",
             pred_set=case["pred_set"], true_set=case["true_set"],
             params_mask=case["params_mask"],
+            # Layout the grid is in, so replot_per_case labels rows the same way.
+            max_num_categories=case["plot_cats"],
         )
         logging.info(f"[saved] {pred_dir / f'{tag}_cf_pred.npz'}")
 
     # Phase 3: generate figures (predictions are already written in phase 2)
     for case in cases:
-        plot_case(case, colors, args.max_num_categories, args.max_num_regressors,
+        plot_case(case, colors, case["plot_cats"], args.max_num_regressors,
                   skip_posteriors=args.skip_posteriors,
                   skip_log_gamma=args.skip_log_gamma)
 

@@ -28,7 +28,7 @@ from cogformer.simulator.benchmarks.ssms.cdm import CDM
 from cogformer.simulator.benchmarks.ssms.lba import LBA
 from cogformer.simulator.benchmarks.ssms.priors import ddm_priors, rdm_priors, cdm_priors, lba_priors
 from cogformer.simulator.benchmarks.ssms.link_funs import ddm_link_fun, rdm_link_fun, cdm_link_fun, lba_link_fun
-from .model_class_cf_validate import load_bf_validation_data
+from ..utils import load_bf_validation_data
 from cogformer.adapter import Adapter
 from cogformer.networks.transformers.cogformer import CogFormer
 from cogformer.diagnostics.plot.adaptive_recovery import adaptive_recovery, global_recovery
@@ -262,18 +262,21 @@ def main():
             free, fixed, fixed_vals = infer_free_fixed_intrinsics(
                 design_config, intrinsic_params, model_cfg["default_fixed_values"]
             )
-            if args.data_dir is not None:
-                # Paired mode: score the exact datasets model_family_bf_validate wrote,
-                # so BF / original / finetuned all see identical simulations. Mirrors
+            # Shared benchmark data (the e1_data stage) covers the bench5 cases of
+            # DDM/RDM/CDM. Cases it does not cover -- mixed_predictor, every LBA case --
+            # fall through to seeded simulation rather than being skipped, so a run with
+            # --data_dir still produces every scenario.
+            data_path = (Path(args.data_dir) / f"{model_name.lower()}_{cfg_name}_data.npz"
+                         if args.data_dir is not None else None)
+            if data_path is not None and not data_path.exists():
+                print(f"{model_name} / {cfg_name}: not in {args.data_dir}; simulating (seeded)")
+                data_path = None
+            if data_path is not None:
+                # Paired mode: score the exact shared datasets, so BF / original /
+                # finetuned all see identical simulations. Mirrors
                 # model_class_cf_validate's branch -- crucially the lift to global space
                 # below stays OUTSIDE this if/else, because load_bf_validation_data
                 # returns param_matrices in LOCAL space just as batch_sample does.
-                data_path = Path(args.data_dir) / f"{model_name.lower()}_{cfg_name}_data.npz"
-                if not data_path.exists():
-                    print(f"Skipping {model_name} / {cfg_name}: paired mode needs "
-                          f"{data_path}, which does not exist (val_scenarios covers "
-                          f"cases the BF baselines do not, e.g. mixed_predictor).")
-                    continue
                 # Must equal build_encoder_input_dim's design_cols, or the encoder gets
                 # the wrong width (the old formula multiplied interaction blocks by
                 # block_width instead of block_width**2: 31 cols instead of 67, and the
@@ -347,6 +350,9 @@ def main():
                 "variable_names": model_cfg["variable_names"],
                 "samples": samples, "true_set": true_set, "params_mask": params_mask,
                 "n_rows": n_rows, "global_indices": global_indices, "outdir": outdir,
+                # Row layout for LABELLING: compact (the scenario's count) when loaded
+                # from the shared benchmark files, padded to training otherwise.
+                "plot_cats": max_cats if data_path is not None else args.max_num_categories,
             })
 
     print(f"Prepared {len(cases)} cases "
@@ -375,7 +381,8 @@ def main():
         tag = f"{case['label']}_{case['cfg_name']}_ft"
         np.savez(pred_dir / f"{tag}_pred.npz",
                  pred_set=case["pred_set"], true_set=case["true_set"],
-                 params_mask=case["params_mask"])
+                 params_mask=case["params_mask"],
+                 max_num_categories=case["plot_cats"])   # row layout, for replots
         logging.info(f"[saved] {pred_dir / f'{tag}_pred.npz'}")
 
     # ── Phase 3: figures (predictions are already written in phase 2) ──────────
@@ -409,7 +416,7 @@ def main():
                 true=true_set, pred=pred_set,
                 design_config=design_config,
                 intrinsic_params=intrinsic_params,
-                max_num_categories=args.max_num_categories,
+                max_num_categories=case["plot_cats"],
                 max_num_regressors=args.max_num_regressors,
                 parameter_mask=params_mask,
                 variable_names=variable_names,
@@ -434,7 +441,7 @@ def main():
                 true=true_set, pred=pred_set,
                 design_config=design_config,
                 intrinsic_params=intrinsic_params,
-                max_num_categories=args.max_num_categories,
+                max_num_categories=case["plot_cats"],
                 max_num_regressors=args.max_num_regressors,
                 global_params=GLOBAL_PARAMS,
                 parameter_mask=params_mask,
@@ -451,7 +458,7 @@ def main():
             true=true_set, pred=pred_set,
             design_config=design_config,
             intrinsic_params=intrinsic_params,
-            max_num_categories=args.max_num_categories,
+            max_num_categories=case["plot_cats"],
             max_num_regressors=args.max_num_regressors,
             parameter_mask=params_mask,
             variable_names=variable_names,
@@ -464,7 +471,7 @@ def main():
         # Global parameters (e.g. pi): separate metrics CSV.
         metrics_glob_df = compute_global_metrics(
             true=true_set, pred=pred_set, design_config=design_config,
-            intrinsic_params=intrinsic_params, max_num_categories=args.max_num_categories,
+            intrinsic_params=intrinsic_params, max_num_categories=case["plot_cats"],
             max_num_regressors=args.max_num_regressors,
             global_params=GLOBAL_PARAMS, parameter_mask=params_mask,
             variable_names=variable_names, skip_log_gamma=args.skip_log_gamma,

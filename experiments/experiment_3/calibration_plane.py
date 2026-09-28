@@ -78,11 +78,13 @@ STIM_ARMS = {
     "zero-shot": "zeroshot/A0.5/{scen}/mid_rdm/lba_{scen}_mid1_metrics.csv",
     "finetuned": "finetuned/lba/{scen}/lba_{scen}_ft_metrics.csv",
 }
-STIM_SCENARIOS = ["intercept_only", "fixed", "regressed", "fixed_regressed",
-                  "interaction", "mixed_predictor", "ppc_design"]
+# bench5: the cases where both arms score the shared benchmark files, so each arrow joins
+# two posteriors of the SAME datasets. (mixed_predictor is simulated per arm -- same
+# parameters, different data -- and ppc_design no longer exists.)
+STIM_SCENARIOS = ["intercept_only", "fixed", "regressed", "fixed_regressed", "interaction"]
 
 
-def load_paired(root):
+def load_paired(root, scenarios=STIM_SCENARIOS):
     """Per-(scenario, param) metrics for a two-arm batch, shaped like load_cells.
 
     The two arms are relabelled as epochs 0 and 1 so panel_a, which is written
@@ -91,7 +93,7 @@ def load_paired(root):
     import pandas as pd
     rows = []
     for arm, epoch in (("zero-shot", 0), ("finetuned", 1)):
-        for scen in STIM_SCENARIOS:
+        for scen in scenarios:
             f = Path(root) / STIM_ARMS[arm].format(scen=scen)
             if not f.exists():
                 raise SystemExit(f"missing {f}")
@@ -211,6 +213,8 @@ def main():
     p.add_argument("--root", type=str, default=str(TRAJ))
     p.add_argument("--paired_root", type=str, default=None,
                    help="Draw panel A only, from a two-arm batch under this root.")
+    p.add_argument("--scenarios", nargs="+", default=STIM_SCENARIOS,
+                   help="Paired mode: cases to draw (default bench5).")
     p.add_argument("--out", type=str,
                    default="outputs/figures/model_class/cf/lba_trajectory"
                            "/lba_calibration_plane.pdf")
@@ -220,7 +224,7 @@ def main():
     a = p.parse_args()
 
     if a.paired_root:
-        df = load_paired(a.paired_root)
+        df = load_paired(a.paired_root, a.scenarios)
         globals()["EPOCHS"] = [0, 1]
         logging.info(f"{len(df)} cells from a paired batch: "
                      f"{df.scenario.nunique()} scenarios, 2 arms")

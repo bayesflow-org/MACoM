@@ -9,7 +9,7 @@ from cogformer.simulator.design_utils import (
     build_ensemble_row_labels,
 )
 from cogformer.diagnostics.plot.adaptive_ecdf import compute_ecdf_bands
-from cogformer.utils.plot_utils import _add_mask_legend, _add_config_legend
+from cogformer.utils.plot_utils import _add_mask_legend, _add_config_legend, place_legend_below
 
 
 def ensemble_ecdf(
@@ -185,6 +185,7 @@ def ensemble_ecdf(
                     alpha=0.7, color="gray"
                 )
                 ax.set_xlabel("Fractional rank statistic" if r_i == n_kept - 1 else "", fontsize=label_fontsize)
+                ax.set_box_aspect(1)   # N/A tiles square too, like the active cells
                 continue
 
             # Shared confidence band drawn once per active cell
@@ -258,20 +259,13 @@ def ensemble_ecdf(
                                        label_fontsize=legend_fontsize, pixel_alphas=pixel_alphas,
                                        thumb_scale=thumb_scale, per_row=thumb_per_row)
 
-    # Reserve space at the bottom of the main plot area for the band/ECDF legend
-    legend_gap = 0.07
-    fig.subplots_adjust(bottom=legend_gap + 0.04)
-
     band_handle = mpatches.Patch(facecolor="black", alpha=band_alpha * 6, label=f"{int(prob * 100)}% confidence band")
     ecdf_handle = mlines.Line2D([], [], color="black", alpha=0.7, label="Rank ECDF")
-    fig.legend(
-        handles=[band_handle, ecdf_handle],
-        loc="lower center",
-        bbox_to_anchor=((1.0 + strip_w_fig) / 2, 0.005),
-        ncol=2,
-        fontsize=legend_fontsize + 2,
-        frameon=True,
-    )
+    # Under the GRID's measured labels (the thumbnail strip is excluded from the
+    # measurement by passing the grid axes), replacing a fixed bottom-margin fraction
+    # that did not scale with the number of rows.
+    place_legend_below(fig, [band_handle, ecdf_handle], axes=list(axarr.ravel()),
+                       ncol=2, fontsize=legend_fontsize + 2, frameon=True)
     return fig
 
 
@@ -349,6 +343,7 @@ def global_ensemble_ecdf(
                 ax.text(0.5, 0.5, "N/A", transform=ax.transAxes, ha="center", va="center",
                         fontsize=18, weight="bold", alpha=0.7, color="gray")
                 ax.set_title(labels[k], fontsize=title_fontsize)
+                ax.set_box_aspect(1)   # N/A tiles square too, like the active cells
                 continue
             r = int(rows_k[0])  # global params live on the intercept row
 

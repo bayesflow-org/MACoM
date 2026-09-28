@@ -5,7 +5,8 @@ import matplotlib.pyplot as plt
 from collections.abc import Callable
 
 from cogformer.simulator.design_utils import build_parameter_mask, expand_design_config_to_mask, build_row_labels
-from cogformer.utils.plot_utils import make_quadratic, credible_interval, cogformer_cm_colors
+from cogformer.utils.plot_utils import (make_quadratic, credible_interval, cogformer_cm_colors,
+                                        place_legend_below)
 
 
 def adaptive_recovery(
@@ -119,7 +120,7 @@ def adaptive_recovery(
     num_cols    = len(col_idx)
 
     if figsize is None:
-        figsize = (3 * num_cols, 2.8 * num_rows)
+        figsize = (3 * num_cols, 3 * num_rows)
 
     fig, axarr = plt.subplots(num_rows, num_cols, figsize=figsize, squeeze=False)
 
@@ -129,6 +130,10 @@ def adaptive_recovery(
 
         for c_f in range(num_cols):
             ax = axarr[r_f, c_f]
+            # Square BY CONSTRUCTION, active and N/A cells alike: the box aspect is fixed
+            # independently of figsize and of the margins tight_layout leaves, which is
+            # what made single-row (intercept-only) grids and 1x1 global panels drift.
+            ax.set_box_aspect(1)
             x = true_f[..., r_f, c_f]
             mask = parameter_mask[r_f, c_f]
             if mask == 1.0:
@@ -197,10 +202,9 @@ def adaptive_recovery(
         handles = [plt.Line2D([], [], marker="o", ls="none", color=c, label=lab)
                    for _, c, lab in arms_f if lab]
         if handles:
-            # Clear of the bottom row's x-labels; bbox_inches="tight" takes it in.
-            fig.legend(handles=handles, loc="lower center", ncol=len(handles),
-                       frameon=False, fontsize=label_fontsize,
-                       bbox_to_anchor=(0.5, -0.035))
+            # Below the measured bottom-row labels, not a height-scaled figure fraction.
+            place_legend_below(fig, handles, ncol=len(handles), frameon=False,
+                               fontsize=label_fontsize)
     return fig
 
 

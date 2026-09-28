@@ -3,8 +3,8 @@
 # outputs/finals/experiment-{1,1a,2,3,4}/.
 #
 # One entry point, one config source (experiments/shared_config.sh), one log tree.
-# Supersedes run_experiment.sh (root, stale: built around the pre-reorg
-# model_family/ layout) and experiments/run_pipeline.sh (no finalize stages).
+# The only launcher: the pre-reorg run_experiment.sh, experiments/run_pipeline.sh and the
+# per-directory run*.sh scripts were removed on 2026-09-28 (they remain in git history).
 # Those still work standalone; nothing here deletes them.
 #
 # ── WHAT THIS PRODUCES ────────────────────────────────────────────────────────
@@ -60,11 +60,8 @@ GPU0="${GPU0:-0}"
 GPU1="${GPU1:-1}"
 
 # ── ModelClass training scale ─────────────────────────────────────────────────
-# Literal 256, not MC_BATCH (64): MC_CKPT hardcodes _b256_ because the production
-# run used 256, and MC_TAG must match MC_CKPT's directory component.
-MC_TRAIN_BATCH=256
-MC_TAG="r4c4_b256_e10000"
-MC_CKPT_DIR="./outputs/checkpoints/model_class/cf/${MC_TAG}"
+# MC_EPOCHS, MC_TRAIN_BATCH, MC_TAG, MC_CKPT_DIR and MC_CKPT all come from
+# shared_config.sh, derived from one another so the tag and filename cannot drift.
 
 FIG_MC="./outputs/figures/model_class/cf"
 DATA_MC="./outputs/data/model_class"
@@ -74,14 +71,28 @@ DATA_MC="./outputs/data/model_class"
 # deleting the targets. finalize_experiment_3.py reads this tree directly, so the
 # LBA stages below pass --outdir explicitly: at their DEFAULT outdirs they would
 # write somewhere finalize never looks, and the finals tree would silently go stale.
-LBA_PAIRED="${FIG_MC}/paired_lba_20260816"
-# Amortization-gap trees (see stage notes).
-GAP_PRED_DIR="./outputs/data/model_family_paired"
-GAP_FIG_DIR="${FIG_MC}_paired"
+LBA_PAIRED="${FIG_MC}/${MC_TAG}_lba"
+
+# Amortization gap: where BF validation writes its per-case npz (the shared datasets
+# plus BF's posterior draws), read by model_family_c2st.
 BF_DATA_DIR="./outputs/data/model_family"
-GAP_SPLIT_ROOT="./outputs/data/_mf_split"
 
 FAMILIES=(ddm rdm cdm)
+# One seed for every validation arm that is later compared PAIRED (per-case vs
+# finetuned, zero-shot vs finetuned). Validators seed each case by
+# its (family, scenario) identity, so equal seeds => identical datasets across
+# checkpoints. Unseeded, model_class_paired_c2st only WARNS that true_set differs.
+VAL_SEED=0
+# THE shared benchmark test set (bench5 x DDM/RDM/CDM/LBA), written once by e1_data and
+# LOADED by every arm that scores a bench5 case: e1_validate (= Exp 3's original arm),
+# e3_zeroshot, e3_ft_validate and the BayesFlow baselines. Loading, not
+# re-seeding, is what pairs them: the seed pins parameters but NOT the RTs/choices
+# (numba RNG) or the regressor designs. Cases it lacks fall back to simulation.
+BENCH_DATA="./outputs/data/benchmark/seed${VAL_SEED}"
+# Row layout of predictions scored from BENCH_DATA: the compact bench grid (intercept,
+# u_1, u_2, u_1:u_2), i.e. 2 categories. The C2ST scripts use it only to LABEL rows;
+# the training value (4) mislabels u_2 and u_1:u_2 as extra categories of u_1.
+BENCH_MAX_CAT=2
 # bench5. "full" is dropped by model_family_c2st and the BF baselines were never
 # trained on "mixed_predictor", so both are absent by construction, not omission.
 GAP_CASES=(intercept_only fixed regressed fixed_regressed interaction)
@@ -146,6 +157,11 @@ stage_is_done() {
 
 need() {                      # need <path> <what produces it>
     [[ -e "$1" ]] && return 0
+    # A dry run walks the whole pipeline before anything exists, so every input an
+    # upstream stage WOULD produce is missing. Report it and carry on.
+    if [[ -n "${DRY_RUN:-}" ]]; then
+        echo "    · (dry run) would need: $1  <- $2"; return 0
+    fi
     echo "${C_ERR}    ! missing input: $1${C_OFF}"
     echo "      produced by: $2"
     return 1
@@ -154,26 +170,47 @@ need() {                      # need <path> <what produces it>
 # ══════════════════════════════════════════════════════════════════════════════
 # EXPERIMENT 1 — generalising across design space
 # ══════════════════════════════════════════════════════════════════════════════
-marker_e1_train() { echo "$MC_CKPT"; }
+marker_e1_data() { echo "${BENCH_DATA}/.done"; }
+stage_e1_data() {
+    # CPU only, minutes. Never regenerate mid-study: the files ARE the test set, and a
+    # re-run yields the same parameters with different datasets, silently unpairing
+    # every arm scored on the previous set. The sentinel is what prevents that.
+    run "shared benchmark datasets (bench5 x ddm/rdm/cdm/lba, 200 x ${OBS} trials)" -- \
+        "$PY" -m experiments.experiment_1.benchmark_data \
+            --outdir "$BENCH_DATA" --batch_size 200 --num_obs "$OBS" --seed "$VAL_SEED" || return 1
+    [[ -n "${DRY_RUN:-}" ]] || touch "${BENCH_DATA}/.done"
+}
+
+# The trainer rewrites MC_CKPT itself at every validation interval, so the file
+# existing says nothing about whether training FINISHED. The marker is a sentinel
+# written only after a clean exit, and --resume continues an interrupted run from
+# its last save instead of restarting a 58-hour job.
+marker_e1_train() { echo "${MC_CKPT}.done"; }
 stage_e1_train() {
-    run "ModelClass CF train (r${MC_MAX_REG}c${MC_MAX_CAT}, b${MC_TRAIN_BATCH}, e${EPOCHS})" -- \
+    run "ModelClass CF train (r${MC_MAX_REG}c${MC_MAX_CAT}, b${MC_TRAIN_BATCH}, e${MC_EPOCHS})" -- \
         "$PY" -m experiments.experiment_1.model_class_cf_train \
             "${MC_ARCH[@]}" "${MC_GEOM[@]}" \
             --checkpoint_dir "$MC_CKPT_DIR" \
             --min_num_obs "$MIN_OBS" --max_num_obs "$MAX_OBS" \
             --train_batch_size "$MC_TRAIN_BATCH" \
             --val_batch_size 50 --val_samples_chunk_size 1 \
-            --epochs "$EPOCHS" --steps_per_epoch "$STEPS" \
+            --epochs "$MC_EPOCHS" --steps_per_epoch "$STEPS" \
             --lr 1e-4 --dropout 0.05 --layer_dropout 0.05 \
             --fm_sample_steps 50 --fm_num_samples 100 \
-            "${DRY[@]}" "${WANDB[@]}" "${SIMW[@]}"
+            --val_epoch_interval 2500 --early_val_epoch 1000 --resume \
+            --fig_dir "${FIG_MC}/${MC_TAG}_train" \
+            "${DRY[@]}" "${WANDB[@]}" "${SIMW[@]}" || return 1
+    [[ -n "${DRY_RUN:-}" ]] || touch "${MC_CKPT}.done"
 }
 
 marker_e1_validate() { echo "${FIG_MC}/${MC_TAG}_validate"; }
 stage_e1_validate() {
-    need "$MC_CKPT" "stage e1_train" || return 1
+    need "${MC_CKPT}.done" "stage e1_train" || return 1
+    need "${BENCH_DATA}/.done" "stage e1_data" || return 1
     # 6 scenarios x 3 families -> per_case/ in finals, and the *_cf_pred.npz that
-    # e1_benchmark and finals' predictions/ both consume.
+    # e1_benchmark and finals' predictions/ both consume. Seeded with VAL_SEED, so this
+    # is ALSO experiment 3's "original" arm (see e3_original), and --skip_posteriors
+    # because finalize's allowlist drops the 180 pairplots anyway.
     run "ModelClass CF validate — 6 scenarios x 3 families" -- \
         "$PY" -m experiments.experiment_1.model_class_cf_validate \
             "${MC_ARCH[@]}" "${MC_GEOM[@]}" \
@@ -181,12 +218,13 @@ stage_e1_validate() {
             --outdir "${FIG_MC}/${MC_TAG}_validate" \
             --pred_dir "${DATA_MC}/${MC_TAG}_validate" \
             --batch_size 200 --num_samples 200 --num_obs "$OBS" \
-            --samples_chunk_size 1
+            --samples_chunk_size 1 --seed "$VAL_SEED" --skip_posteriors \
+            --data_dir "$BENCH_DATA"
 }
 
 marker_e1_ensemble() { echo "${FIG_MC}/${MC_TAG}_ensemble/model_class_ensemble_data.npz"; }
 stage_e1_ensemble() {
-    need "$MC_CKPT" "stage e1_train" || return 1
+    need "${MC_CKPT}.done" "stage e1_train" || return 1
     # The marker is data.npz, not the directory: finalize_experiment_1 GUARDS on
     # that file, because pre-2026-09 runs wrote figures but no npz and are the
     # stale set this stage overwrites. A directory-only marker would let a stale
@@ -214,13 +252,16 @@ stage_e1_benchmark() {
             --max_num_regressors "$MC_MAX_REG" --max_num_categories "$MC_MAX_CAT"
 }
 
-marker_e1_design_eig() { echo "./outputs/data/design_opt/ddm/design_eig.csv"; }
+# Scoped to MC_TAG: an untagged directory lets a result from any other checkpoint
+# satisfy the marker and be copied into finals as this run's.
+DESIGN_OPT_DIR="./outputs/data/design_opt/${MC_TAG}/ddm"
+marker_e1_design_eig() { echo "${DESIGN_OPT_DIR}/design_eig.csv"; }
 stage_e1_design_eig() {
-    need "$MC_CKPT" "stage e1_train" || return 1
+    need "${MC_CKPT}.done" "stage e1_train" || return 1
     run "information gain vs trial count (static design optimisation)" -- \
         "$PY" -m experiments.experiment_1.ddm_design_eig \
             --checkpoint "$MC_CKPT" \
-            --outdir "./outputs/data/design_opt/ddm" \
+            --outdir "$DESIGN_OPT_DIR" \
             --max_num_regressors "$MC_MAX_REG" --max_num_categories "$MC_MAX_CAT" \
             --num_obs_grid "200,400,600,800,1000" \
             --batch_size 200 --num_samples 200 --samples_chunk_size 1
@@ -237,71 +278,45 @@ stage_e1_design_eig() {
 # of a case-specific BayesFlow baseline from the single amortized ModelClass
 # CogFormer? 0.5 = indistinguishable = no gap.
 #
-# STATE AS OF 2026-09-11: the DDM and CDM gap results already sit in
-# outputs/finals/experiment-1/amortization_gap/, but their SOURCES are gone — only
-# 1 of 15 BF checkpoints survives and there are zero *_data.npz. RDM has no arm at
-# all and never did. So these three stages are a FULL REBUILD (~15 BF trainings),
-# not a refresh. finalize_experiment_1 carries the existing DDM/CDM rows forward,
-# so skipping this group leaves the current finals tree intact.
+#
+# PAIRING (2026-09-27): both arms score the shared benchmark files from e1_data. The
+# CogFormer arm IS e1_validate; the BayesFlow arm loads the same files via --data_dir.
+# The BF simulator reads each case's design options from val_scenarios, so the
+# baselines train on the distribution they are tested on.
 marker_e1a_bf() { echo "${BF_DATA_DIR}/rdm_interaction_data.npz"; }
 stage_e1a_bf() {
     for fam in "${FAMILIES[@]}"; do
         for case in "${GAP_CASES[@]}"; do
+            # Per-case resume: the stage marker only names the LAST case, so without
+            # this an interruption at case 14 would retrain all 15 (~8 h each at b128).
+            # The npz is written by validate, i.e. only after that case's training
+            # finished, and it is what e1a_c2st pairs against.
+            if [[ -e "${BF_DATA_DIR}/${fam}_${case}_data.npz" && -z "${FORCE:-}" ]]; then
+                echo "    · ${fam}/${case}: validated npz exists, skipped"; continue
+            fi
             run "BF baseline train ${fam}/${case}" -- \
                 "$PY" -m experiments.experiment_1a.model_family_bf_train \
                     --model "$fam" --case "$case" \
-                    --epochs "$MF_BF_EPOCHS" --steps_per_epoch 100 --batch_size 64 \
+                    --epochs "$MF_BF_EPOCHS" --steps_per_epoch "$STEPS" --batch_size "$MF_BF_BATCH" \
                     "${DRY[@]}" "${WANDB[@]}" || return 1
             # XLA_PYTHON_CLIENT_PREALLOCATE=false: jax otherwise grabs 75% of the
             # card on a shared box.
+            need "${BENCH_DATA}/.done" "stage e1_data" || return 1
             run "BF baseline validate ${fam}/${case}" -- \
                 env XLA_PYTHON_CLIENT_PREALLOCATE=false \
                 "$PY" -m experiments.experiment_1a.model_family_bf_validate \
                     --model "$fam" --case "$case" \
-                    --batch_size "$VAL_BATCH" --num_samples 200 \
+                    --num_samples 200 --data_dir "$BENCH_DATA" \
                     --skip_posteriors || return 1
         done
     done
 }
 
-marker_e1a_paired() { echo "${GAP_PRED_DIR}/rdm_interaction_cf_pred.npz"; }
-stage_e1a_paired() {
-    need "${BF_DATA_DIR}" "stage e1a_bf" || return 1
-    # WHY PAIRED MATTERS. C2ST scores two sets of draws over the SAME simulated
-    # datasets, so this re-runs CogFormer validation with --data_dir pointing at
-    # the BF npz — loading BF's rts/choices/design_matrices instead of simulating
-    # its own. The pre-existing predictions in outputs/data/model_class/ were NOT
-    # produced this way, and model_family_c2st's only guard is a shape check on the
-    # parameter grid (both arms are 181x7 regardless), so feeding it those files
-    # yields a silently-wrong, inflated gap. Writes to its own PRED_DIR.
-    #
-    # model_class_cf_validate has no --models flag, but in paired mode it skips any
-    # case whose npz is absent — so each family gets a view directory holding only
-    # its own npz. Filenames are disjoint and seeding is per-(model,case), so
-    # splitting changes no result.
-    mkdir -p "$GAP_PRED_DIR" "$GAP_FIG_DIR"
-    rm -rf "$GAP_SPLIT_ROOT"
-    for fam in "${FAMILIES[@]}"; do
-        mkdir -p "$GAP_SPLIT_ROOT/$fam"
-        for f in "$BF_DATA_DIR/${fam}_"*_data.npz; do
-            [[ -e "$f" ]] && ln -sf "$(realpath "$f")" "$GAP_SPLIT_ROOT/$fam/$(basename "$f")"
-        done
-    done
-    for fam in "${FAMILIES[@]}"; do
-        run "paired CogFormer validation — ${fam}" -- \
-            "$PY" -m experiments.experiment_1a.model_class_cf_validate \
-                "${MC_ARCH[@]}" "${MC_GEOM[@]}" \
-                --checkpoint "$MC_CKPT" \
-                --data_dir "$GAP_SPLIT_ROOT/$fam" \
-                --pred_dir "$GAP_PRED_DIR" --outdir "$GAP_FIG_DIR" \
-                --batch_size "$VAL_BATCH" --num_samples 200 --num_obs "$OBS" \
-                --samples_chunk_size 1 --skip_posteriors || return 1
-    done
-}
-
 marker_e1a_c2st() { echo "./outputs/figures/c2st/rdm/rdm_c2st_summary.csv"; }
 stage_e1a_c2st() {
-    need "$GAP_PRED_DIR" "stage e1a_paired" || return 1
+    # The CogFormer side is e1_validate's predictions: it scored the SAME shared
+    # benchmark files as the baselines, so no separate paired run is needed.
+    need "${DATA_MC}/${MC_TAG}_validate" "stage e1_validate" || return 1
     # Only BF_vs_Original is reachable here: Original_vs_Finetuned additionally
     # needs --ft_pred_dir from the LBA-finetuned checkpoint, which is experiment 3's
     # forgetting study (stage e3_paired_c2st), not this one.
@@ -310,9 +325,9 @@ stage_e1a_c2st() {
             "$PY" -m experiments.experiment_1a.model_family_c2st \
                 --model "$fam" \
                 --bf_data_dir "$BF_DATA_DIR" \
-                --mc_pred_dir "$GAP_PRED_DIR" \
+                --mc_pred_dir "${DATA_MC}/${MC_TAG}_validate" \
                 --scenarios BF_vs_Original \
-                --max_num_categories "$MC_MAX_CAT" || return 1
+                --max_num_categories "$BENCH_MAX_CAT" || return 1
     done
 }
 
@@ -340,7 +355,7 @@ stage_e1a_finalize() {
 # stage here would fail on inputs the finals tree does not even want.
 marker_e2_apply() { echo "./outputs/data/real_data/cdm/mc"; }
 stage_e2_apply() {
-    need "$MC_CKPT" "stage e1_train" || return 1
+    need "${MC_CKPT}.done" "stage e1_train" || return 1
     need "./data" "the empirical datasets (not produced by this pipeline)" || return 1
     for fam in "${FAMILIES[@]}"; do
         run "real-data model-class apply — ${fam}" -- \
@@ -360,7 +375,7 @@ stage_e2_apply() {
 # report the stage done with the variants missing.
 marker_e2_refit_svfix() { echo "./outputs/data/real_data/ddm/mc_sv_fixed/ddm_mc_posteriors.npz"; }
 stage_e2_refit_svfix() {
-    need "$MC_CKPT" "stage e1_train" || return 1
+    need "${MC_CKPT}.done" "stage e1_train" || return 1
     need "./data/data_application_ddm.csv" "the empirical DDM dataset (not produced here)" || return 1
     # A genuine constrained FIT, not a simulation-time override: --fix_s_v drops s_v
     # from the design so it is never an estimation target, and every other parameter is
@@ -379,7 +394,7 @@ stage_e2_refit_svfix() {
             --max_num_regressors "$MC_MAX_REG" --max_num_categories "$MC_MAX_CAT"
 }
 
-marker_e2_ppc() { echo "./outputs/figures/real_data/ppc/ddm_sv0"; }
+marker_e2_ppc() { echo "./outputs/figures/real_data/ppc/combined_ppc.pdf"; }
 stage_e2_ppc() {
     need "./outputs/data/real_data" "stage e2_apply" || return 1
     for fam in "${FAMILIES[@]}"; do
@@ -397,14 +412,6 @@ stage_e2_ppc() {
             --model cdm --variant mc \
             --fix_natural "s_v=0.0" \
             --outdir ./outputs/figures/real_data/ppc/cdm_sv0 \
-            --max_num_regressors "$MC_MAX_REG" \
-            --max_num_categories "$MC_MAX_CAT" || return 1
-    # pi=0 isolates the distributional fit from lapse contamination.
-    run "PPC — rdm, no contamination (pi=0)" -- \
-        "$PY" -m experiments.experiment_2.ppc \
-            --model rdm --variant mc \
-            --no_contamination \
-            --outdir ./outputs/figures/real_data/ppc/rdm_nocontam \
             --max_num_regressors "$MC_MAX_REG" \
             --max_num_categories "$MC_MAX_CAT" || return 1
     # Matches the ORIGINAL DDM specification: Stump et al. (2026) has no across-trial
@@ -433,6 +440,38 @@ stage_e2_ppc() {
     else
         echo "    · skipped: ddm s_v-fixed refit absent (run stage e2_refit_svfix)"
     fi
+    # All three families in one figure, from the SAME cached draws the per-family runs
+    # just simulated (no re-simulation). Last, and the stage marker, so a partial PPC
+    # run cannot report itself complete.
+    run "PPC — combined figure, all families" -- \
+        "$PY" -m experiments.experiment_2.combined_all \
+            --variant mc \
+            --max_num_regressors "$MC_MAX_REG" --max_num_categories "$MC_MAX_CAT"
+}
+
+# Simulation-based validation on each family's EMPIRICAL design: every dataset borrows
+# a real subject's regressor values, trial count and per-trial context (RDM: 3
+# alternatives with the subject's ink colours), with the parameter design the real-data
+# fit used. Shows how well the actual experiment identifies each reported coefficient.
+# DDM twice: the canonical design and the s_v-fixed design of the refit.
+REALDATA_FIG="${FIG_MC}/${MC_TAG}_realdata"
+REALDATA_PRED="${DATA_MC}/${MC_TAG}_realdata"
+marker_e2_validate() { echo "${REALDATA_PRED}/cdm_realdata_cf_pred.npz"; }
+stage_e2_validate() {
+    need "${MC_CKPT}.done" "stage e1_train" || return 1
+    need "./data" "the empirical datasets (not produced by this pipeline)" || return 1
+    local spec fam flag
+    for spec in "ddm:" "ddm:--fix_s_v" "rdm:" "cdm:"; do
+        fam="${spec%%:*}"; flag="${spec#*:}"
+        run "real-data-design validation — ${fam} ${flag}" -- \
+            "$PY" -m experiments.experiment_2.realdata_validate \
+                --model "$fam" $flag \
+                --checkpoint "$MC_CKPT" \
+                --outdir "$REALDATA_FIG" --pred_dir "$REALDATA_PRED" \
+                --num_datasets 200 --num_samples 200 --samples_chunk_size 1 \
+                --seed "$VAL_SEED" \
+                --max_num_regressors "$MC_MAX_REG" --max_num_categories "$MC_MAX_CAT" || return 1
+    done
 }
 
 marker_e2_finalize() { echo ""; }
@@ -450,19 +489,25 @@ stage_e2_finalize() {
 # the finals tree quietly kept the August figures.
 marker_e3_zeroshot() { echo "${LBA_PAIRED}/zeroshot"; }
 stage_e3_zeroshot() {
-    need "$MC_CKPT" "stage e1_train" || return 1
+    need "${MC_CKPT}.done" "stage e1_train" || return 1
+    need "${BENCH_DATA}/.done" "stage e1_data" || return 1
+    # LBA bench5 from the shared files, like the finetuned and BF arms, so the
+    # zero-shot -> finetuned change is measured on identical datasets.
     run "LBA zero-shot validate (A=${LBA_FIXED_A})" -- \
         "$PY" -m experiments.experiment_3.model_class_lba_cf_validate \
             --lba_fixed_A "$LBA_FIXED_A" "${MC_ARCH[@]}" "${MC_GEOM[@]}" \
             --checkpoint "$MC_CKPT" \
             --outdir "${LBA_PAIRED}/zeroshot" \
             --batch_size 200 --num_samples 200 --num_obs "$OBS" \
-            --samples_chunk_size 1
+            --samples_chunk_size 1 --seed "$VAL_SEED" --data_dir "$BENCH_DATA"
 }
 
-marker_e3_finetune() { echo "$LBA_FT_CKPT"; }
+# Same sentinel logic as e1_train: the finetune overwrites LBA_FT_CKPT every
+# --checkpoint_interval epochs. It has no --resume, so an interrupted finetune
+# restarts from epoch 0.
+marker_e3_finetune() { echo "${LBA_FT_CKPT}.done"; }
 stage_e3_finetune() {
-    need "$MC_CKPT" "stage e1_train" || return 1
+    need "${MC_CKPT}.done" "stage e1_train" || return 1
     # fixed_A changes what the intrinsic `a` MEANS (threshold vs start-point range),
     # so every LBA arm — finetune, zero-shot, validate — must use the same value.
     # It is in the checkpoint filename for exactly that reason.
@@ -476,34 +521,106 @@ stage_e3_finetune() {
             --train_batch_size "$LBA_FT_BATCH" \
             --val_batch_size 50 --val_samples_chunk_size 1 \
             --finetune_scheme "${FINETUNE_SCHEME:-2}" \
-            "${DRY[@]}" "${WANDB[@]}"
+            --seed "$VAL_SEED" \
+            "${DRY[@]}" "${WANDB[@]}" || return 1
+    [[ -n "${DRY_RUN:-}" ]] || touch "${LBA_FT_CKPT}.done"
 }
 
 marker_e3_ft_validate() { echo "${LBA_PAIRED}/finetuned"; }
 stage_e3_ft_validate() {
-    need "$LBA_FT_CKPT" "stage e3_finetune" || return 1
+    need "${LBA_FT_CKPT}.done" "stage e3_finetune" || return 1
     run "LBA finetuned validate — 4 families" -- \
         "$PY" -m experiments.experiment_3.model_class_lba_finetune_validate \
             --lba_fixed_A "$LBA_FIXED_A" "${MC_ARCH[@]}" "${MC_GEOM[@]}" \
             --checkpoint "$LBA_FT_CKPT" \
             --outdir "${LBA_PAIRED}/finetuned" \
+            --pred_dir "${LBA_PAIRED}/finetuned/predictions" \
             --batch_size 200 --num_samples 200 --num_obs "$OBS" \
-            --samples_chunk_size 1
+            --samples_chunk_size 1 --seed "$VAL_SEED" --data_dir "$BENCH_DATA"
 }
 
 marker_e3_original() { echo "${LBA_PAIRED}/original"; }
 stage_e3_original() {
-    need "$MC_CKPT" "stage e1_train" || return 1
-    # The "before" arm of the forgetting study: the ORIGINAL checkpoint scored on
-    # the same datasets as the finetuned one, so the paired C2ST has a matched pair.
-    run "original-checkpoint arm (forgetting baseline)" -- \
-        "$PY" -m experiments.experiment_1.model_class_cf_validate \
-            "${MC_ARCH[@]}" "${MC_GEOM[@]}" \
-            --checkpoint "$MC_CKPT" \
-            --outdir "${LBA_PAIRED}/original" \
-            --pred_dir "${LBA_PAIRED}/original/predictions" \
-            --batch_size 200 --num_samples 200 --num_obs "$OBS" \
-            --samples_chunk_size 1
+    # The "before" arm of the forgetting study: the ORIGINAL checkpoint on the same
+    # seeded datasets as the finetuned one. That is exactly e1_validate -- same script,
+    # checkpoint, scenarios, arguments and VAL_SEED -- so it is LINKED, not re-run.
+    # Per-family folders point at e1_validate's figures and predictions/ at its npz,
+    # giving model_class_paired_c2st and finalize_experiment_3 the layout they read.
+    need "${FIG_MC}/${MC_TAG}_validate" "stage e1_validate" || return 1
+    need "${DATA_MC}/${MC_TAG}_validate" "stage e1_validate" || return 1
+    [[ -n "${DRY_RUN:-}" ]] && { echo "    · (dry run) would link original/ -> e1_validate"; return 0; }
+    local fam out="${LBA_PAIRED}/original"
+    mkdir -p "$out"
+    for fam in "${FAMILIES[@]}"; do
+        ln -sfn "$(realpath "${FIG_MC}/${MC_TAG}_validate/${fam}")" "${out}/${fam}"
+    done
+    ln -sfn "$(realpath "${DATA_MC}/${MC_TAG}_validate")" "${out}/predictions"
+    echo "    · original/ linked to e1_validate (${#FAMILIES[@]} families + predictions)"
+}
+
+# ZERO-SHOT -> FINETUNED, and ORIGINAL -> FINETUNED, as paired differences on bench5
+# (every arm scored the shared files, which model_class_lba_compare asserts):
+#   Δr heatmaps per family and case, and a per-parameter metric-delta table/figure;
+#   the calibration plane: each LBA cell's move in (contraction, calibration error).
+# CPU only, from saved predictions and metrics.
+marker_e3_compare() { echo "${LBA_PAIRED}/compare/delta_metrics.csv"; }
+stage_e3_compare() {
+    need "${LBA_PAIRED}/zeroshot" "stage e3_zeroshot" || return 1
+    need "${LBA_PAIRED}/finetuned" "stage e3_ft_validate" || return 1
+    need "${DATA_MC}/${MC_TAG}_validate" "stage e1_validate" || return 1
+    run "zero-shot / original vs finetuned — paired deltas" -- \
+        "$PY" -m experiments.experiment_3.model_class_lba_compare \
+            --zero_shot_dir "${LBA_PAIRED}/zeroshot/A${LBA_FIXED_A}" \
+            --finetuned_dir "${LBA_PAIRED}/finetuned" \
+            --base_fig_dir "${FIG_MC}/${MC_TAG}_validate" \
+            --base_pred_dir "${DATA_MC}/${MC_TAG}_validate" \
+            --outdir "${LBA_PAIRED}/compare" \
+            --scenarios "${GAP_CASES[@]}" --max_num_categories "$BENCH_MAX_CAT" || return 1
+    run "LBA calibration plane (zero-shot -> finetuned)" -- \
+        "$PY" -m experiments.experiment_3.calibration_plane \
+            --paired_root "$LBA_PAIRED" --scenarios "${GAP_CASES[@]}" \
+            --out "${LBA_PAIRED}/compare/lba_calibration_plane.pdf" \
+            --csv_out "${LBA_PAIRED}/compare/lba_calibration_plane.csv"
+}
+
+# LBA AMORTIZATION GAP -- the held-out family's counterpart of experiment 1a. LBA has
+# no original-checkpoint arm (it was not in the model class), so its CogFormer arm is
+# the FINETUNED checkpoint. Same budget per case as the 1a baselines, same shared
+# benchmark files (the LBA cases of e1_data), same generator check (verified
+# 2026-09-27: mean RT p >= 0.23 in all 5 cases, favored_idx reaches the BF input).
+marker_e3_bf() { echo "${BF_DATA_DIR}/lba_interaction_data.npz"; }
+stage_e3_bf() {
+    need "${BENCH_DATA}/.done" "stage e1_data" || return 1
+    local case
+    for case in "${GAP_CASES[@]}"; do
+        if [[ -e "${BF_DATA_DIR}/lba_${case}_data.npz" && -z "${FORCE:-}" ]]; then
+            echo "    · lba/${case}: validated npz exists, skipped"; continue
+        fi
+        run "BF baseline train lba/${case}" -- \
+            "$PY" -m experiments.experiment_1a.model_family_bf_train \
+                --model lba --case "$case" \
+                --epochs "$MF_BF_EPOCHS" --steps_per_epoch "$STEPS" --batch_size "$MF_BF_BATCH" \
+                "${DRY[@]}" "${WANDB[@]}" || return 1
+        run "BF baseline validate lba/${case}" -- \
+            env XLA_PYTHON_CLIENT_PREALLOCATE=false \
+            "$PY" -m experiments.experiment_1a.model_family_bf_validate \
+                --model lba --case "$case" \
+                --num_samples 200 --data_dir "$BENCH_DATA" \
+                --skip_posteriors || return 1
+    done
+}
+
+marker_e3_gap_c2st() { echo "./outputs/figures/c2st/lba/lba_c2st_summary.csv"; }
+stage_e3_gap_c2st() {
+    need "${BF_DATA_DIR}/lba_interaction_data.npz" "stage e3_bf" || return 1
+    need "${LBA_PAIRED}/finetuned/predictions" "stage e3_ft_validate" || return 1
+    run "C2ST BF_vs_Finetuned — lba" -- \
+        "$PY" -m experiments.experiment_1a.model_family_c2st \
+            --model lba \
+            --bf_data_dir "$BF_DATA_DIR" \
+            --ft_pred_dir "${LBA_PAIRED}/finetuned/predictions" \
+            --scenarios BF_vs_Finetuned \
+            --max_num_categories "$BENCH_MAX_CAT"
 }
 
 marker_e3_paired_c2st() { echo "${LBA_PAIRED}/c2st/forgetting_c2st_summary.csv"; }
@@ -511,38 +628,40 @@ stage_e3_paired_c2st() {
     need "${LBA_PAIRED}/original" "stage e3_original"   || return 1
     need "${LBA_PAIRED}/finetuned" "stage e3_ft_validate" || return 1
     # Did finetuning on LBA move the posteriors for the three families the model was
-    # originally trained on? Paired, so no re-simulation.
+    # originally trained on? bench5 ONLY: those are the cases both arms load from the
+    # shared benchmark files. The script's default list adds mixed_predictor, which each
+    # arm simulates itself -- same seeded parameters, DIFFERENT datasets -- and --strict
+    # compares only true_set, so it would pass while comparing unpaired data.
     run "forgetting study — paired C2ST original vs finetuned" -- \
-        "$PY" -m experiments.model_class.model_class_paired_c2st \
-            --max_num_categories "$MC_MAX_CAT"
+        "$PY" -m experiments.experiment_3.model_class_paired_c2st \
+            --orig_dir "${LBA_PAIRED}/original/predictions" \
+            --ft_dir "${LBA_PAIRED}/finetuned/predictions" \
+            --outdir "${LBA_PAIRED}/c2st" \
+            --scenarios "${GAP_CASES[@]}" \
+            --max_num_categories "$BENCH_MAX_CAT" --strict
 }
 
-marker_e3_trajectory() { echo "${FIG_MC}/lba_trajectory/lba_finetuning_trajectory.pdf"; }
-stage_e3_trajectory() {
-    # Diagnostics at epochs 0/500/1000/1500/2000 on identical seeded datasets —
-    # the path between the arms, not the endpoints. Needs the per-epoch finetune
-    # checkpoints (…_ep0 … _ep2000), which e3_finetune writes alongside the final one.
-    run "LBA finetuning trajectory report" -- \
-        "$PY" -m experiments.model_class.lba_trajectory_report \
-            --outdir "${FIG_MC}/lba_trajectory"
-}
+# LBA on the empirical lexical-decision data, STIMULUS-CODED (favored_idx per trial)
+# with the condition_only design (intercept + condition). That design is the one the
+# PPC itself argued for: dropping u_2/u_3/u_1:u_2 cut the nonword median-RT error from
+# 266 ms to 18 ms while keeping the observed Speed-Accuracy gap. Lexicality needs no
+# regressor under stimulus coding -- it reaches the model as favored_idx.
+LBA_RD_DESIGN="condition_only"
+LBA_RD_POST="./outputs/data/real_data/lba_stim_cond/mc/lba_mc_posteriors.npz"
+LBA_RD_PPC="./outputs/figures/real_data/ppc/lba_stim_cond"
 
-marker_e3_ppc_apply() { echo "./outputs/data/real_data/lba/mc/lba_mc_posteriors.npz"; }
+marker_e3_ppc_apply() { echo "$LBA_RD_POST"; }
 stage_e3_ppc_apply() {
-    need "$LBA_FT_CKPT" "stage e3_finetune" || return 1
+    need "${LBA_FT_CKPT}.done" "stage e3_finetune" || return 1
     need "./data/data_application_lba.csv" "the empirical LBA dataset (not produced here)" || return 1
-    # The producing scripts stay in experiment_2/: ppc.py and data_utils.py are shared
-    # real-data machinery serving all four families, and lba_mc_cf_apply imports
-    # data_utils as a sibling. Only the RESULTS belong to experiment 3, which is what
-    # finalize_experiment_3's ppc/ section collects.
-    #
-    # The FINETUNED checkpoint, not MC_CKPT: this is LBA on empirical data, and only
-    # the finetuned model has an LBA decoder worth applying. Its defaults already carry
-    # num_models=4, r4c4 and lba_fixed_A=0.5, which must match the finetune.
-    run "LBA real-data apply (17 subjects, finetuned checkpoint)" -- \
+    # The producing scripts stay in experiment_2/ (ppc.py and data_utils.py serve all
+    # four families); only the RESULTS belong to experiment 3. The FINETUNED
+    # checkpoint, since only it has an LBA decoder worth applying.
+    run "LBA real-data apply (stimulus-coded, ${LBA_RD_DESIGN})" -- \
         "$PY" -m experiments.experiment_2.lba_mc_cf_apply \
             --checkpoint "$LBA_FT_CKPT" \
-            --lba_fixed_A "$LBA_FIXED_A" \
+            --lba_fixed_A "$LBA_FIXED_A" --design "$LBA_RD_DESIGN" \
+            --outdir "$(dirname "$LBA_RD_POST")/" \
             --encoder_num_layers "$ENC_LAYERS" --decoder_num_layers "$DEC_LAYERS" \
             --encoder_num_heads "$HEADS" --decoder_num_heads "$HEADS" \
             --proj_dim "$PROJ" --num_seeds "$SEEDS" --seed_dim "$MC_DIM" \
@@ -550,24 +669,44 @@ stage_e3_ppc_apply() {
             --max_num_regressors "$MC_MAX_REG" --max_num_categories "$MC_MAX_CAT"
 }
 
-marker_e3_ppc() { echo "./outputs/figures/real_data/ppc/lba_conventional"; }
+# Real-data-design validation for LBA: same script and rules as e2_validate, against
+# the FINETUNED checkpoint and the design the real-data fit uses (LBA_RD_DESIGN), with
+# each dataset borrowing a real subject's condition coding, trial count and per-trial
+# word/nonword stimulus (favored_idx).
+marker_e3_realdata_validate() { echo "${REALDATA_PRED}/lba_realdata_cf_pred.npz"; }
+stage_e3_realdata_validate() {
+    need "${LBA_FT_CKPT}.done" "stage e3_finetune" || return 1
+    need "./data/data_application_lba.csv" "the empirical LBA dataset (not produced here)" || return 1
+    run "real-data-design validation — lba (${LBA_RD_DESIGN})" -- \
+        "$PY" -m experiments.experiment_2.realdata_validate \
+            --model lba --design "$LBA_RD_DESIGN" --lba_fixed_A "$LBA_FIXED_A" \
+            --checkpoint "$LBA_FT_CKPT" --num_models 4 \
+            --outdir "$REALDATA_FIG" --pred_dir "$REALDATA_PRED" \
+            --num_datasets 200 --num_samples 200 --samples_chunk_size 1 \
+            --seed "$VAL_SEED" \
+            --max_num_regressors "$MC_MAX_REG" --max_num_categories "$MC_MAX_CAT"
+}
+
+marker_e3_ppc() { echo "${LBA_RD_PPC}_conventional"; }
 stage_e3_ppc() {
-    need "./outputs/data/real_data/lba/mc/lba_mc_posteriors.npz" "stage e3_ppc_apply" || return 1
+    need "$LBA_RD_POST" "stage e3_ppc_apply" || return 1
     # TWO variants from the SAME posterior draws, differing only in what the forward
-    # simulation holds fixed. Which belongs in the paper is a modelling decision that
-    # has not been made, so both are produced and finalize_experiment_3 files them
-    # under ppc/free/ and ppc/conventional/ rather than picking silently.
+    # simulation holds fixed. Which belongs in the paper is still open, so both are
+    # produced and finalize_experiment_3 files them under ppc/free/ and
+    # ppc/conventional/. --design MUST match the fit; ppc.py checks it against the
+    # design_name stored in the posteriors file.
     run "LBA PPC — free (s_v, s_tau as estimated)" -- \
         "$PY" -m experiments.experiment_2.ppc \
-            --model lba --variant mc \
+            --model lba --variant mc --design "$LBA_RD_DESIGN" \
+            --posteriors "$LBA_RD_POST" --outdir "$LBA_RD_PPC" \
             --max_num_regressors "$MC_MAX_REG" \
             --max_num_categories "$MC_MAX_CAT" || return 1
     # s_v=1, s_tau=0 is the standard LBA identifiability constraint.
     run "LBA PPC — conventional (s_v=1.0, s_tau=0.0)" -- \
         "$PY" -m experiments.experiment_2.ppc \
-            --model lba --variant mc \
+            --model lba --variant mc --design "$LBA_RD_DESIGN" \
+            --posteriors "$LBA_RD_POST" --outdir "${LBA_RD_PPC}_conventional" \
             --fix_natural "s_v=1.0,s_tau=0.0" \
-            --outdir ./outputs/figures/real_data/ppc/lba_conventional \
             --max_num_regressors "$MC_MAX_REG" \
             --max_num_categories "$MC_MAX_CAT"
 }
@@ -581,58 +720,109 @@ stage_e3_finalize() {
 # ══════════════════════════════════════════════════════════════════════════════
 # EXPERIMENT 4 — encoder representation (aDDM)
 # ══════════════════════════════════════════════════════════════════════════════
-# DELEGATED, on purpose. The five variants differ by non-obvious flag combinations
-# (--fix_v / --fix_s_v), per-variant output-tree suffixes and baseline tags, and
-# equalised validation budgets. Those are already encoded correctly in the tested
-# run_addm_*.sh scripts; re-deriving them inline is how the arms end up mismatched.
-# The scripts hardcode `.venv/bin/python` but resolve it relative to the project
-# root, which is this script's cwd, so they run correctly from here.
-E4_SCRIPTS=(
-    "encoder_rep/run_addm_7d_e500.sh:intercept_only_7d (7-dim baseline arm)"
-    "encoder_rep/run_addm_vfixed.sh:vfixed (v pinned)"
-    "encoder_rep/run_addm_varying.sh:varying_values (trial-varying item values)"
-    "encoder_rep/run_addm_svfixed.sh:svfixed + vsvfixed (s_v pinned, and both)"
-)
-marker_e4_probe() { echo "./outputs/data/encoder_rep/addm_vsvfixed"; }
+# FINAL SCOPE (2026-09-27): the 5-parameter vsvfixed aDDM only (v and s_v pinned;
+# free: v_diff, omega, a, tau, s_tau), plus the 5-family pooled geometry. The other
+# variants (intercept_only_7d, vfixed, svfixed, varying_values) are out of the paper.
+#
+# Called DIRECTLY against experiments/experiment_4/. The older run_addm_*.sh launchers
+# imported experiments/encoder_rep/, whose copies stopped being updated on 2026-09-08..12
+# while experiment_4's moved on; both were removed on 2026-09-28 (still in git history).
+#
+# Every aDDM call below MUST carry the same E4_VARIANT flags: they select the
+# simulated model (resolve_case), so a mismatch trains and validates on different
+# generative models -- the empty-fixed_values failure mode again.
+E4_VARIANT=(--case intercept_only --first_fixation item0 --fix_v --fix_s_v)
+E4_TAG="vsvfixed_e500"                 # baseline arm's run tag
+E4_EPOCHS=500                          # == the budget both arms were matched at
+E4_VAL=(--val_batch_size 500 --num_samples 500 --sample_chunk_size 50)
+E4_DATA="./outputs/data/encoder_rep"
+E4_FIG="./outputs/figures/encoder_rep"
+E4_BASELINE_CKPT="./outputs/checkpoints/encoder_rep/bf_baseline/addm_vsvfixed/intercept_only/item0_${E4_TAG}/addm_baseline_fm/model.keras"
+
+marker_e4_probe() { echo "${E4_DATA}/addm_vsvfixed/intercept_only/addm_encoder_rep_data.npz"; }
 stage_e4_probe() {
-    need "$MC_CKPT" "stage e1_train" || return 1
-    for entry in "${E4_SCRIPTS[@]}"; do
-        local script="${entry%%:*}" desc="${entry#*:}"
-        run "aDDM probe — ${desc}" -- bash "experiments/${script}" || return 1
+    need "${MC_CKPT}.done" "stage e1_train" || return 1
+    # FROZEN arm: the model-class encoder, frozen, feeding a FlowMatching head. Always
+    # retrained -- its checkpoint path does not encode which encoder it was built on,
+    # so a leftover from an older model-class checkpoint would pass silently.
+    local mode
+    for mode in train validate; do
+        run "aDDM frozen-encoder arm — ${mode}" -- \
+            "$PY" -m experiments.experiment_4.addm_bf_apply \
+                --mode "$mode" "${E4_VARIANT[@]}" \
+                --num_models 3 --encoder_device cuda --epochs "$E4_EPOCHS" \
+                "${E4_VAL[@]}" --cogformer_checkpoint "$MC_CKPT" || return 1
     done
+    run "aDDM frozen-encoder diagnostics" -- \
+        "$PY" -m experiments.experiment_4.addm_diagnostics \
+            --case intercept_only --arm frozen \
+            --data "${E4_DATA}/addm_vsvfixed/intercept_only/addm_encoder_rep_data.npz" || return 1
+    # BASELINE arm: learned SetTransformer summary. It does not depend on CogFormer,
+    # so the kept checkpoint (trained 2026-09 under BayesFlow 2.0.13; loads with
+    # identical weights under 2.0.14) is reused unless FORCE is set. It trains through
+    # the synchronous fit_online path, so the keras fork-RNG bug never touched it.
+    if [[ ! -e "$E4_BASELINE_CKPT" || -n "${FORCE:-}" ]]; then
+        run "aDDM baseline arm — train" -- \
+            "$PY" -m experiments.experiment_4.addm_bf_baseline \
+                --mode train "${E4_VARIANT[@]}" --tag "$E4_TAG" --subnet_dropout 0 \
+                --epochs "$E4_EPOCHS" "${E4_VAL[@]}" || return 1
+    else
+        echo "    · baseline checkpoint present, reused: $E4_BASELINE_CKPT"
+    fi
+    run "aDDM baseline arm — validate" -- \
+        "$PY" -m experiments.experiment_4.addm_bf_baseline \
+            --mode validate "${E4_VARIANT[@]}" --tag "$E4_TAG" --subnet_dropout 0 \
+            --epochs "$E4_EPOCHS" "${E4_VAL[@]}" || return 1
+    # Redraw the baseline's four diagnostics with the SAME renderer as the frozen arm,
+    # so the two arms' figures differ only in their arm colour. Overwrites the
+    # baseline script's own default-styled plots under the same filenames.
+    run "aDDM baseline-arm diagnostics" -- \
+        "$PY" -m experiments.experiment_4.addm_diagnostics \
+            --case intercept_only --arm baseline \
+            --data "${E4_FIG}/addm_baseline_vsvfixed/intercept_only/item0_${E4_TAG}/addm_baseline_data.npz"
 }
 
-marker_e4_representation() { echo "./outputs/data/encoder_rep/representation/crossfamily"; }
+marker_e4_compare() { echo "${E4_DATA}/addm_compare/intercept_only_vsvfixed/shared_validation.npz"; }
+stage_e4_compare() {
+    need "${E4_DATA}/addm_vsvfixed/intercept_only/addm_encoder_rep_data.npz" "stage e4_probe" || return 1
+    # PAIRED: both arms re-scored on one shared validation set, then C2ST against an
+    # empirical draw-split null, log-density and CRPS. Separate validate runs simulate
+    # separate datasets, which is why this stage exists at all.
+    run "aDDM arm comparison (shared validation C2ST)" -- \
+        "$PY" -m experiments.experiment_4.addm_arm_compare \
+            "${E4_VARIANT[@]}" --tag "$E4_TAG" \
+            --cogformer_checkpoint "$MC_CKPT" --num_models 3 || return 1
+    run "aDDM combined recovery (frozen vs baseline)" -- \
+        "$PY" -m experiments.experiment_4.combined_recovery \
+            --frozen_data "${E4_DATA}/addm_vsvfixed/intercept_only/addm_encoder_rep_data.npz" \
+            --baseline_data "${E4_FIG}/addm_baseline_vsvfixed/intercept_only/item0_${E4_TAG}/addm_baseline_data.npz"
+}
+
+marker_e4_representation() { echo "${E4_DATA}/representation/crossfamily/app3_summaries.npz"; }
 stage_e4_representation() {
-    need "$MC_CKPT" "stage e1_train" || return 1
+    need "${MC_CKPT}.done" "stage e1_train" || return 1
     # REPRESENTATION level, not posterior level: RSA (crossnobis) + CKA against a
     # dimensionality-matched null. The frozen summary is 128-d and the learned one
-    # 16-d, so no posterior metric can compare them — this is the only level at
-    # which the universal-representation claim is testable.
-    # Needs BOTH encoders: the pooled-geometry figure draws one panel per encoder,
-    # before and after the LBA finetune, so this stage now depends on e3_finetune.
-    need "$LBA_FT_CKPT" "stage e3_finetune" || return 1
-    run "cross-family representation (RSA / CKA)" -- \
+    # 16-d, so no posterior metric can compare them.
+    # The pooled geometry draws one panel per encoder, before and after the LBA
+    # finetune, so this stage also needs e3_finetune. It saves its raw simulated
+    # datasets (app3_raw_data.npz): --seed alone cannot regenerate them.
+    need "${LBA_FT_CKPT}.done" "stage e3_finetune" || return 1
+    run "cross-family pooled geometry (5 families, before/after LBA finetune)" -- \
         "$PY" -m experiments.experiment_4.crossfamily_representation \
             --cogformer_checkpoint "$MC_CKPT" --num_models 3 \
             --finetuned_checkpoint "$LBA_FT_CKPT" --finetuned_num_models 4 \
             --fixed_A "$LBA_FIXED_A" || return 1
-    run "aDDM representation — varying_values" -- \
+    run "aDDM representation — frozen vs baseline (vsvfixed)" -- \
         "$PY" -m experiments.experiment_4.addm_representation \
-            --case varying_values --tag varying_e500 \
+            "${E4_VARIANT[@]}" --tag "$E4_TAG" \
             --cogformer_checkpoint "$MC_CKPT" --num_models 3 || return 1
-    run "aDDM representation — v-fixed" -- \
-        "$PY" -m experiments.experiment_4.addm_representation \
-            --case intercept_only --fix_v --tag vfixed_e500 \
-            --cogformer_checkpoint "$MC_CKPT" --num_models 3 || return 1
-    run "aDDM representation — s_v-fixed" -- \
-        "$PY" -m experiments.experiment_4.addm_representation \
-            --case intercept_only --fix_s_v --tag svfixed_e500 \
-            --cogformer_checkpoint "$MC_CKPT" --num_models 3 || return 1
-    run "aDDM representation — v + s_v fixed" -- \
-        "$PY" -m experiments.experiment_4.addm_representation \
-            --case intercept_only --fix_v --fix_s_v --tag vsvfixed_e500 \
-            --cogformer_checkpoint "$MC_CKPT" --num_models 3
+    # The combined page reads the two summaries it plots from their SOURCES here; its
+    # defaults point into outputs/finals/, which would plot the previous run.
+    run "combined panel (probe + C2ST + representation)" -- \
+        "$PY" -m experiments.experiment_4.combined_panel \
+            --geometry_npz "${E4_DATA}/representation/crossfamily/app3_summaries.npz" \
+            --rep_npz "${E4_DATA}/representation/intercept_only_vsvfixed/summaries.npz"
 }
 
 marker_e4_finalize() { echo ""; }
@@ -645,18 +835,18 @@ stage_e4_finalize() {
 # stage table
 # ══════════════════════════════════════════════════════════════════════════════
 ALL_STAGES=(
-    e1_train e1_validate e1_ensemble e1_benchmark e1_design_eig e1_finalize
-    e1a_bf e1a_paired e1a_c2st e1a_finalize
-    e2_apply e2_refit_svfix e2_ppc e2_finalize
-    e3_zeroshot e3_finetune e3_ft_validate e3_original e3_paired_c2st
-    e3_trajectory e3_ppc_apply e3_ppc e3_finalize
-    e4_probe e4_representation e4_finalize
+    e1_data e1_train e1_validate e1_ensemble e1_benchmark e1_design_eig e1_finalize
+    e1a_bf e1a_c2st e1a_finalize
+    e2_apply e2_refit_svfix e2_ppc e2_validate e2_finalize
+    e3_bf e3_zeroshot e3_finetune e3_ft_validate e3_original e3_paired_c2st
+    e3_compare e3_gap_c2st e3_ppc_apply e3_ppc e3_realdata_validate e3_finalize
+    e4_probe e4_compare e4_representation e4_finalize
 )
-GROUP_exp1="e1_train e1_validate e1_ensemble e1_benchmark e1_design_eig e1_finalize"
-GROUP_exp1a="e1a_bf e1a_paired e1a_c2st e1a_finalize"
-GROUP_exp2="e2_apply e2_refit_svfix e2_ppc e2_finalize"
-GROUP_exp3="e3_zeroshot e3_finetune e3_ft_validate e3_original e3_paired_c2st e3_trajectory e3_ppc_apply e3_ppc e3_finalize"
-GROUP_exp4="e4_probe e4_representation e4_finalize"
+GROUP_exp1="e1_data e1_train e1_validate e1_ensemble e1_benchmark e1_design_eig e1_finalize"
+GROUP_exp1a="e1a_bf e1a_c2st e1a_finalize"
+GROUP_exp2="e2_apply e2_refit_svfix e2_ppc e2_validate e2_finalize"
+GROUP_exp3="e3_bf e3_zeroshot e3_finetune e3_ft_validate e3_original e3_paired_c2st e3_compare e3_gap_c2st e3_ppc_apply e3_ppc e3_realdata_validate e3_finalize"
+GROUP_exp4="e4_probe e4_compare e4_representation e4_finalize"
 GROUP_finalize="e1_finalize e1a_finalize e2_finalize e3_finalize e4_finalize"
 
 expand_group() {

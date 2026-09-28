@@ -5,9 +5,9 @@ Pools simulated RT distributions across all subjects and compares them to
 observed RT distributions, stratified by experimental condition.
 
 Usage:
-    python -m experiments.real_data.ppc --model ddm --variant mf
-    python -m experiments.real_data.ppc --model cdm --variant mc
-    python -m experiments.real_data.ppc --model rdm --variant mf
+    python -m experiments.experiment_2.ppc --model ddm --variant mf
+    python -m experiments.experiment_2.ppc --model cdm --variant mc
+    python -m experiments.experiment_2.ppc --model rdm --variant mf
 """
 import argparse
 import hashlib
@@ -426,7 +426,15 @@ def collect_ppc_cached(model_name, variant, n_ppc_samples, seed, no_contaminatio
     takes seconds. Without this, every cosmetic change to a PPC figure pays the
     full simulation cost again.
     """
+    # The POSTERIORS' CONTENT is in the key. Before 2026-09-27 the canonical run keyed
+    # only on family/variant/flags, so refitting with a new checkpoint and re-running
+    # this script silently reloaded draws simulated from the OLD posteriors. Hashing
+    # the file (a few MB) ties every cache entry to the exact fit it came from.
+    post_file = (Path(posteriors_path) if posteriors_path else
+                 DATA_DIR / model_name / variant / f"{model_name}_{variant}_posteriors.npz")
+    post_sha = hashlib.sha256(post_file.read_bytes()).hexdigest()[:16]
     key = _cache_key(model=model_name, variant=variant, n_ppc_samples=n_ppc_samples,
+                     posteriors_sha=post_sha,
                      seed=seed, no_contamination=no_contamination,
                      fixed_natural=fixed_natural,
                      # ADDITIVE: only present when set. A constrained REFIT has the
