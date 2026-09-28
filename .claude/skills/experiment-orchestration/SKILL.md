@@ -140,8 +140,11 @@ machine, 1 GPU / 24 cores):
 ## 6. Before the final launch
 
 - `git status` clean and committed on both hosts; `uv sync --locked` done; versions verified.
-- Any pending architecture decision applied as CLASS defaults in
-  `cogformer/networks/transformers/cogformer.py` (not per-script flags).
+- Architecture: `CogFormer` defaults are `gated_residual=True, pre_pool_ffn=True,
+  weight_init="orthogonal"` (adopted 2026-09-28 from the A/B). Scripts that pass these flags
+  explicitly (`model_class_cf_train`, `model_class_cf_validate`, `realdata_validate`) default to
+  the same values; keep them in lockstep, or training silently uses a different architecture
+  than every validator expects. Checkpoints trained before 2026-09-28 need all three off.
 - `outputs/finals/experiment-*` cleared if a clean rebuild is wanted.
 - `DRY_RUN=1 bash run_experiments.sh all` completes; `--list` shows the expected todo stages.
 - GPUs free (`nvidia-smi`), enough disk for ~15 GB of new outputs.

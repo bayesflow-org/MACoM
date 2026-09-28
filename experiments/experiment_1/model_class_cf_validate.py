@@ -85,7 +85,8 @@ def parse_args():
                    help="Samples per ODE loop; peak GPU memory scales with batch_size * samples_chunk_size.")
     p.add_argument("--include_full", action="store_true", default=False,
                    help="Deprecated / no effect: validation now runs the fixed val_scenarios set.")
-    p.add_argument("--skip_posteriors", action="store_true", default=False, help="Skip posterior pairplots")
+    p.add_argument("--skip_posteriors", action=argparse.BooleanOptionalAction, default=True,
+                   help="Skip posterior pairplots (DEFAULT). They are not deliverables -- the finalize allowlists drop them -- and cost time per case; pass --no-skip_posteriors to draw them.")
     p.add_argument("--skip_log_gamma", action="store_true", default=True, help="Skip log gamma metric (slow, skipped by default)")
     p.add_argument("--include_log_gamma", dest="skip_log_gamma", action="store_false", help="Include log gamma metric")
 
@@ -107,10 +108,10 @@ def parse_args():
                    help="Must match the flag the checkpoint was trained with. Use "
                         "--no-self_attn_padding_mask for checkpoints trained mask-off.")
 
-    # Must match the training run; see model_class_cf_train. The first two add
-    # parameters, so a mismatch fails in load_state_dict.
-    p.add_argument("--gated_residual", action=argparse.BooleanOptionalAction, default=False)
-    p.add_argument("--pre_pool_ffn", action=argparse.BooleanOptionalAction, default=False)
+    # Must match the training run; see model_class_cf_train. Default ON = the CogFormer
+    # class default. The first two add parameters, so a mismatch fails in load_state_dict.
+    p.add_argument("--gated_residual", action=argparse.BooleanOptionalAction, default=True)
+    p.add_argument("--pre_pool_ffn", action=argparse.BooleanOptionalAction, default=True)
     add_seed_arg(p)
     return p.parse_args()
 

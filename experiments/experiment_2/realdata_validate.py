@@ -274,9 +274,9 @@ def parse_args():
         p.add_argument(f"--{k}", type=int, default=v)
     p.add_argument("--num_models", type=int, default=None,
                    help="Model-embedding rows in the checkpoint; default 3, or 4 for lba.")
-    # Must match the checkpoint; see model_class_cf_train.
-    p.add_argument("--gated_residual", action=argparse.BooleanOptionalAction, default=False)
-    p.add_argument("--pre_pool_ffn", action=argparse.BooleanOptionalAction, default=False)
+    # Must match the checkpoint; see model_class_cf_train. Default ON = the class default.
+    p.add_argument("--gated_residual", action=argparse.BooleanOptionalAction, default=True)
+    p.add_argument("--pre_pool_ffn", action=argparse.BooleanOptionalAction, default=True)
     return p.parse_args()
 
 

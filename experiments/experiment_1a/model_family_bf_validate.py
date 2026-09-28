@@ -176,7 +176,7 @@ def test(model_key: str, case: str):
 
 
 def main(model_key: str, case: str, batch_size: int = 200, num_samples: int = 200,
-         skip_posteriors: bool = False, skip_log_gamma: bool = True, seed: int = 0,
+         skip_posteriors: bool = True, skip_log_gamma: bool = True, seed: int = 0,
          tag: str = "", bench_dir: str | None = None):
     model_cfg = MODELS[model_key]
     model_name = model_key
@@ -450,7 +450,8 @@ if __name__ == "__main__":
                              "the same --tag, and suffix this run's npz / evaluations "
                              "CSV / figures directory to match, so an experimental run "
                              "cannot overwrite a production baseline.")
-    parser.add_argument("--skip_posteriors", action="store_true")
+    parser.add_argument("--skip_posteriors", action=argparse.BooleanOptionalAction, default=True,
+                        help="Skip posterior pairplots (DEFAULT). They are not deliverables -- the finalize allowlists drop them -- and cost time per case; pass --no-skip_posteriors to draw them.")
     parser.add_argument("--data_dir", type=str, default=None,
                         help="Score the shared benchmark datasets in this directory "
                              "(<model>_<case>_data.npz) instead of simulating.")

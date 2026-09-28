@@ -416,15 +416,15 @@ def parse_args():
                              "Pass --no-self_attn_padding_mask to drop it: ~1.48x faster/step "
                              "(FlashAttention fires) with near-neutral recovery per the A/B ablation. "
                              "Finetune/inference scripts must be run with the matching flag.")
-    # BayesFlow 2.0.13 attention defaults, off by default (see CogFormer.__init__).
-    # Only this script exposes them. Every other script builds CogFormer with the class
-    # defaults, so a checkpoint trained with --gated_residual or --pre_pool_ffn fails
-    # loudly in load_state_dict elsewhere until those defaults are flipped.
-    parser.add_argument("--gated_residual", action=argparse.BooleanOptionalAction, default=False,
+    # BayesFlow-style attention options, ON by default (adopted 2026-09-28 after the A/B;
+    # see CogFormer.__init__). Defaults here MUST equal the class defaults: this script
+    # passes them explicitly, so a False here would silently train the old architecture
+    # while every script that relies on the class default expects the new one.
+    parser.add_argument("--gated_residual", action=argparse.BooleanOptionalAction, default=True,
                         help="Zero-initialised learnable scale on every attention/FFN residual branch.")
-    parser.add_argument("--pre_pool_ffn", action=argparse.BooleanOptionalAction, default=False,
+    parser.add_argument("--pre_pool_ffn", action=argparse.BooleanOptionalAction, default=True,
                         help="Gated row-wise FFN on the encoder tokens before PMA pooling.")
-    parser.add_argument("--weight_init", type=str, default="default", choices=["default", "orthogonal"])
+    parser.add_argument("--weight_init", type=str, default="orthogonal", choices=["default", "orthogonal"])
     parser.add_argument("--encoder_embed_dim", type=int, default=64)
     parser.add_argument("--ffn_expansion_factor", type=float, default=4.0)
     parser.add_argument("--seed_dim", type=int, default=128)

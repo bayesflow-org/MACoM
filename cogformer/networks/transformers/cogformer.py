@@ -48,17 +48,20 @@ class CogFormer(nn.Module):
             self_attn_padding_mask: bool = True,
             output_conditioning: str = "linear",
             block_conditioning: str = "film",
-            gated_residual: bool = False,
-            pre_pool_ffn: bool = False,
-            weight_init: str = "default",
+            gated_residual: bool = True,
+            pre_pool_ffn: bool = True,
+            weight_init: str = "orthogonal",
     ):
         super().__init__()
         # gated_residual / pre_pool_ffn / weight_init="orthogonal" port BayesFlow's
         # 2.0.13 attention defaults (zero-init residual scales, rFF before PMA pooling,
-        # orthogonal kernels). All default OFF, i.e. the architecture every existing
-        # checkpoint was trained with. The first two add parameters, so loading a
-        # checkpoint with the wrong setting fails in load_state_dict rather than
-        # silently; weight_init only affects a fresh model and is invisible at load.
+        # orthogonal kernels). All default ON since 2026-09-28: the A/B at the final
+        # recipe (r4c4, b128, 500 ep, 18 validation cases) found recovery r 0.64 -> 0.75,
+        # NRMSE 0.179 -> 0.153 and contraction 0.51 -> 0.61 at unchanged calibration.
+        # Checkpoints trained before that need all three passed as False/"default".
+        # The first two add parameters, so loading a checkpoint with the wrong setting
+        # fails in load_state_dict rather than silently; weight_init only affects a fresh
+        # model and is invisible at load.
         assert weight_init in ("default", "orthogonal"), \
             f"weight_init must be 'default' or 'orthogonal', got {weight_init!r}"
 
