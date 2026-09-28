@@ -39,7 +39,7 @@ from ..configs import MODELS as _BASE_MODELS
 from ..utils import (add_global_params, build_encoder_input_dim, chunked_sample,
                      resolve_val_scenario, ModelClassDataset, make_sim_loader,
                      add_sim_backend_arg, apply_sim_backend, recommend_sim_workers,
-                     add_decoder_groups_arg)
+                     add_decoder_groups_arg, compile_cogformer)
 from ..timing import RunTimer
 
 
@@ -592,7 +592,7 @@ if __name__ == "__main__":
     # Compile before wrapping in the trainer; _load_pretrained must run first so the
     # state dict keys have no _orig_mod. prefix.
     if not args.no_compile:
-        cogformer = torch.compile(cogformer, dynamic=True, mode=args.compile_mode)
+        cogformer = compile_cogformer(cogformer, args.compile_mode, args.decoder_groups)
 
     adapter = Adapter()
 

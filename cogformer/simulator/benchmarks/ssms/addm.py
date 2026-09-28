@@ -207,16 +207,26 @@ class ADDM(Model):
     def build_random_context(num_obs: int) -> dict:
         return {"first_fixation": "random"}
 
-    def simulate(self, params: dict[str, np.ndarray], context=None):
-        context = context or {}
-        mode_name = context.get("first_fixation", self.first_fixation)
+    supports_gpu = True
+
+    def _mode(self, context):
+        mode_name = (context or {}).get("first_fixation", self.first_fixation)
         if mode_name not in FIRST_FIX_MODES:
             raise ValueError(
                 f"first_fixation must be one of {sorted(FIRST_FIX_MODES)}, got {mode_name!r}"
             )
-        mode = FIRST_FIX_MODES[mode_name]
+        return FIRST_FIX_MODES[mode_name]
 
-        pi = params.get("pi", None)
+    def _finish(self, results, pi):
+        rts = results[:, 0][..., None]
+        choices = results[:, 1][..., None]
+        pi_val = pi if pi is not None else self.pi
+        rts, choices = contaminate(rts, choices, pi=pi_val, num_alternatives=2)
+        return {"rts": rts, "choices": choices}
+
+    def simulate(self, params: dict[str, np.ndarray], context=None):
+        if self.uses_gpu:
+            return self.simulate_many([(params, context)])[0]
         results = simulate_addm(
             v_0=params["v_0"],
             v_1=params["v_1"],
@@ -226,16 +236,26 @@ class ADDM(Model):
             s_v=params["s_v"],
             s_tau=params["s_tau"],
             mean_fix_dur=params["mean_fix_dur"],
-            first_fix_mode=mode,
+            first_fix_mode=self._mode(context),
             sigma=1.0,
             dt=self.dt,
             max_steps=self.max_steps,
         )
-        rts = results[:, 0][..., None]
-        choices = results[:, 1][..., None]
-        pi_val = pi if pi is not None else self.pi
-        rts, choices = contaminate(rts, choices, pi=pi_val, num_alternatives=2)
-        return {"rts": rts, "choices": choices}
+        return self._finish(results, params.get("pi", None))
+
+    def simulate_many(self, requests):
+        if not self.uses_gpu:
+            return super().simulate_many(requests)
+        from .gpu_kernels import simulate_addm_gpu
+        lens = [len(np.asarray(p["v_0"]).reshape(-1)) for p, _ in requests]
+        cat = {k: np.concatenate([np.asarray(p[k]).reshape(-1) for p, _ in requests])
+               for k in ("v_0", "v_1", "omega", "a", "tau", "s_v", "s_tau", "mean_fix_dur")}
+        mode = np.concatenate([np.full(n, self._mode(c), dtype=np.int32)
+                               for n, (_, c) in zip(lens, requests)])
+        results = simulate_addm_gpu(**cat, first_fix_mode=mode, sigma=1.0, dt=self.dt,
+                                    max_steps=self.max_steps)
+        return [self._finish(r, p.get("pi", None))
+                for r, (p, _) in zip(np.split(results, np.cumsum(lens)[:-1]), requests)]
 
     def sample(self):
         raise NotImplementedError

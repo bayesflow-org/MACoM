@@ -87,7 +87,9 @@ def recommend_sim_workers(backend: str | None = None) -> int:
     draws, contamination and adapt (~6% of the numba-era per-batch CPU work), and every
     worker holds its own CUDA context (~0.3-0.5 GB). A handful of workers is enough.
     """
-    backend = backend or os.environ.get("COGFORMER_SIM_BACKEND", "numba")
+    if backend is None:
+        from cogformer.simulator.model import _default_backend
+        backend = os.environ.get("COGFORMER_SIM_BACKEND") or _default_backend()
     cpu = os.cpu_count() or 4
     if backend == "gpu":
         return max(2, min(6, cpu - 4))
@@ -97,10 +99,10 @@ def recommend_sim_workers(backend: str | None = None) -> int:
 def add_sim_backend_arg(parser) -> None:
     """Register --sim_backend (see cogformer.simulator.model.Model.sim_backend)."""
     parser.add_argument("--sim_backend", choices=["numba", "gpu"], default=None,
-                        help="Simulation backend for DDM/RDM/CDM (LBA/aDDM always numba). "
-                             "'gpu' runs the Triton kernels, batched per family per batch; "
-                             "distributionally equivalent to numba (experiments/"
-                             "check_gpu_simulators.py). Default: $COGFORMER_SIM_BACKEND, else numba.")
+                        help="Simulation backend. 'gpu' runs the Triton kernels, batched per "
+                             "family per batch; distributionally equivalent to numba "
+                             "(experiments/check_gpu_simulators.py). Default: "
+                             "$COGFORMER_SIM_BACKEND, else gpu when CUDA is available.")
 
 
 def add_decoder_groups_arg(parser) -> None:
@@ -114,9 +116,10 @@ def add_decoder_groups_arg(parser) -> None:
 
 def apply_sim_backend(args) -> str:
     """Export the chosen backend so models AND spawned simulation workers pick it up."""
+    from cogformer.simulator.model import _default_backend
     if getattr(args, "sim_backend", None):
         os.environ["COGFORMER_SIM_BACKEND"] = args.sim_backend
-    return os.environ.get("COGFORMER_SIM_BACKEND", "numba")
+    return os.environ.get("COGFORMER_SIM_BACKEND") or _default_backend()
 
 
 def set_numba_threads(n: int) -> None:
@@ -304,6 +307,23 @@ def plan_token_groups(adapted: dict, num_groups: int) -> dict:
            for key, val in adapted.items()}
     out["token_groups"] = groups
     return out
+
+
+def compile_cogformer(model, mode: str, decoder_groups: int = 0):
+    """torch.compile a CogFormer for training.
+
+    Without decoder groups the whole model is one graph (the long-standing setup). With
+    them, the encoder and decoder are compiled SEPARATELY, in place, and the per-group
+    loop in CogFormer.forward stays eager: compiled as one graph, the data-dependent
+    group slicing trips an Inductor assertion on symbolic sizes (torch 2.11,
+    2026-09-28). In-place Module.compile also keeps state_dict keys free of the
+    ``_orig_mod.`` prefix; every loader strips it either way.
+    """
+    if decoder_groups and decoder_groups > 1:
+        model.encoder.compile(dynamic=True, mode=mode)
+        model.decoder.compile(dynamic=True, mode=mode)
+        return model
+    return torch.compile(model, dynamic=True, mode=mode)
 
 
 def train_step(net, adapted, config, optimizer, scheduler):

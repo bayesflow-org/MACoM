@@ -26,6 +26,12 @@ bash fetch_fonts.sh                       # Inter fonts for the figure style (on
 - The orchestrator exports `MPLBACKEND=Agg` itself (a dead Xwayland DISPLAY otherwise hangs
   every plotting stage at 0% CPU). Any script run OUTSIDE the orchestrator needs it too.
 - Real data lives in `data/data_application_{ddm,rdm,cdm,lba}.csv` (tracked in git).
+- **Simulation runs on the GPU** (Triton kernels for DDM/RDM/CDM/LBA/aDDM,
+  `cogformer/simulator/benchmarks/ssms/gpu_kernels.py`). The orchestrator exports
+  `COGFORMER_SIM_BACKEND=$SIM_BACKEND` (shared_config: `gpu`) for every stage; `numba` is the
+  CPU reference and the automatic fallback without CUDA. After any Triton/torch/driver
+  upgrade, re-run `python -m experiments.check_gpu_simulators` (all five families, ~1 h):
+  p<0.05 should sit near 5% and p<0.01 near 1%; re-run any p<1e-3 set at 400k trials.
 
 ## 2. The pipeline
 
@@ -57,12 +63,16 @@ graph). Use it to find where an artifact comes from, what to copy between hosts,
 stage to re-run for a missing file. `experiments/finalize_experiment_N.py` stays the
 authoritative source→destination map if the two ever disagree.
 
-Rough costs on this project's hardware (RTX 5000 Ada class):
-- `e1_train`: ~14 s/epoch at b128 → ~58 h. SIMULATION-bound on 24 cores (20 workers ≈ 7.5
-  batches/s; the GPU could take ~9.7/s), so throughput scales with CPU cores, not GPU speed.
-- each BF case: ~8 h at 1000 ep × b128, SIMULATION-bound (CPU); 20 cases in total (15 in e1a, 5 LBA in e3).
-- an 18-case validation at 200 datasets × 200 draws (`samples_chunk_size 1`): ~4–5 h.
-- `e3_finetune` (1000 ep, b128): several hours.
+Rough costs on this project's hardware (RTX 5000 Ada class, 24 cores), GPU simulation,
+measured 2026-09-28. Everything below is GPU-bound: wall time scales with GPUs, not cores.
+- `e1_train`: ~7.7 s/epoch at b128 (GPU sim + 3 decoder groups) -> ~32 h. For reference:
+  numba sim 13.9 s/epoch (~58 h, simulation-bound), GPU sim without the split 12.4 s/epoch.
+- each BF case: ~10.3 s/epoch -> ~2.9 h at 1000 ep x b128 (numba: ~3.5 h); 20 cases
+  (15 in e1a, 5 LBA in e3) ~58 GPU-hours. The BF step itself keeps the GPU at ~97% and peaks
+  at a ~7.3 GiB allocation: do NOT stack several BF cases (or BF + e1_train) on one card.
+- an 18-case validation at 200 datasets x 200 draws: ~1 h (padded cases sample on active
+  rows only since 2026-09-28; was ~7 h).
+- `e3_finetune` (1000 ep, b128): a few hours.
 
 ## 3. Invariants — do not break these
 
@@ -84,7 +94,14 @@ Rough costs on this project's hardware (RTX 5000 Ada class):
 5. **Same architecture flags everywhere.** The r/c geometry (`MC_MAX_REG/MC_MAX_CAT`) and
    `LBA_FIXED_A=0.5` are passed explicitly; checkpoint filenames do not encode r/c. Loading
    is strict, so a mismatched parameter set fails loudly — do not work around it.
-6. **Finalize copies, never deletes.** Stale files in `outputs/finals/` survive a rebuild.
+6. **One simulation backend per study.** GPU and numba are distributionally equivalent but
+   not draw-for-draw identical, so a seeded output reproduces only on the backend that
+   produced it. Keep `SIM_BACKEND` fixed from `e1_data` onward, on every host.
+7. **Never GPU-simulate in a forked process.** CUDA does not survive fork. The CogFormer
+   loader spawns its workers; the BF trainer switches keras' PyDataset to threads when the
+   model is on the GPU. New code that parallelises simulation must do one of the two (or set
+   `COGFORMER_SIM_BACKEND=numba` in that process).
+8. **Finalize copies, never deletes.** Stale files in `outputs/finals/` survive a rebuild.
    For a clean final run, clear `outputs/finals/experiment-*` first (it is in git history).
 
 ## 4. Launching and monitoring
@@ -111,25 +128,25 @@ The orchestrator has no host roles; split by running stage selections per host a
 artifacts with rsync. Both hosts: same commit, `uv sync --locked`, and paths are
 repo-relative, so rsync `outputs/...` subtrees 1:1 between clones.
 
-**Critical path:** `e1_train` (~58 h) → everything that needs the model-class checkpoint.
-BF baselines (`e1a_bf`, `e3_bf`) need only `e1_data` and are CPU-bound, so they run in
-parallel with training — ideally on the host with more CPU cores.
+**Critical path:** `e1_train` (~32 h) -> everything that needs the model-class checkpoint.
+BF baselines (`e1a_bf`, `e3_bf`) need only `e1_data`. With GPU simulation every heavy stage is
+GPU-bound and needs little CPU (4-6 sim workers), so split by GPU: one heavy job per card.
 
-Suggested split (host A = more GPUs/cores, e.g. starrail 2 GPU / 48 cores; host B = this
-machine, 1 GPU / 24 cores):
+Suggested split (host A = starrail, 2 GPUs; host B = this machine, 1 GPU), ~90 GPU-hours of
+training in total:
 
 1. **One host** runs `e1_data`. Copy `outputs/data/benchmark/seed0/` (incl. `.done`) to the
    other host BEFORE either host runs anything that reads it.
-2. Host A GPU 0: `e1_train`. Host A GPU 1 and host B: BF cases.
+2. Host A GPU 0: `e1_train` (~32 h). Host A GPU 1 and host B's GPU: the 20 BF cases,
+   ~10 each (~29 h per card) -- they finish together with training.
    - To split BF cases, run individual cases directly on one host — copy the exact
      train+validate commands for those cases from `DRY_RUN=1 bash run_experiments.sh e1a_bf`
-     (run them with `MPLBACKEND=Agg` and the repo on `PYTHONPATH`) — and rsync back:
+     (run them with the repo on `PYTHONPATH` and the orchestrator's exports: `MPLBACKEND=Agg COGFORMER_SIM_BACKEND=gpu XLA_PYTHON_CLIENT_PREALLOCATE=false`) — and rsync back:
      `outputs/checkpoints/model_family/bf/<fam>/`, `outputs/data/model_family/<fam>_<case>_data.npz`,
      `outputs/figures/model_family/bf/<fam>/<case>/`,
      `outputs/evaluations/model_family/bf/<fam>_families_bf_<case>_evaluations.csv`.
      The stage on the other host then skips those cases.
-   - Two BF jobs on one host compete for the same cores (each defaults to cpu_count − 4
-     simulation workers); set `--sim_workers` so their sum stays below the core count.
+   - Pin each job to its card with `CUDA_VISIBLE_DEVICES`; one BF job per GPU (see costs).
 3. After `e1_train`: copy `outputs/checkpoints/model_class/cf/<MC_TAG>/` INCLUDING the `.pt.done`
    sentinel to any host that runs downstream stages. Likewise the LBA finetune directory
    `outputs/checkpoints/model_class/cf/lba_finetune/` + `.done` after `e3_finetune`.

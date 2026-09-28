@@ -32,11 +32,11 @@ MF_BF_BATCH=128
 # 1000, not 2000: finetuning gains plateau by ~1000 epochs (2026-09-27).
 LBA_FT_EPOCHS=1000
 
-# Simulation backend for TRAINING stages (e1_train, e3_finetune, e1a_bf). "gpu" runs
-# DDM/RDM/CDM on Triton kernels (LBA/aDDM stay on numba): distributionally equivalent
-# to numba (experiments/check_gpu_simulators.py) and it lifts the simulation ceiling
-# that bound training on CPU. Data generation and validation stay on numba, so every
-# seeded/paired test set is produced exactly as before.
+# Simulation backend for EVERY stage (exported as COGFORMER_SIM_BACKEND by
+# run_experiments.sh). "gpu" runs all five families (DDM/RDM/CDM/LBA/aDDM) on Triton
+# kernels, distributionally equivalent to numba (experiments/check_gpu_simulators.py),
+# 95-420x one CPU core. Seeded outputs reproduce only on the backend that made them, so
+# do not switch it mid-study; "numba" is the CPU reference implementation.
 SIM_BACKEND=gpu
 
 # ── Encoder design geometry ────────────────────────────────────────────────────

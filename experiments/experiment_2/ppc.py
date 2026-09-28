@@ -177,11 +177,13 @@ def _condition_labels(subject_data, condition_col, label_map):
         return vals.round(1)
 
 
-def _simulate_subject(model, link_funs, intrinsic_params, design_matrix, posterior_sample,
-                      no_contamination=False, param_mask_2d=None, fixed_natural=None,
-                      context=None):
+def _prepare_subject(model, link_funs, intrinsic_params, design_matrix, posterior_sample,
+                     no_contamination=False, param_mask_2d=None, fixed_natural=None,
+                     context=None):
     """
-    Forward-simulate one set of trials from one posterior sample.
+    Per-trial simulator parameters for one set of trials from one posterior sample.
+    Simulated by the caller, all draws of a subject in one model.simulate_many call
+    (a single launch on the GPU backend; the numba backend loops, in the same order).
 
     posterior_sample : (n_rows, n_params) — unconstrained regression coefficients
     design_matrix    : (num_obs, n_rows)
@@ -199,7 +201,8 @@ def _simulate_subject(model, link_funs, intrinsic_params, design_matrix, posteri
                        that also hardcodes accumulator 1 as favored, making choice 2
                        unreachable and choice 1 absorb ~73% of responses against
                        3-choice data that is observed at ~1/3 each.
-    Returns dict with "rts" (num_obs,) and "choices" (num_obs,).
+    Returns the prepared params; _finish_subject turns the simulation into
+    {"rts", "choices", "valid_mask"}.
     """
     if param_mask_2d is not None:
         posterior_sample = posterior_sample * param_mask_2d
@@ -220,8 +223,10 @@ def _simulate_subject(model, link_funs, intrinsic_params, design_matrix, posteri
             params[pname] = link_funs[pname](predictor[:, j])
 
     num_obs = predictor.shape[0]
-    prepared = model.prepare_params(params, num_obs=num_obs, context=context)
-    result = model.simulate(prepared)
+    return model.prepare_params(params, num_obs=num_obs, context=context)
+
+
+def _finish_subject(result):
     rts = result["rts"].squeeze()
     choices = result["choices"].squeeze()
     valid = rts > 0
@@ -356,14 +361,18 @@ def collect_ppc(
                     obs_rts_by_cond[cond_name][lbl].append(d["rts"][mask])
                     obs_ch_by_cond[cond_name][lbl].append(d["choices"][mask])
 
-        # PPC: simulate for each sampled posterior draw
-        for k, s_idx in enumerate(sample_indices):
-            post_sample = post_subj[s_idx].reshape(n_rows, n_params)
-            sim = _simulate_subject(model, link_funs, intrinsic_params, dm, post_sample,
-                                    no_contamination=no_contamination,
-                                    param_mask_2d=param_mask_2d,
-                                    fixed_natural=fixed_natural,
-                                    context=sim_context)
+        # PPC: simulate every sampled posterior draw of this subject in one call
+        requests = [
+            (_prepare_subject(model, link_funs, intrinsic_params, dm,
+                              post_subj[s_idx].reshape(n_rows, n_params),
+                              no_contamination=no_contamination,
+                              param_mask_2d=param_mask_2d,
+                              fixed_natural=fixed_natural,
+                              context=sim_context), sim_context)
+            for s_idx in sample_indices
+        ]
+        for k, result in enumerate(model.simulate_many(requests)):
+            sim = _finish_subject(result)
 
             for cond_name, cond_col, label_map in cfg["conditions"]:
                 cond_vals = _condition_labels(d, cond_col, label_map)

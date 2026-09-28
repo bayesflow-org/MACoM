@@ -33,6 +33,7 @@ from ..utils import (add_global_params, build_encoder_input_dim, chunked_sample,
                      infer_free_fixed_intrinsics, ModelClassDataset, make_sim_loader, train_step,
                      add_architecture_args, add_training_args, recommend_sim_workers,
                      add_sim_backend_arg, apply_sim_backend, add_decoder_groups_arg,
+                     compile_cogformer,
                      resolve_val_scenario)
 from ..timing import RunTimer
 
@@ -633,7 +634,7 @@ if __name__ == "__main__":
 
     torch.set_float32_matmul_precision("high")
     cogformer = CogFormer(**cogformer_config).to(device).train()
-    cogformer = torch.compile(cogformer, dynamic=True, mode=args.compile_mode)
+    cogformer = compile_cogformer(cogformer, args.compile_mode, args.decoder_groups)
     if is_distributed:
         from torch.nn.parallel import DistributedDataParallel as DDP
         cogformer = DDP(cogformer, device_ids=[local_rank])

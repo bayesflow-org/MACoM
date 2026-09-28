@@ -6,6 +6,21 @@ from abc import ABC, abstractmethod
 from collections.abc import Mapping
 
 
+_DEFAULT_BACKEND: str | None = None
+
+
+def _default_backend() -> str:
+    """ "gpu" if CUDA is usable in this process, else "numba" (checked once)."""
+    global _DEFAULT_BACKEND
+    if _DEFAULT_BACKEND is None:
+        try:
+            import torch
+            _DEFAULT_BACKEND = "gpu" if torch.cuda.is_available() else "numba"
+        except ImportError:
+            _DEFAULT_BACKEND = "numba"
+    return _DEFAULT_BACKEND
+
+
 class Model(ABC):
     """
     Abstract base class for simulation-based inference models.
@@ -14,18 +29,24 @@ class Model(ABC):
     with batching handled by NestedModelFamily.
     """
 
-    # Simulation backend. "numba" (default) runs the CPU kernels per dataset; "gpu" runs
-    # the Triton kernels (gpu_kernels.py) and lets ModelFamily/ModelClass batch every
-    # dataset of a batch into one launch. Resolved per instance: an explicit
-    # ``sim_backend`` wins, else the COGFORMER_SIM_BACKEND environment variable (which
-    # spawned simulation workers inherit), else "numba". Models without GPU kernels
-    # (supports_gpu = False) always run on the CPU.
+    # Simulation backend. "gpu" runs the Triton kernels (gpu_kernels.py) and lets
+    # ModelFamily/ModelClass batch every dataset of a batch into one launch; "numba" runs
+    # the CPU kernels per dataset. Resolved per instance: an explicit ``sim_backend``
+    # wins, else the COGFORMER_SIM_BACKEND environment variable (which spawned
+    # simulation workers inherit), else "gpu" when CUDA is available and "numba"
+    # otherwise. The two are distributionally equivalent (experiments/
+    # check_gpu_simulators.py) but NOT draw-for-draw identical: a seeded run reproduces
+    # only on the backend it was made with.
+    #
+    # Never simulate on the GPU inside a process FORKED after CUDA was initialised
+    # (CUDA does not survive fork): use spawn (make_sim_loader) or threads
+    # (model_family_bf_train) -- or set COGFORMER_SIM_BACKEND=numba there.
     sim_backend: str | None = None
     supports_gpu: bool = False
 
     @property
     def uses_gpu(self) -> bool:
-        backend = self.sim_backend or os.environ.get("COGFORMER_SIM_BACKEND", "numba")
+        backend = self.sim_backend or os.environ.get("COGFORMER_SIM_BACKEND") or _default_backend()
         if backend not in ("numba", "gpu"):
             raise ValueError(f"unknown simulation backend {backend!r} (numba | gpu)")
         return backend == "gpu" and self.supports_gpu
