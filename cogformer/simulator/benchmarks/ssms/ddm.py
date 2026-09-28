@@ -176,15 +176,32 @@ class DDM(Model):
         pi    = as_1d(params.get("pi", self.pi), num_obs)
         return {"v": v, "a": a, "z": z, "tau": tau, "s_v": s_v, "s_tau": s_tau, "pi": pi}
 
-    def simulate(self, params: dict[str, np.ndarray], context=None):
-        pi = params.get("pi", None)
-        ddm_params = {k: v for k, v in params.items() if k != "pi"}
-        results = simulate_ddm(**ddm_params, sigma=1.0, dt=self.dt, max_steps=self.max_steps)
+    supports_gpu = True
+
+    def _finish(self, results, pi):
         rts = results[:, 0][..., None]
         choices = results[:, 1][..., None]
         pi_val = pi if pi is not None else self.pi
         rts, choices = contaminate(rts, choices, pi=pi_val, num_alternatives=2)
         return {"rts": rts, "choices": choices}
+
+    def simulate(self, params: dict[str, np.ndarray], context=None):
+        if self.uses_gpu:
+            return self.simulate_many([(params, context)])[0]
+        ddm_params = {k: v for k, v in params.items() if k != "pi"}
+        results = simulate_ddm(**ddm_params, sigma=1.0, dt=self.dt, max_steps=self.max_steps)
+        return self._finish(results, params.get("pi", None))
+
+    def simulate_many(self, requests):
+        if not self.uses_gpu:
+            return super().simulate_many(requests)
+        from .gpu_kernels import simulate_ddm_gpu
+        lens = [len(p["v"]) for p, _ in requests]
+        cat = {k: np.concatenate([np.asarray(p[k]).reshape(-1) for p, _ in requests])
+               for k in ("v", "a", "z", "tau", "s_v", "s_tau")}
+        results = simulate_ddm_gpu(**cat, sigma=1.0, dt=self.dt, max_steps=self.max_steps)
+        return [self._finish(r, p.get("pi", None))
+                for r, (p, _) in zip(np.split(results, np.cumsum(lens)[:-1]), requests)]
 
     def sample(self, batch_size: int | tuple, num_obs: int = 500, context=None):
         if isinstance(batch_size, tuple):

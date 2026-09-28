@@ -22,13 +22,22 @@ STEPS=100
 #   ModelClass CogFormer : 15000 ep x 100 steps x 128 = 192M datasets (3 families)
 #   BayesFlow baselines  :  1000 ep x 100 steps x 128 x 15 cases = 192M datasets
 # i.e. 64M per family on both sides -- the predecessor's per-family equivalence,
-# lifted to the whole class. Measured 14 s/epoch at b128 (GPU-bound), so ~58 h.
+# lifted to the whole class. Measured 14 s/epoch at b128, so ~58 h. SIMULATION-bound
+# on a 24-core host: 20 workers deliver ~7.5 batches/s vs ~9.7 steps/s the GPU can take
+# (2026-09-28 profile), so a faster GPU step alone does not shorten e1_train here.
 MC_EPOCHS=15000
 MC_TRAIN_BATCH=128
 MF_BF_EPOCHS=1000
 MF_BF_BATCH=128
 # 1000, not 2000: finetuning gains plateau by ~1000 epochs (2026-09-27).
 LBA_FT_EPOCHS=1000
+
+# Simulation backend for TRAINING stages (e1_train, e3_finetune, e1a_bf). "gpu" runs
+# DDM/RDM/CDM on Triton kernels (LBA/aDDM stay on numba): distributionally equivalent
+# to numba (experiments/check_gpu_simulators.py) and it lifts the simulation ceiling
+# that bound training on CPU. Data generation and validation stay on numba, so every
+# seeded/paired test set is produced exactly as before.
+SIM_BACKEND=gpu
 
 # ── Encoder design geometry ────────────────────────────────────────────────────
 # A checkpoint's encoder input_embedding is sized by (max_num_regressors,

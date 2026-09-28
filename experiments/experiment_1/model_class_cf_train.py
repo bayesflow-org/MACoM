@@ -32,6 +32,7 @@ from ..configs import MODELS as _BASE_MODELS
 from ..utils import (add_global_params, build_encoder_input_dim, chunked_sample,
                      infer_free_fixed_intrinsics, ModelClassDataset, make_sim_loader, train_step,
                      add_architecture_args, add_training_args, recommend_sim_workers,
+                     add_sim_backend_arg, apply_sim_backend, add_decoder_groups_arg,
                      resolve_val_scenario)
 from ..timing import RunTimer
 
@@ -431,7 +432,9 @@ def parse_args():
     parser.add_argument("--model_embed_dim", type=int, default=8)
     parser.add_argument("--num_sim_workers", type=int, default=None,
                         help="Parallel CPU simulation workers; each gets cpu_count//num_sim_workers numba threads. "
-                             "Defaults to max(3, cpu_count // 8) — ~8 numba threads/worker on any machine.")
+                             "Defaults to recommend_sim_workers(): cpu_count - 4 on numba, <= 6 on gpu.")
+    add_sim_backend_arg(parser)
+    add_decoder_groups_arg(parser)
     add_training_args(parser)
     parser.add_argument("--max_num_obs", type=int, default=500)
     parser.add_argument("--val_num_obs", type=int, default=500)
@@ -482,7 +485,8 @@ if __name__ == "__main__":
     args = parse_args()
     if args.checkpoint_dir is not None:
         CHECKPOINT_DIR = args.checkpoint_dir
-    num_sim_workers = args.num_sim_workers if args.num_sim_workers is not None else recommend_sim_workers()
+    sim_backend = apply_sim_backend(args)
+    num_sim_workers = args.num_sim_workers if args.num_sim_workers is not None else recommend_sim_workers(sim_backend)
 
     logging.basicConfig(level=logging.INFO)
     torch.backends.cuda.matmul.allow_tf32 = True
@@ -535,6 +539,7 @@ if __name__ == "__main__":
         "steps_per_epoch": args.steps_per_epoch,
         "learning_rate": args.lr,
         "gradient_clip_norm": 5.0,
+        "decoder_groups": args.decoder_groups,
         "device": device,
         "model_family_config": model_family_config,
         "train_sample_config": train_sample_config,

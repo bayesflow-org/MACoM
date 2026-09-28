@@ -3,7 +3,7 @@ import numpy as np
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
 
-from .model_family import ModelFamily, _init_numba_threads
+from .model_family import ModelFamily, _init_numba_threads, resolve_deferred
 
 
 class ModelClass:
@@ -169,6 +169,7 @@ class ModelClass:
                 coefficient_prior=coefficient_prior,
                 design_generator_kwargs=design_generator_kwargs,
                 coefficient_prior_kwargs=coefficient_prior_kwargs,
+                defer_simulation=mf.model.uses_gpu,
             )
             sim_instance["model_id"] = self.model_index[model_name]
             sim_instance["num_obs"] = num_obs
@@ -181,6 +182,11 @@ class ModelClass:
             list_batch = [_sample_one(i) for i in range(batch_size)]
         else:
             list_batch = list(self._pool.map(_sample_one, range(batch_size)))
+
+        # GPU-backed families were sampled with defer_simulation: one launch per family.
+        for name, mf in self.model_families.items():
+            if mf.model.uses_gpu:
+                resolve_deferred(mf.model, [b for b in list_batch if b["model_name"] == name])
 
         return self.collate(
             list_batch,

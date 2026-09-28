@@ -104,6 +104,7 @@ mkdir -p "$LOG_DIR"
 WANDB=();  [[ -n "${USE_WANDB:-}"       ]] && WANDB=(--use_wandb)
 SIMW=();   [[ -n "${NUM_SIM_WORKERS:-}" ]] && SIMW=(--num_sim_workers "$NUM_SIM_WORKERS")
 DRY=();    [[ -n "${DRY_EPOCHS:-}"      ]] && DRY=(--dry_run_epochs "$DRY_EPOCHS")
+SIMB=(--sim_backend "$SIM_BACKEND")   # training stages only; see shared_config.sh
 
 MASK_ARGS=(--self_attn_padding_mask)
 [[ "${SELF_ATTN_PADDING_MASK:-true}" == "true" ]] || MASK_ARGS=(--no-self_attn_padding_mask)
@@ -199,8 +200,9 @@ stage_e1_train() {
             --fm_sample_steps 50 --fm_num_samples 100 \
             --val_epoch_interval 2500 --early_val_epoch 1000 --resume \
             --fig_dir "${FIG_MC}/${MC_TAG}_train" \
-            "${DRY[@]}" "${WANDB[@]}" "${SIMW[@]}" || return 1
-    [[ -n "${DRY_RUN:-}" ]] || touch "${MC_CKPT}.done"
+            "${SIMB[@]}" "${DRY[@]}" "${WANDB[@]}" "${SIMW[@]}" || return 1
+    # A DRY_EPOCHS smoke test writes under the real filename; never mark it complete.
+    [[ -n "${DRY_RUN:-}${DRY_EPOCHS:-}" ]] || touch "${MC_CKPT}.done"
 }
 
 marker_e1_validate() { echo "${FIG_MC}/${MC_TAG}_validate"; }
@@ -294,11 +296,13 @@ stage_e1a_bf() {
             if [[ -e "${BF_DATA_DIR}/${fam}_${case}_data.npz" && -z "${FORCE:-}" ]]; then
                 echo "    · ${fam}/${case}: validated npz exists, skipped"; continue
             fi
+            # GPU sim: jax and torch share this process, so jax must not preallocate.
             run "BF baseline train ${fam}/${case}" -- \
+                env XLA_PYTHON_CLIENT_PREALLOCATE=false \
                 "$PY" -m experiments.experiment_1a.model_family_bf_train \
                     --model "$fam" --case "$case" \
                     --epochs "$MF_BF_EPOCHS" --steps_per_epoch "$STEPS" --batch_size "$MF_BF_BATCH" \
-                    "${DRY[@]}" "${WANDB[@]}" || return 1
+                    "${SIMB[@]}" "${DRY[@]}" "${WANDB[@]}" || return 1
             # XLA_PYTHON_CLIENT_PREALLOCATE=false: jax otherwise grabs 75% of the
             # card on a shared box.
             need "${BENCH_DATA}/.done" "stage e1_data" || return 1
@@ -522,8 +526,8 @@ stage_e3_finetune() {
             --val_batch_size 50 --val_samples_chunk_size 1 \
             --finetune_scheme "${FINETUNE_SCHEME:-2}" \
             --seed "$VAL_SEED" \
-            "${DRY[@]}" "${WANDB[@]}" || return 1
-    [[ -n "${DRY_RUN:-}" ]] || touch "${LBA_FT_CKPT}.done"
+            "${SIMB[@]}" "${DRY[@]}" "${WANDB[@]}" || return 1
+    [[ -n "${DRY_RUN:-}${DRY_EPOCHS:-}" ]] || touch "${LBA_FT_CKPT}.done"
 }
 
 marker_e3_ft_validate() { echo "${LBA_PAIRED}/finetuned"; }

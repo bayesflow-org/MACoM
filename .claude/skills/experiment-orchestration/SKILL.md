@@ -58,7 +58,8 @@ stage to re-run for a missing file. `experiments/finalize_experiment_N.py` stays
 authoritative source→destination map if the two ever disagree.
 
 Rough costs on this project's hardware (RTX 5000 Ada class):
-- `e1_train`: ~14 s/epoch at b128, GPU-bound → ~58 h. Sim workers are nearly idle.
+- `e1_train`: ~14 s/epoch at b128 → ~58 h. SIMULATION-bound on 24 cores (20 workers ≈ 7.5
+  batches/s; the GPU could take ~9.7/s), so throughput scales with CPU cores, not GPU speed.
 - each BF case: ~8 h at 1000 ep × b128, SIMULATION-bound (CPU); 20 cases in total (15 in e1a, 5 LBA in e3).
 - an 18-case validation at 200 datasets × 200 draws (`samples_chunk_size 1`): ~4–5 h.
 - `e3_finetune` (1000 ep, b128): several hours.

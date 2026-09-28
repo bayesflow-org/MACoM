@@ -37,7 +37,9 @@ from cogformer.utils.plot_utils import cogformer_fm_colors
 
 from ..configs import MODELS as _BASE_MODELS
 from ..utils import (add_global_params, build_encoder_input_dim, chunked_sample,
-                     resolve_val_scenario, ModelClassDataset, make_sim_loader)
+                     resolve_val_scenario, ModelClassDataset, make_sim_loader,
+                     add_sim_backend_arg, apply_sim_backend, recommend_sim_workers,
+                     add_decoder_groups_arg)
 from ..timing import RunTimer
 
 
@@ -207,6 +209,7 @@ class LBAFinetuner:
                 adapted["regressor_indices"],
                 adapted["param_masks"],
                 model_ids=adapted["model_ids"],
+                token_groups=adapted.get("token_groups"),
             )
             L = self.net.compute_loss(pred_velocity, target_velocity, adapted["param_masks"])
         L.backward()
@@ -345,9 +348,12 @@ def parse_args():
     parser.add_argument("--pretrained_checkpoint", type=str, required=True,
                         help="Path to the pretrained DDM/RDM/CDM ModelClass checkpoint.")
     parser.add_argument("--use_wandb", action="store_true")
-    parser.add_argument("--num_sim_workers", type=int, default=20,
+    parser.add_argument("--num_sim_workers", type=int, default=None,
                         help="Prefetching simulation workers (scheme 2 only). 0 disables "
-                             "the loader and samples inline, which is ~3x slower.")
+                             "the loader and samples inline, which is ~3x slower. Default: "
+                             "recommend_sim_workers() for the chosen --sim_backend.")
+    add_sim_backend_arg(parser)
+    add_decoder_groups_arg(parser)
     parser.add_argument("--compile_mode", type=str, default="max-autotune-no-cudagraphs",
                         choices=["default", "reduce-overhead", "max-autotune",
                                  "max-autotune-no-cudagraphs"],
@@ -427,6 +433,9 @@ def parse_args():
 
 if __name__ == "__main__":
     args = parse_args()
+    sim_backend = apply_sim_backend(args)
+    if args.num_sim_workers is None:
+        args.num_sim_workers = recommend_sim_workers(sim_backend)
 
     logging.basicConfig(level=logging.INFO)
     if args.seed is not None:
@@ -651,7 +660,8 @@ if __name__ == "__main__":
              "train_contexts": {"RDM": RDM.build_random_context}},
             {"model_family_config": model_family_config,
              "train_sample_config": train_sample_config,
-             "batch_size": train_config["batch_size"]},
+             "batch_size": train_config["batch_size"],
+             "decoder_groups": args.decoder_groups},
             args.num_sim_workers, 1,
         )
         sim_loader = iter(make_sim_loader(ds, args.num_sim_workers))

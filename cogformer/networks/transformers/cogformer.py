@@ -140,7 +140,17 @@ class CogFormer(nn.Module):
             elif isinstance(m, PoolingByMultiheadAttention):
                 nn.init.orthogonal_(m.seed.data[0])
 
-    def forward(self, params, input_data, param_indices, regressor_indices, params_mask=None, model_ids=None):
+    def forward(self, params, input_data, param_indices, regressor_indices, params_mask=None, model_ids=None,
+                token_groups=None):
+        """
+        token_groups : optional list of (start, end, num_tokens) over a batch whose
+            datasets are sorted by active-token count (see experiments.utils.
+            plan_token_groups). The encoder runs once on the whole batch; the decoder runs
+            once per group, trimmed to that group's token width, and the outputs are
+            zero-padded back to the full width. Exact: tokens beyond a dataset's width are
+            masked (zero velocity and target), so compute_loss is unchanged -- but the
+            decoder no longer pays for every dataset at the batch's largest width.
+        """
 
         encoder_tokens = self.encoder(input_data)
 
@@ -150,6 +160,22 @@ class CogFormer(nn.Module):
         if self.model_embedding is not None and model_ids is not None:
             model_embedding = self.model_embedding(model_ids)                                        # (B, model_embed_dim)
             model_embedding = model_embedding.unsqueeze(1).expand(-1, pos_embeddings.shape[1], -1)   # (B, T, model_embed_dim)
+
+        if token_groups is not None:
+            num_tokens = params.shape[1]
+            preds, targets = [], []
+            for start, end, width in token_groups:
+                pv, tv = self.decoder(
+                    theta=params[start:end, :width],
+                    query=pos_embeddings[start:end, :width],
+                    key=encoder_tokens[start:end],
+                    query_mask=None if params_mask is None else params_mask[start:end, :width],
+                    model_embedding=None if model_embedding is None else model_embedding[start:end, :width],
+                )
+                pad = (0, 0, 0, num_tokens - width)
+                preds.append(F.pad(pv, pad))
+                targets.append(F.pad(tv, pad))
+            return torch.cat(preds, dim=0), torch.cat(targets, dim=0)
 
         pred_velocity, target_velocity = self.decoder(
             theta=params,

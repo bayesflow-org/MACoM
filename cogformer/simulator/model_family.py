@@ -32,6 +32,16 @@ def _init_numba_threads(n: int) -> None:
         pass
 
 
+def resolve_deferred(model, items: list[dict]) -> None:
+    """Fill ``obs`` for datasets sampled with ``defer_simulation=True``, simulating all
+    of them in a single ``model.simulate_many`` call (in place)."""
+    pending = [it for it in items if "_sim_request" in it]
+    if not pending:
+        return
+    for it, obs in zip(pending, model.simulate_many([it.pop("_sim_request") for it in pending])):
+        it["obs"] = obs
+
+
 class ModelFamily:
     def __init__(
         self,
@@ -208,8 +218,13 @@ class ModelFamily:
         coefficient_prior_kwargs: dict | None = None,
         design_matrix: np.ndarray | None = None,
         category_counts: dict[str, int] | None = None,
+        defer_simulation: bool = False,
     ):
         """
+        defer_simulation : return the prepared per-trial parameters under
+            ``_sim_request`` instead of simulating (``obs`` is None). The caller batches
+            the requests of many datasets into one ``model.simulate_many`` call and fills
+            ``obs`` via :func:`resolve_deferred`. Used for GPU simulation.
         design_matrix : optional FIXED design, ``(num_obs, n_cols)`` in exactly the layout
             ``build_design_matrix`` produces for this (design_config, max_num_regressors,
             max_num_categories). Replaces ONLY the design draw: the coefficient prior,
@@ -375,7 +390,7 @@ class ModelFamily:
             for j, name in enumerate(self.intrinsic_params)
         }
         params = self.model.prepare_params(params=params, num_obs=num_obs, context=context)
-        obs = self.model.simulate(params, context=context)
+        obs = None if defer_simulation else self.model.simulate(params, context=context)
 
         has_intercept_col = "1" in design_config
         regressor_mask = build_regressor_mask(
@@ -411,6 +426,9 @@ class ModelFamily:
                 if isinstance(v, np.ndarray) and v.shape == (num_obs,)
             },
         }
+
+        if defer_simulation:
+            out["_sim_request"] = (params, context)
 
         if debug:
             inspect(out)
@@ -475,6 +493,10 @@ class ModelFamily:
         if mask_randomizer_kwargs is None:
             mask_randomizer_kwargs = self.mask_randomizer_kwargs
 
+        # GPU backend: simulate the whole batch in one launch after the designs are drawn.
+        # The numba path keeps simulating inline, so its RNG order is unchanged.
+        defer = self.model.uses_gpu
+
         def _sample_one(i: int) -> dict:
             if context is None:
                 ctx_i = self.model.build_default_context(num_obs=num_obs) if hasattr(self.model, 'build_default_context') else None
@@ -508,6 +530,7 @@ class ModelFamily:
                 coefficient_prior=coefficient_prior,
                 design_generator_kwargs=design_generator_kwargs,
                 coefficient_prior_kwargs=coefficient_prior_kwargs,
+                defer_simulation=defer,
             )
             sim_instance["num_obs"] = num_obs
             sim_instance["num_regressors"] = num_regressors_array[i]
@@ -519,6 +542,8 @@ class ModelFamily:
             list_batch = [_sample_one(i) for i in range(batch_size)]
         else:
             list_batch = list(self._pool.map(_sample_one, range(batch_size)))
+        if defer:
+            resolve_deferred(self.model, list_batch)
 
         return self.collate(
             list_batch,

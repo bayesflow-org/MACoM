@@ -274,16 +274,43 @@ class RDM(Model):
         num_alternatives = np.random.randint(2, 5)
         return RDM.build_context(num_obs, num_alternatives)
 
-    def simulate(self, params: dict[str, np.ndarray], context=None, randomize=False):
-        pi = params.get("pi", None)
-        rdm_params = {k: v for k, v in params.items() if k != "pi"}
-        results = simulate_rdm(**rdm_params, decay=self.decay, dt=self.dt, max_steps=self.max_steps)
+    supports_gpu = True
+
+    def _finish(self, results, pi, context):
         rts = results[:, 0][..., None]
         choices = results[:, 1][..., None]
         num_alternatives = int((context or {}).get("num_alternatives", 2))
         pi_val = pi if pi is not None else self.pi
         rts, choices = contaminate(rts, choices, pi=pi_val, num_alternatives=num_alternatives)
         return {"rts": rts, "choices": choices}
+
+    def simulate(self, params: dict[str, np.ndarray], context=None, randomize=False):
+        if self.uses_gpu:
+            return self.simulate_many([(params, context)])[0]
+        rdm_params = {k: v for k, v in params.items() if k != "pi"}
+        results = simulate_rdm(**rdm_params, decay=self.decay, dt=self.dt, max_steps=self.max_steps)
+        return self._finish(results, params.get("pi", None), context)
+
+    def simulate_many(self, requests):
+        if not self.uses_gpu:
+            return super().simulate_many(requests)
+        if self.decay != 0.0:
+            raise NotImplementedError("GPU RDM kernel supports constant thresholds only (decay == 0)")
+        from .gpu_kernels import simulate_rdm_gpu
+        lens = [p["v"].shape[0] for p, _ in requests]
+        # Datasets may differ in their number of accumulators: pad drifts to the
+        # largest and pass the per-trial count (padding columns are ignored).
+        k_max = max(p["v"].shape[1] for p, _ in requests)
+        v = np.concatenate([np.pad(np.asarray(p["v"]), ((0, 0), (0, k_max - p["v"].shape[1])))
+                            for p, _ in requests])
+        m = np.concatenate([np.full(n, p["v"].shape[1], dtype=np.int32)
+                            for n, (p, _) in zip(lens, requests)])
+        cat = {k: np.concatenate([np.asarray(p[k]).reshape(-1) for p, _ in requests])
+               for k in ("a", "tau", "s_v", "s_tau")}
+        results = simulate_rdm_gpu(v, **cat, sigma=1.0, dt=self.dt, max_steps=self.max_steps,
+                                   num_alternatives=m)
+        return [self._finish(r, p.get("pi", None), c)
+                for r, (p, c) in zip(np.split(results, np.cumsum(lens)[:-1]), requests)]
 
     def sample(self):
         raise NotImplementedError

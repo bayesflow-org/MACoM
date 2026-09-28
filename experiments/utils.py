@@ -74,17 +74,49 @@ def recommend_batch_size(base: int = 64) -> int:
     return int(min(base * 4, 2 ** round(math.log2(base * scale))))
 
 
-def recommend_sim_workers() -> int:
+def recommend_sim_workers(backend: str | None = None) -> int:
     """Number of DataLoader simulation workers scaled to available CPU cores.
 
-    Prefer many workers with ONE numba thread each over few workers with many:
-    multi-threaded numba pays a fork-join sync on every simulate() call (once per
-    batch element), which measured 2.4x slower than element-level process
-    parallelism at equal core counts (24-core box: 6w x 4t = 3.3 batches/s,
-    20w x 1t = 7.8 batches/s). Leave a few cores for the main process and GPU feeding.
+    numba backend: prefer many workers with ONE numba thread each over few workers with
+    many: multi-threaded numba pays a fork-join sync on every simulate() call (once per
+    batch element), which measured 2.4x slower than element-level process parallelism
+    at equal core counts (24-core box: 6w x 4t = 3.3 batches/s, 20w x 1t = 7.8
+    batches/s). Leave a few cores for the main process and GPU feeding.
+
+    gpu backend: the kernels run on the GPU, leaving each worker only the design/prior
+    draws, contamination and adapt (~6% of the numba-era per-batch CPU work), and every
+    worker holds its own CUDA context (~0.3-0.5 GB). A handful of workers is enough.
     """
+    backend = backend or os.environ.get("COGFORMER_SIM_BACKEND", "numba")
     cpu = os.cpu_count() or 4
+    if backend == "gpu":
+        return max(2, min(6, cpu - 4))
     return max(3, cpu - 4)
+
+
+def add_sim_backend_arg(parser) -> None:
+    """Register --sim_backend (see cogformer.simulator.model.Model.sim_backend)."""
+    parser.add_argument("--sim_backend", choices=["numba", "gpu"], default=None,
+                        help="Simulation backend for DDM/RDM/CDM (LBA/aDDM always numba). "
+                             "'gpu' runs the Triton kernels, batched per family per batch; "
+                             "distributionally equivalent to numba (experiments/"
+                             "check_gpu_simulators.py). Default: $COGFORMER_SIM_BACKEND, else numba.")
+
+
+def add_decoder_groups_arg(parser) -> None:
+    """Register --decoder_groups (see plan_token_groups)."""
+    parser.add_argument("--decoder_groups", type=int, default=3,
+                        help="Split each training batch into this many size-sorted decoder "
+                             "groups, each decoded at its own token width (exact; see "
+                             "plan_token_groups). 3 measured 1.82x on the r4c4 b128 step; "
+                             "0 or 1 disables.")
+
+
+def apply_sim_backend(args) -> str:
+    """Export the chosen backend so models AND spawned simulation workers pick it up."""
+    if getattr(args, "sim_backend", None):
+        os.environ["COGFORMER_SIM_BACKEND"] = args.sim_backend
+    return os.environ.get("COGFORMER_SIM_BACKEND", "numba")
 
 
 def set_numba_threads(n: int) -> None:
@@ -179,6 +211,7 @@ class ModelClassDataset(torch.utils.data.IterableDataset):
         self._sample_config = train_config["train_sample_config"]
         self._n_workers = num_workers
         self._world = world_size
+        self._decoder_groups = int(train_config.get("decoder_groups", 0) or 0)
 
     def __iter__(self):
         from cogformer.simulator import ModelFamily, ModelClass
@@ -213,7 +246,64 @@ class ModelClassDataset(torch.utils.data.IterableDataset):
                 batch_size=self._batch_size,
                 flatten_param_outputs=True,
             )
-            yield adapter.adapt(samples, device="cpu", compact_tokens=True)
+            adapted = adapter.adapt(samples, device="cpu", compact_tokens=True)
+            if self._decoder_groups > 1:
+                adapted = plan_token_groups(adapted, self._decoder_groups)
+            yield adapted
+
+
+def plan_token_groups(adapted: dict, num_groups: int) -> dict:
+    """Sort a compact-token batch by active rows and split it into decoder groups.
+
+    Returns the batch reordered (datasets sorted by active design rows; the loss is a
+    mean over datasets, so order is irrelevant) with ``token_groups`` = [(start, end,
+    width)]: contiguous slices, each decoded at its own token width (its largest
+    dataset's active rows, rounded up to a multiple of 8 like the adapter's compaction,
+    times n_params). Split points minimise the total padded tokens sum(n_g * width_g).
+    A size-sorted split is exact -- see CogFormer.forward(token_groups=...) -- and cut
+    the r4c4 b128 training step 103 -> 57 ms at 3 groups (2026-09-28; real batches
+    carried 6x padding waste).
+    """
+    n_params = adapted["n_params"]
+    active = adapted["num_active_rows"].numpy().astype(np.int64)
+    batch_size = active.shape[0]
+    max_rows = adapted["param_masks"].shape[1] // n_params
+    order = np.argsort(active, kind="stable")
+    rows = np.minimum(-(-np.maximum(active[order], 1) // 8) * 8, max_rows)   # sorted, padded
+    k = max(1, min(num_groups, batch_size))
+
+    # dp[g][j]: min padded rows covering the first j datasets with g groups.
+    inf = np.iinfo(np.int64).max // 4
+    dp = np.full((k + 1, batch_size + 1), inf, dtype=np.int64)
+    cut = np.zeros((k + 1, batch_size + 1), dtype=np.int64)
+    dp[0, 0] = 0
+    for g in range(1, k + 1):
+        for j in range(g, batch_size + 1):
+            i = np.arange(g - 1, j)
+            cost = dp[g - 1, i] + (j - i) * rows[j - 1]
+            best = int(np.argmin(cost))
+            dp[g, j], cut[g, j] = cost[best], i[best]
+    bounds, j = [], batch_size
+    for g in range(k, 0, -1):
+        i = int(cut[g, j])
+        if j > i:
+            bounds.append((i, j))
+        j = i
+    bounds.reverse()
+
+    groups = []
+    for i, j in bounds:   # ties in the DP can split a run of equal widths: merge it back
+        width = int(rows[j - 1]) * n_params
+        if groups and groups[-1][2] == width:
+            groups[-1] = (groups[-1][0], j, width)
+        else:
+            groups.append((i, j, width))
+
+    perm = torch.from_numpy(order)
+    out = {key: (val[perm] if torch.is_tensor(val) and val.dim() > 0 and val.shape[0] == batch_size else val)
+           for key, val in adapted.items()}
+    out["token_groups"] = groups
+    return out
 
 
 def train_step(net, adapted, config, optimizer, scheduler):
@@ -228,6 +318,7 @@ def train_step(net, adapted, config, optimizer, scheduler):
             adapted["regressor_indices"],
             adapted["param_masks"],
             model_ids=adapted.get("model_ids"),
+            token_groups=adapted.get("token_groups"),
         )
         _module = getattr(net, 'module', net)  # handles DDP and DataParallel
         L = _module.compute_loss(pred_velocity, target_velocity, adapted["param_masks"])
@@ -296,13 +387,67 @@ def add_training_args(parser):
                              "reference level is a priori closer to every other level. Same scale.")
 
 
+def compact_adapted(adapted):
+    """Drop fully masked design rows from a padded adapted batch, on its device.
+
+    The GPU-side equivalent of Adapter.adapt(..., compact_tokens=True): active rows
+    first in canonical order, padded to the batch maximum rounded up to a multiple
+    of 8. Exact for sampling -- the decoder masks inactive tokens as self-attention
+    keys and zeroes their outputs, so active-token velocities do not depend on them
+    (verified 2026-09-28: max relative velocity difference 7e-7 in fp32).
+    Returns a new dict carrying row_gather_indices / num_active_rows /
+    num_design_rows, which chunked_sample uses to scatter back.
+    """
+    n_params = adapted["n_params"]
+    masks = adapted["param_masks"]
+    batch_size, num_tokens = masks.shape
+    n_rows = num_tokens // n_params
+
+    row_active = (masks.reshape(batch_size, n_rows, n_params) > 0).any(dim=-1)   # (B, R)
+    num_active = row_active.sum(dim=1)
+    compact_rows = max(int(num_active.max().item()), 1)
+    compact_rows = min(-(-compact_rows // 8) * 8, n_rows)
+    # Stable sort puts active rows first, each group in canonical order.
+    order = torch.sort((~row_active).to(torch.int8), dim=1, stable=True).indices
+    gather = order[:, :compact_rows]                                               # (B, Rc)
+    pad = torch.arange(compact_rows, device=masks.device)[None, :] >= num_active[:, None]
+    gather = gather.masked_fill(pad, 0)
+
+    tok = (gather[:, :, None] * n_params
+           + torch.arange(n_params, device=masks.device)).reshape(batch_size, -1)
+    pad_tok = pad.repeat_interleave(n_params, dim=1)
+
+    def take(x):
+        idx = tok if x.dim() == 2 else tok[..., None].expand(-1, -1, x.shape[-1])
+        return torch.gather(x, 1, idx)
+
+    regressor_idx = take(adapted["regressor_indices"]).masked_fill(pad_tok[..., None], 0)
+    return {
+        **adapted,
+        "param_indices": take(adapted["param_indices"]),
+        "regressor_indices": regressor_idx,
+        "param_masks": take(masks).masked_fill(pad_tok, 0),
+        "param_matrices": take(adapted["param_matrices"]).masked_fill(pad_tok, 0),
+        "row_gather_indices": gather,
+        "num_active_rows": num_active,
+        "num_design_rows": n_rows,
+    }
+
+
 def chunked_sample(model, adapted, num_samples, steps, solver="euler",
-                   samples_chunk_size=None):
+                   samples_chunk_size=None, compact=True):
     """Call model.sample() in chunks of samples_chunk_size to limit peak GPU memory.
 
     Peak memory scales with batch_size * samples_chunk_size * num_tokens.
     If samples_chunk_size is None the full num_samples are drawn in one pass.
+
+    compact : sample on active design rows only (compact_adapted) and scatter back to
+        the canonical layout. Exact, and 15x faster on padded r4c4 grids (603 -> 72
+        tokens). Output shape is unchanged; entries of fully inactive rows are 0
+        instead of untouched prior noise (they are masked everywhere downstream).
     """
+    if compact and "row_gather_indices" not in adapted:
+        adapted = compact_adapted(adapted)
     input_data      = adapted["input_data"]
     param_indices   = adapted["param_indices"]
     regressor_idx   = adapted["regressor_indices"]

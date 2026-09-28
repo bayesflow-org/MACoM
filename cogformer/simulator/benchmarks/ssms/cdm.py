@@ -194,12 +194,32 @@ class CDM(Model):
         theta_mode = np.random.choice(["random_uniform", "zeros"])
         return CDM.build_context(num_obs, theta_mode)
 
-    def simulate(self, params: dict[str, np.ndarray], context=None):
-        pi = params.get("pi", None)
-        cdm_params = {k: v for k, v in params.items() if k != "pi"}
-        results = simulate_cdm(**cdm_params, decay=self.decay, dt=self.dt, max_steps=self.max_steps)
+    supports_gpu = True
+
+    def _finish(self, results, pi):
         rts = results[:, 0][..., None]
         choices = results[:, 1][..., None]
         pi_val = pi if pi is not None else self.pi
         rts, choices = contaminate(rts, choices, pi=pi_val, is_circular=True)
         return {"rts": rts, "choices": choices}
+
+    def simulate(self, params: dict[str, np.ndarray], context=None):
+        if self.uses_gpu:
+            return self.simulate_many([(params, context)])[0]
+        cdm_params = {k: v for k, v in params.items() if k != "pi"}
+        results = simulate_cdm(**cdm_params, decay=self.decay, dt=self.dt, max_steps=self.max_steps)
+        return self._finish(results, params.get("pi", None))
+
+    def simulate_many(self, requests):
+        if not self.uses_gpu:
+            return super().simulate_many(requests)
+        if self.decay != 0.0:
+            raise NotImplementedError("GPU CDM kernel supports constant thresholds only (decay == 0)")
+        from .gpu_kernels import simulate_cdm_gpu
+        lens = [p["v"].shape[0] for p, _ in requests]
+        v = np.concatenate([np.asarray(p["v"]) for p, _ in requests])
+        cat = {k: np.concatenate([np.asarray(p[k]).reshape(-1) for p, _ in requests])
+               for k in ("a", "tau", "s_v", "s_tau")}
+        results = simulate_cdm_gpu(v, **cat, sigma=1.0, dt=self.dt, max_steps=self.max_steps)
+        return [self._finish(r, p.get("pi", None))
+                for r, (p, _) in zip(np.split(results, np.cumsum(lens)[:-1]), requests)]

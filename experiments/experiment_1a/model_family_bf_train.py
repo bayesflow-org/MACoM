@@ -24,7 +24,8 @@ from pathlib import Path
 from cogformer.simulator.model_family import ModelFamily
 
 from ..configs import MODELS as _BASE_MODELS
-from ..utils import recommend_sim_workers, stimulus_channels, benchmark_mix_opts
+from ..utils import (recommend_sim_workers, stimulus_channels, benchmark_mix_opts,
+                     add_sim_backend_arg, apply_sim_backend)
 from ..timing import RunTimer
 
 
@@ -383,17 +384,24 @@ def main(model_key: str, case: str, epochs: int = 1000, steps_per_epoch: int = 1
     # is num_batches_per_epoch -- NOT steps_per_epoch, which is not a fit_online
     # argument and silently fell through **kwargs into keras' fit() while the dataset
     # kept its own default of 100. Same bug fixed in encoder_rep/addm_bf_baseline.py.
-    workers = sim_workers if sim_workers is not None else recommend_sim_workers()
+    #
+    # GPU simulation backend: THREAD workers, not processes. keras forks its worker
+    # pool, and a child forked after the parent (jax) initialized CUDA cannot use CUDA
+    # itself; threads share the parent's context and the Triton kernels release the
+    # GIL while they run, leaving only the light design/prior draws GIL-bound.
+    # (Threads also cannot replay a forked RNG state -- see _reseed_if_forked.)
+    gpu_sim = simulator.model_family.model.uses_gpu
+    workers = sim_workers if sim_workers is not None else (4 if gpu_sim else recommend_sim_workers())
     dataset = bf.datasets.OnlineDataset(
         simulator=simulator,
         batch_size=batch_size,
         num_batches=steps_per_epoch,
         adapter=adapter,
         workers=workers,
-        use_multiprocessing=workers > 1,
+        use_multiprocessing=workers > 1 and not gpu_sim,
         max_queue_size=max(2 * workers, 4),
     )
-    print(f"[sim] {workers} dataset worker processes x 1 numba thread, "
+    print(f"[sim] {workers} dataset worker {'threads (GPU kernels)' if gpu_sim else 'processes x 1 numba thread'}, "
           f"prefetch queue {max(2 * workers, 4)}")
     # _fit, not fit: BasicWorkflow.fit is an abstract stub that always raises
     # NotImplementedError, and fit_online is just OnlineDataset(...) + _fit(...). Calling
@@ -452,7 +460,9 @@ if __name__ == "__main__":
                         help="If set, train for this many epochs only and record extrapolated time.")
     parser.add_argument("--use_wandb", action="store_true")
     parser.add_argument("--test", action="store_true")
+    add_sim_backend_arg(parser)
     args = parser.parse_args()
+    apply_sim_backend(args)
 
     if args.test:
         test(model_key=args.model, case=args.case)
