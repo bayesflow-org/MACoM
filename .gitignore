@@ -229,7 +229,12 @@ outputs/checkpoints/model_class/cf/*
 !outputs/checkpoints/model_class/cf/lba_finetune/
 outputs/checkpoints/model_class/cf/lba_finetune/*
 !outputs/checkpoints/model_class/cf/lba_finetune/*.pt
-outputs/data/
+# Keep the shared benchmark test set (e1_data): every arm is scored on these exact
+# files and a regeneration does not reproduce them, so they travel with the repo.
+outputs/data/*
+!outputs/data/benchmark/
+outputs/data/benchmark/*
+!outputs/data/benchmark/seed0/
 outputs/timing/
 outputs/logs/
 # Ignore figures except real_data and model_class/cf. A negation cannot
@@ -256,6 +261,7 @@ datasets/
 # encoder_rep results are small and are the experiment's record — keep them.
 # Must come AFTER the global *.npz rule: last matching pattern wins.
 !outputs/figures/encoder_rep/**/*.npz
+!outputs/data/benchmark/seed0/*.npz
 
 # Vendored typeface. The TTFs are ~2 MB of binary that never changes and is not
 # ours; `fetch_fonts.sh` pulls the pinned release into cogformer/utils/fonts/.
