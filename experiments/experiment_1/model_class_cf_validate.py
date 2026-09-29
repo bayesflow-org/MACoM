@@ -30,7 +30,8 @@ from cogformer.utils.plot_utils import cogformer_mc_colors
 
 from ..configs import MODELS as _BASE_MODELS
 from ..utils import (load_bf_validation_data, add_global_params, infer_free_fixed_intrinsics, build_encoder_input_dim,
-                     chunked_sample, resolve_val_scenario, seed_case, add_seed_arg)
+                     chunked_sample, resolve_val_scenario, seed_case, add_seed_arg,
+                     bench_to_training_layout)
 
 GLOBAL_PARAMS = ["pi"]
 GLOBAL_VARIABLE_NAMES = [r"$\pi$"]
@@ -442,6 +443,28 @@ def main():
             if data_path is not None and not data_path.exists():
                 print(f"{model_name} / {cfg_name}: not in {args.data_dir}; simulating (seeded)")
                 data_path = None
+
+            def self_simulate():
+                samples = mf.batch_sample(
+                    design_config=design_config,
+                    batch_size=args.batch_size,
+                    num_obs=args.num_obs,
+                    mask_randomizer_kwargs=mask_kwargs,
+                    max_num_regressors=args.max_num_regressors,
+                    max_num_categories=max_cats,
+                    min_num_categories=min_cats,
+                    keep_intercept=args.keep_intercept,
+                    add_interaction=args.add_interaction,
+                    flatten_param_outputs=True,
+                    fixed_config=True,
+                    link_fun=link_fun,
+                    pad_to_max_num_categories=training_max_cats,
+                    **mix_opts,
+                )
+                samples["model_ids"] = np.full(args.batch_size, model_id, dtype=np.int64)
+                return samples
+
+            keep_rows = None
             if data_path is not None:
                 # Must equal build_encoder_input_dim's design_cols, or the encoder gets
                 # the wrong width (the old formula multiplied interaction blocks by
@@ -476,24 +499,14 @@ def main():
                 # documented fallback. Without this the paired branch dies in
                 # Adapter._resolve_position_codes.
                 test_samples["design_configs"] = [design_config] * args.batch_size
+                # The network sees the canonical training layout, not the compact file
+                # grid (see bench_to_training_layout); keep_rows maps back for saving.
+                if max_cats < training_max_cats:
+                    test_samples, keep_rows = bench_to_training_layout(
+                        test_samples, self_simulate(), design_config,
+                        bench_max_num_categories=max_cats)
             else:
-                test_samples = mf.batch_sample(
-                    design_config=design_config,
-                    batch_size=args.batch_size,
-                    num_obs=args.num_obs,
-                    mask_randomizer_kwargs=mask_kwargs,
-                    max_num_regressors=args.max_num_regressors,
-                    max_num_categories=max_cats,
-                    min_num_categories=min_cats,
-                    keep_intercept=args.keep_intercept,
-                    add_interaction=args.add_interaction,
-                    flatten_param_outputs=True,
-                    fixed_config=True,
-                    link_fun=link_fun,
-                    pad_to_max_num_categories=training_max_cats,
-                    **mix_opts,
-                )
-                test_samples["model_ids"] = np.full(args.batch_size, model_id, dtype=np.int64)
+                test_samples = self_simulate()
 
             test_samples["param_matrices"], test_samples["param_masks"] = \
                 model_class.lift_to_global_space(
@@ -511,7 +524,10 @@ def main():
             true_set = true_flat.reshape(args.batch_size, n_rows, n_global_params)[:, :, global_indices]
             params_mask = adapted["param_masks"].detach().cpu().numpy()
             params_mask = params_mask.reshape(args.batch_size, n_rows, n_global_params)[0][:, global_indices]
+            if keep_rows is not None:
+                true_set, params_mask = true_set[:, keep_rows], params_mask[keep_rows]
             cases.append({
+                "keep_rows": keep_rows,
                 "model_name": model_name, "cfg_name": cfg_name,
                 "design_config": design_config, "intrinsic_params": intrinsic_params,
                 "variable_names": variable_names, "global_indices": global_indices,
@@ -541,6 +557,8 @@ def main():
         case["pred_set"] = raw.reshape(
             args.batch_size, args.num_samples, case["n_rows"], n_global_params
         )[:, :, :, case["global_indices"]]
+        if case["keep_rows"] is not None:
+            case["pred_set"] = case["pred_set"][:, :, case["keep_rows"]]
 
         # Persist immediately rather than at the top of phase 3. Sampling is the
         # expensive part (~20 min/case) and lives only in memory until written, so a

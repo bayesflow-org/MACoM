@@ -46,7 +46,7 @@ from cogformer.utils.plot_utils import cogformer_mc_colors
 from ..configs import MODELS as _BASE_MODELS, LBA_CONFIG
 from ..utils import (add_global_params, infer_free_fixed_intrinsics, build_encoder_input_dim,
                      chunked_sample, resolve_val_scenario, seed_case, add_seed_arg,
-                     load_bf_validation_data)
+                     load_bf_validation_data, bench_to_training_layout)
 
 
 GLOBAL_PARAMS = ["pi"]
@@ -327,25 +327,9 @@ def main():
         if data_path is not None and not data_path.exists():
             print(f"LBA / {cfg_name}: not in {args.data_dir}; simulating (seeded)")
             data_path = None
-        if data_path is not None:
-            test_samples = load_bf_validation_data(
-                data_path=data_path, design_config=design_config,
-                intrinsic_params=LBA_LOCAL_PARAMS, model_id=0,   # overwritten per eval id
-                batch_size=args.batch_size,
-                max_dm_cols=build_encoder_input_dim(
-                    max_num_regressors=args.max_num_regressors,
-                    max_num_categories=args.max_num_categories,
-                    keep_intercept=args.keep_intercept) - 5,
-            )
-            # Same three fields, same reasons, as model_class_lba_finetune_validate's
-            # paired branch: training regressor ceiling, the scenario's category count
-            # (the shared grid has len(design_config) rows), and the design config so
-            # the adapter can rebuild position codes.
-            test_samples["max_num_regressors"] = args.max_num_regressors
-            test_samples["max_num_categories"] = max_cats
-            test_samples["design_configs"] = [design_config] * args.batch_size
-        else:
-            test_samples = lba_family.batch_sample(
+
+        def self_simulate():
+            return lba_family.batch_sample(
                 design_config=design_config,
                 batch_size=args.batch_size,
                 num_obs=args.num_obs,
@@ -367,6 +351,33 @@ def main():
                    "min_num_categories": min_cats,
                    **mix_opts},
             )
+
+        keep_rows = None
+        if data_path is not None:
+            test_samples = load_bf_validation_data(
+                data_path=data_path, design_config=design_config,
+                intrinsic_params=LBA_LOCAL_PARAMS, model_id=0,   # overwritten per eval id
+                batch_size=args.batch_size,
+                max_dm_cols=build_encoder_input_dim(
+                    max_num_regressors=args.max_num_regressors,
+                    max_num_categories=args.max_num_categories,
+                    keep_intercept=args.keep_intercept) - 5,
+            )
+            # Same three fields, same reasons, as model_class_lba_finetune_validate's
+            # paired branch: training regressor ceiling, the scenario's category count
+            # (the shared grid has len(design_config) rows), and the design config so
+            # the adapter can rebuild position codes.
+            test_samples["max_num_regressors"] = args.max_num_regressors
+            test_samples["max_num_categories"] = max_cats
+            test_samples["design_configs"] = [design_config] * args.batch_size
+            # The network sees the canonical training layout, not the compact file grid
+            # (see utils.bench_to_training_layout); keep_rows maps back for saving.
+            if max_cats < training_max_cats:
+                test_samples, keep_rows = bench_to_training_layout(
+                    test_samples, self_simulate(), design_config,
+                    bench_max_num_categories=max_cats)
+        else:
+            test_samples = self_simulate()
         pm_global, mask_global = lift_lba_to_global(
             test_samples["param_matrices"],
             test_samples["param_masks"],
@@ -378,10 +389,12 @@ def main():
         n_rows = pm_global.shape[1] // N_GLOBAL_PARAMS
         true_set   = pm_global.reshape(args.batch_size, n_rows, N_GLOBAL_PARAMS)[:, :, LBA_TO_GLOBAL]
         params_mask = mask_global.reshape(args.batch_size, n_rows, N_GLOBAL_PARAMS)[0][:, LBA_TO_GLOBAL]
+        if keep_rows is not None:
+            true_set, params_mask = true_set[:, keep_rows], params_mask[keep_rows]
         config_data.append({
             "cfg_name": cfg_name, "design_config": design_config,
             "test_samples": test_samples, "true_set": true_set,
-            "params_mask": params_mask, "n_rows": n_rows,
+            "params_mask": params_mask, "n_rows": n_rows, "keep_rows": keep_rows,
             # Row layout for LABELLING: compact (the scenario's count) when loaded from
             # the shared benchmark files, padded to training otherwise.
             "plot_cats": max_cats if data_path is not None else args.max_num_categories,
@@ -407,6 +420,8 @@ def main():
             pred_set = raw.reshape(
                 args.batch_size, args.num_samples, cd["n_rows"], N_GLOBAL_PARAMS
             )[:, :, :, LBA_TO_GLOBAL]
+            if cd["keep_rows"] is not None:
+                pred_set = pred_set[:, :, cd["keep_rows"]]
             outdir = outdir_root / cd["cfg_name"] / f"mid_{id_label.lower()}"
             outdir.mkdir(parents=True, exist_ok=True)
             cases.append({

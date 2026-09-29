@@ -28,7 +28,7 @@ from cogformer.simulator.benchmarks.ssms.cdm import CDM
 from cogformer.simulator.benchmarks.ssms.lba import LBA
 from cogformer.simulator.benchmarks.ssms.priors import ddm_priors, rdm_priors, cdm_priors, lba_priors
 from cogformer.simulator.benchmarks.ssms.link_funs import ddm_link_fun, rdm_link_fun, cdm_link_fun, lba_link_fun
-from ..utils import load_bf_validation_data
+from ..utils import load_bf_validation_data, bench_to_training_layout
 from cogformer.adapter import Adapter
 from cogformer.networks.transformers.cogformer import CogFormer
 from cogformer.diagnostics.plot.adaptive_recovery import adaptive_recovery, global_recovery
@@ -271,6 +271,28 @@ def main():
             if data_path is not None and not data_path.exists():
                 print(f"{model_name} / {cfg_name}: not in {args.data_dir}; simulating (seeded)")
                 data_path = None
+
+            def self_simulate():
+                return mf.batch_sample(
+                    design_config=design_config,
+                    batch_size=args.batch_size,
+                    num_obs=args.num_obs,
+                    mask_randomizer_kwargs={"free_intrinsics": free, "fixed_intrinsics": fixed,
+                                            "fixed_values": fixed_vals,
+                                            "global_params": GLOBAL_PARAMS},
+                    max_num_regressors=args.max_num_regressors,
+                    max_num_categories=max_cats,
+                    min_num_categories=min_cats,
+                    keep_intercept=args.keep_intercept,
+                    add_interaction=args.add_interaction,
+                    flatten_param_outputs=True,
+                    fixed_config=True,
+                    link_fun=link_fn,
+                    pad_to_max_num_categories=training_max_cats,
+                    **mix_opts,
+                )
+
+            keep_rows = None
             if data_path is not None:
                 # Paired mode: score the exact shared datasets, so BF / original /
                 # finetuned all see identical simulations. Mirrors
@@ -310,25 +332,14 @@ def main():
                 # documented fallback. Without this the paired branch dies in
                 # Adapter._resolve_position_codes.
                 samples["design_configs"] = [design_config] * args.batch_size
+                # The network sees the canonical training layout, not the compact file
+                # grid (see utils.bench_to_training_layout); keep_rows maps back for saving.
+                if max_cats < training_max_cats:
+                    samples, keep_rows = bench_to_training_layout(
+                        samples, self_simulate(), design_config,
+                        bench_max_num_categories=max_cats)
             else:
-                samples = mf.batch_sample(
-                    design_config=design_config,
-                    batch_size=args.batch_size,
-                    num_obs=args.num_obs,
-                    mask_randomizer_kwargs={"free_intrinsics": free, "fixed_intrinsics": fixed,
-                                            "fixed_values": fixed_vals,
-                                            "global_params": GLOBAL_PARAMS},
-                    max_num_regressors=args.max_num_regressors,
-                    max_num_categories=max_cats,
-                    min_num_categories=min_cats,
-                    keep_intercept=args.keep_intercept,
-                    add_interaction=args.add_interaction,
-                    flatten_param_outputs=True,
-                    fixed_config=True,
-                    link_fun=link_fn,
-                    pad_to_max_num_categories=training_max_cats,
-                    **mix_opts,
-                )
+                samples = self_simulate()
             pm_g, mask_g = model_class.lift_to_global_space(
                 model_name, samples["param_matrices"], samples["param_masks"]
             )
@@ -340,6 +351,8 @@ def main():
             n_rows = pm_g.shape[1] // n_global
             true_set = pm_g.reshape(args.batch_size, n_rows, n_global)[:, :, global_indices]
             params_mask = mask_g.reshape(args.batch_size, n_rows, n_global)[0][:, global_indices]
+            if keep_rows is not None:
+                true_set, params_mask = true_set[:, keep_rows], params_mask[keep_rows]
 
             outdir = Path(args.outdir) / model_name.lower() / cfg_name
             outdir.mkdir(parents=True, exist_ok=True)
@@ -349,7 +362,8 @@ def main():
                 "intrinsic_params": intrinsic_params,
                 "variable_names": model_cfg["variable_names"],
                 "samples": samples, "true_set": true_set, "params_mask": params_mask,
-                "n_rows": n_rows, "global_indices": global_indices, "outdir": outdir,
+                "n_rows": n_rows, "keep_rows": keep_rows,
+                "global_indices": global_indices, "outdir": outdir,
                 # Row layout for LABELLING: compact (the scenario's count) when loaded
                 # from the shared benchmark files, padded to training otherwise.
                 "plot_cats": max_cats if data_path is not None else args.max_num_categories,
@@ -373,6 +387,8 @@ def main():
         case["pred_set"] = raw.reshape(
             args.batch_size, args.num_samples, case["n_rows"], n_global
         )[:, :, :, case["global_indices"]]
+        if case["keep_rows"] is not None:
+            case["pred_set"] = case["pred_set"][:, :, case["keep_rows"]]
 
         # Persist immediately rather than at the top of phase 3. Sampling is the
         # expensive part and lives only in memory until written, so a failure anywhere

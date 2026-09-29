@@ -811,3 +811,79 @@ def load_bf_validation_data(
     if "num_alternatives" in dataset.files:
         out["num_alternatives"] = np.asarray(dataset["num_alternatives"])
     return out
+
+
+def bench_to_training_layout(bench: dict, canonical: dict, design_config: dict,
+                             bench_max_num_categories: int = 2) -> tuple[dict, list[int]]:
+    """Re-lay a loaded benchmark case (load_bf_validation_data) into the training layout.
+
+    The shared benchmark files store the COMPACT grid of their case: design columns
+    [1, u_1, u_2, u_1:u_2] at the scenario's category count (2 for bench5). The
+    model-class network was trained on the canonical r/c grid, where u_2 sits at
+    column 1 + (K-1), interactions follow all main blocks, and every regressor column
+    is populated (unused ones as standardized distractors). Zero-padding the compact
+    grid on the right put u_2 in u_1's category-2 slot and labelled its parameter token
+    that way, which the network never saw in training (measured 2026-09-29: DDM
+    regressed tau-intercept 90% coverage 0.21 on the files vs 0.82 self-simulated).
+
+    ``canonical`` is a batch_sample output for the same scenario, drawn exactly as the
+    self-simulated branch draws it (pad_to_max_num_categories=training max, flattened
+    params, local space). Its layout, position codes and distractor columns are kept;
+    the benchmark's regressor columns, parameter rows, RTs/choices and per-trial
+    context replace its own. Interaction columns are recomputed from the updated main
+    columns. Returns (samples, keep_rows): keep_rows are the canonical row indices of
+    the compact rows, in compact order, to map predictions back to the compact grid.
+    """
+    from cogformer.simulator.design_utils import build_position_codes
+
+    compact_codes = build_position_codes(design_config, max_num_categories=bench_max_num_categories)
+    canon_codes = np.asarray(canonical["position_codes"][0], dtype=np.int64)
+    if not (np.asarray(canonical["position_codes"]) == canon_codes).all():
+        raise ValueError("canonical sample has per-element position codes; expected one fixed layout")
+
+    def canon_row(code):
+        hits = np.where((canon_codes == code).all(axis=1))[0]
+        if len(hits) != 1:
+            raise ValueError(f"position code {tuple(code)} matches {len(hits)} canonical rows")
+        return int(hits[0])
+
+    # Row 0 is the intercept on both grids; its all-zero code is shared with padding rows.
+    keep_rows = [0] + [canon_row(c) for c in compact_codes[1:]]
+
+    B, T = bench["design_matrices"].shape[:2]
+    canon_dm = np.asarray(canonical["design_matrices"], dtype=np.float32)
+    if canon_dm.shape[:2] != (B, T):
+        raise ValueError(f"canonical design {canon_dm.shape[:2]} != benchmark {(B, T)}")
+    dm = canon_dm.copy()
+    bench_dm = np.asarray(bench["design_matrices"], dtype=np.float32)
+
+    main_rows = [(i, r) for i, (r, c) in enumerate(zip(keep_rows, compact_codes)) if c[0] > 0 and c[1] == 0]
+    for i, r in main_rows:
+        dm[:, :, r] = bench_dm[:, :, i]
+    for r, (a, b, sa, sb) in enumerate(canon_codes):
+        if a > 0 and b > 0 and np.abs(canon_dm[:, :, r]).any():
+            dm[:, :, r] = dm[:, :, canon_row((a, 0, sa, 0))] * dm[:, :, canon_row((b, 0, sb, 0))]
+    # Cross-check: an interaction the benchmark itself stores must equal the recomputed one.
+    for i, (r, c) in enumerate(zip(keep_rows, compact_codes)):
+        if c[0] > 0 and c[1] > 0 and np.abs(bench_dm[:, :, i]).any():
+            if not np.allclose(dm[:, :, r], bench_dm[:, :, i], atol=1e-4):
+                raise ValueError(f"recomputed interaction column {tuple(c)} differs from the benchmark's")
+
+    n_canon = canon_codes.shape[0]
+    n_compact = len(keep_rows)
+    n_local = bench["param_matrices"].shape[1] // n_compact
+    pm = np.zeros((B, n_canon, n_local), dtype=np.float32)
+    mask = np.zeros((B, n_canon, n_local), dtype=np.float32)
+    pm[:, keep_rows] = np.asarray(bench["param_matrices"]).reshape(B, n_compact, n_local)
+    mask[:, keep_rows] = np.asarray(bench["param_masks"]).reshape(B, n_compact, n_local)
+    if canonical["param_matrices"].shape[1] != n_canon * n_local:
+        raise ValueError("canonical and benchmark parameter spaces differ")
+
+    out = {k: v for k, v in canonical.items() if k not in ("sim_data", "per_trial_context", "num_alternatives")}
+    out["design_matrices"] = dm
+    out["param_matrices"] = pm.reshape(B, n_canon * n_local)
+    out["param_masks"] = mask.reshape(B, n_canon * n_local)
+    for k in ("sim_data", "per_trial_context", "num_alternatives", "model_ids"):
+        if k in bench:
+            out[k] = bench[k]
+    return out, keep_rows
