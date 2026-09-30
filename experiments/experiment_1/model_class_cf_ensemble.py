@@ -229,7 +229,7 @@ def main():
         mf = model_class.model_families[model_name]
         model_id = model_class.model_index[model_name]
         intrinsic_params_local = mf.intrinsic_params
-        link_fun = link_funs[model_name]
+        link_fun = model_class.link_funs[model_name]
         default_fixed = DEFAULT_FIXED_VALUES[model_name]
 
         dc = covering_configs[model_name][model_counters[model_name] - 1]
