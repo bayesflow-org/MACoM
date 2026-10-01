@@ -67,8 +67,11 @@ uses a quadratic discriminant, because at ~100 draws per side the 1-D MLP barely
 (0.53 vs 0.67 with QDA on ddm/interaction, null 0.50). The pooled arms have no null.
 
 **C2ST is direction-blind.** A large value says the two posteriors differ, not which
-one is better. Read it next to `bf_evaluations.csv` and `cf_metrics.csv` (NRMSE,
-calibration error, contraction) on the same datasets.
+one is better. Read it next to `bf_metrics.csv` and `cf_metrics.csv` (NRMSE,
+calibration error, contraction) on the same datasets: both come from the same metric
+code. `bf_evaluations.csv` is BayesFlow's own implementation, whose NRMSE aggregates
+differently (per-dataset RMSE, then the median over datasets) and is not comparable to
+`cf_metrics.csv`; contraction and calibration error agree between the two.
 
 ## Budget
 

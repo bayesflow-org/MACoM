@@ -14,9 +14,17 @@ single parameter's draws trace the aggregate posterior (~ the prior for any cali
 approximator), so it reads ~0.52 however far apart the per-dataset posteriors are. See
 model_family_c2st._dataset_task.
 
-Both arms report the same parameters per case in the same order; the CogFormer validator
-splits them into <case>_fm_metrics.csv (per-row params) + _fm_metrics_global.csv (pi), the
-BayesFlow evaluator writes them in one unlabeled file. The row counts are asserted equal.
+Both arms are read from files written by the SAME metric code
+(cogformer.diagnostics.metric.adaptive_metrics, via compute_adaptive_metrics /
+compute_global_metrics): <case>_fm_metrics.csv + _fm_metrics_global.csv for CogFormer,
+<fam>_family_<case>_bf_metrics.csv + _bf_metrics_global.csv for the baseline. NOT the
+baseline's evaluations.csv: that is BayesFlow's own root_mean_squared_error, which takes
+the RMSE over each dataset's draws and then the median over datasets, where the repo's
+takes the RMSE over datasets per draw and then the median over draws. On identical
+draws the two differ by up to ~0.04, so mixing them (as this table did until
+2026-10-01) understated the baseline's NRMSE and overstated the gap (CogFormer/baseline
+1.86-2.02x instead of 1.33-1.58x). Contraction and calibration error agree exactly
+between the two. The parameter counts are asserted equal.
 
 SEM = sample standard deviation / sqrt(n).
 
@@ -45,7 +53,7 @@ METRICS = [("NRMSE", r"\textbf{NRMSE} ($\downarrow$)"),
 CF_NAME = r"\textbf{CogFormer}-$\mathcal{C}$"
 BF_NAME = r"\textbf{Baseline}"
 
-BF_EVAL = Path("outputs/evaluations/model_family/bf")
+BF_FIG = Path("outputs/figures/model_family/bf")
 CF_VAL = Path("outputs/figures/model_class/cf") / f"{shared_config.get('MC_TAG')}_validate"
 C2ST = Path("outputs/figures/c2st")
 OUT = Path("outputs/finals/experiment-1a/amortization_gap_tables.tex")
@@ -64,7 +72,9 @@ def load_metrics(fam: str) -> dict[str, pd.DataFrame]:
     """{arm: DataFrame of per-parameter metrics pooled over the five cases}."""
     bf, cf = [], []
     for case in CASES:
-        b = pd.read_csv(BF_EVAL / f"{fam}_families_bf_{case}_evaluations.csv", sep=";", index_col=0)
+        bd = BF_FIG / fam / case
+        b = pd.concat([pd.read_csv(bd / f"{fam}_family_{case}_bf_metrics.csv", index_col=0),
+                       pd.read_csv(bd / f"{fam}_family_{case}_bf_metrics_global.csv", index_col=0)])
         d = CF_VAL / fam / case
         c = pd.concat([pd.read_csv(d / f"{fam}_{case}_fm_metrics.csv", index_col=0),
                        pd.read_csv(d / f"{fam}_{case}_fm_metrics_global.csv", index_col=0)])
