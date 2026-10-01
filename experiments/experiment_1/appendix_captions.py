@@ -24,6 +24,15 @@ husl case colours, r = mean of the per-case Pearson r, mask thumbnails with cell
 with their count n, Log Gamma = log(gamma / gamma_0.05) (Saeilynoja et al. 2022 ECDF
 statistic against the 5% quantile of its uniform-rank null, 1000 null draws).
 
+Also writes outputs/finals/experiment-1/main_figure.tex, the main-text figure (short caption),
+and main_figure_details.tex, the methods/appendix paragraph its caption refers to: (a)
+random-design ensemble recovery of the coefficient matrix, (b) its pi companion, (c)
+information gain vs trial count. Facts there follow model_class_cf_ensemble.py (12
+covering random designs, 4 per family, 2 regressors, binary categoricals, interactions
+on), the pi prior (Beta(1, 50), identity link) and ddm_design_eig.py (CC/CB/BC/BB on v and
+a, common-estimand rescaling, Gaussian EIG, NRMSE normalised by the SD of the truth, +-1
+SE bands); the realised split balance is read from information_gain.csv.
+
     python -m experiments.experiment_1.appendix_captions
 """
 from pathlib import Path
@@ -197,7 +206,109 @@ def ensemble_blocks():
     return out
 
 
+# ── main-text figure ─────────────────────────────────────────────────────────
+MAIN_OUT = FINALS / "main_figure.tex"
+EIG_CSV = FINALS / "information_gain" / "information_gain.csv"
+NUM_PRIOR_DRAWS = 1500      # ddm_design_eig.py --prior_batch default (e1_design_eig does not override it)
+ENSEMBLE_CSV = FINALS / "random_ensemble" / "design_configs.csv"
+
+MAIN = (
+    r"\textbf{{Amortized inference across design space.}} "
+    r"(a) Parameter recovery for {NCFG} randomly drawn regression designs ({PER} per model "
+    r"family; two continuous or binary regressors and their interaction), all estimated by one "
+    r"CogFormer network: posterior means against ground truth with 90\% credible intervals, one "
+    r"colour per design; $r$ is the mean per-design correlation. Columns are the parameters of "
+    r"all three families and rows the coefficients (intercept, main effects of $u_1$ and $u_2$, "
+    r"interaction); the strip on the left shows each design's coefficient pattern, with opacity "
+    r"proportional to its $|r|$. (b) The contamination probability $\pi$ for each design. "
+    r"(c) Expected information gain (left) and mean NRMSE (right) against trial count when each "
+    r"of two DDM predictors is measured continuously (C) or as a binary factor (B); bands are "
+    r"$\pm 1$ standard error. Every estimate is an amortized forward pass of the same network. "
+    r"Details in Appendix~\ref{{{DETAILS}}}."
+)
+DETAILS_OUT = FINALS / "main_figure_details.tex"
+DETAILS_LABEL = "app:exp1-main-details"
+DETAILS = (
+    r"Each random design in Figure~\ref{{fig:exp1-main}}a has two regressors, each continuous "
+    r"or binary (one contrast, so $u_k(:c_1)$ denotes a slope or a contrast), and their "
+    r"interaction, with each parameter entering each coefficient at random; the set of "
+    r"{NCFG} designs was redrawn until together they cover every coefficient of the grid. Each "
+    r"design contributes {N} simulated datasets of {T} trials, with {D} posterior draws per "
+    r"dataset. Coefficients are shown on the unconstrained (link) scale on which the network is "
+    r"trained; $\pi$ (Figure~\ref{{fig:exp1-main}}b) is shown on its natural scale, with prior "
+    r"$\mathrm{{Beta}}(1, 50)$. "
+    r"For the design comparison (Figure~\ref{{fig:exp1-main}}c), both DDM predictors act on "
+    r"drift rate and boundary separation ({NACT} estimated coefficients, including $\pi$). "
+    r"Expected information gain is the Gaussian log-volume ratio "
+    r"$\tfrac{{1}}{{2}}\log\det\Sigma_{{\text{{prior}}}} - \tfrac{{1}}{{2}}\,"
+    r"\mathbb{{E}}_x\!\left[\log\det\Sigma_{{\text{{post}}}}(x)\right]$, in nats, with "
+    r"$\Sigma_{{\text{{prior}}}}$ estimated from {NPRIOR} prior draws; NRMSE is the root mean "
+    r"squared error of the posterior draws against ground truth, divided by the standard "
+    r"deviation of the ground-truth values and averaged over the coefficients. Both are computed "
+    r"on a common estimand, each slope scaled by the realised standard deviation of its "
+    r"predictor, so that continuous and binary predictors are comparable. Information gain is "
+    r"relative to each design's own prior, which is wider for binary contrasts (a contrast of two "
+    r"cell means has twice the prior variance of a continuous slope). Each point uses {N} "
+    r"datasets with {D} posterior draws; standard errors are over datasets (bootstrapped for "
+    r"NRMSE). Binary predictors are randomly unbalanced dichotomisations (realised balance "
+    r"{BAL_LO}--{BAL_HI}), not median splits."
+)
+
+
+def main_figure():
+    eig = __import__("pandas").read_csv(EIG_CSV)
+    cfgs = __import__("pandas").read_csv(ENSEMBLE_CSV)
+    per = cfgs.groupby("family").size()
+    assert per.nunique() == 1, per
+    n_act = eig["n_active"].unique()
+    assert len(n_act) == 1, n_act
+    bal = eig["mean_split_balance"].dropna()
+    vals = dict(NCFG=len(cfgs), PER=int(per.iloc[0]), N=N_DATASETS, T=N_TRIALS, D=N_DRAWS,
+                NACT=int(n_act[0]), NPRIOR=NUM_PRIOR_DRAWS,
+                BAL_LO=f"{bal.min():.2f}", BAL_HI=f"{bal.max():.2f}")
+    cap = MAIN.format(**vals, DETAILS=DETAILS_LABEL)
+    DETAILS_OUT.write_text("\n".join([
+        "% Generated by `python -m experiments.experiment_1.appendix_captions` -- do not edit by hand.",
+        "% Methods/appendix text for the main-text figure fig:exp1-main (main_figure.tex).",
+        "% Place it under a heading carrying the label below, e.g.",
+        f"% \\subsection{{Design-space figure: details}}\\label{{{DETAILS_LABEL}}}",
+        DETAILS.format(**vals),
+        "",
+    ]))
+    print(f"[saved] {DETAILS_OUT}")
+    for f in ("random_ensemble/recovery.pdf", "random_ensemble/recovery_pi.pdf",
+              "information_gain/information_gain.pdf"):
+        if not (FINALS / f).exists():
+            raise SystemExit(f"missing {FINALS / f} -- run e1_finalize first")
+    tex = "\n".join([
+        "% Generated by `python -m experiments.experiment_1.appendix_captions` -- do not edit by hand.",
+        "% Main-text figure for Experiment 1. Needs \\usepackage{graphicx,subcaption,amsmath};",
+        "% paths are relative to outputs/finals/experiment-1/.",
+        r"\begin{figure}[t]",
+        r"  \centering",
+        r"  \begin{subfigure}{\textwidth}\centering",
+        r"    \includegraphics[width=\textwidth]{random_ensemble/recovery.pdf}",
+        r"    \caption{}\label{fig:exp1-main-recovery}",
+        r"  \end{subfigure}\\[1ex]",
+        r"  \begin{subfigure}{\textwidth}\centering",
+        r"    \includegraphics[width=0.85\textwidth]{random_ensemble/recovery_pi.pdf}",
+        r"    \caption{}\label{fig:exp1-main-pi}",
+        r"  \end{subfigure}\\[1ex]",
+        r"  \begin{subfigure}{\textwidth}\centering",
+        r"    \includegraphics[width=0.75\textwidth]{information_gain/information_gain.pdf}",
+        r"    \caption{}\label{fig:exp1-main-eig}",
+        r"  \end{subfigure}",
+        rf"  \caption{{{cap}}}",
+        r"  \label{fig:exp1-main}",
+        r"\end{figure}",
+        "",
+    ])
+    MAIN_OUT.write_text(tex)
+    print(f"[saved] {MAIN_OUT}")
+
+
 def main():
+    main_figure()
     order = [(f, k) for f in FAMILIES for k in KINDS]
     for f, k in order:
         for p in (FINALS / "per_case" / f / CASE / f"{k}.pdf",
