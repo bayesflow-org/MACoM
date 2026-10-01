@@ -434,6 +434,16 @@ def parse_args():
                         help="Resume training from existing checkpoint if it exists.")
     parser.add_argument("--resume_start_epoch", type=int, default=0,
                         help="Epoch to resume from when checkpoint lacks epoch metadata (old format).")
+    parser.add_argument("--init_checkpoint", type=str, default=None,
+                        help="Start from these weights (weights only: fresh optimizer and LR "
+                             "schedule from epoch 0), e.g. to fine-tune a copy of a trained "
+                             "model. --resume still wins once this run has its own checkpoint.")
+    parser.add_argument("--family_weights", type=str, default=None,
+                        help="Comma-separated training sampling weights over DDM,RDM,CDM, e.g. "
+                             "'0,1,0' to train on RDM only. The global parameter space and model "
+                             "ids are those of all three families either way. Default: uniform.")
+    parser.add_argument("--run_tag", type=str, default=None,
+                        help="Suffix for the wandb run name and an extra wandb tag.")
 
     add_architecture_args(parser)
     parser.add_argument("--self_attn_padding_mask", action=argparse.BooleanOptionalAction,
@@ -628,6 +638,13 @@ if __name__ == "__main__":
         "CDM": {"free_intrinsics": ["v", "v_theta", "a", "tau"], "fixed_intrinsics": ["s_v", "s_tau"], "fixed_values": _MODELS_WITH_PI["cdm"]["default_fixed_values"], "global_params": GLOBAL_PARAMS},
     }
 
+    family_weights = None
+    if args.family_weights is not None:
+        family_weights = [float(w) for w in args.family_weights.split(",")]
+        if len(family_weights) != num_models or sum(family_weights) <= 0:
+            raise SystemExit(f"--family_weights needs {num_models} weights (DDM,RDM,CDM) "
+                             f"with a positive sum, got {args.family_weights!r}")
+
     # Config dict used by trainer to reconstruct per-thread ModelClass instances
     model_class_config = {
         "families": {
@@ -640,6 +657,7 @@ if __name__ == "__main__":
         # model_family training distribution. Validation scenarios keep the default
         # context (2 alternatives), which is in-distribution.
         "train_contexts": {"RDM": RDM.build_random_context},
+        "weights": family_weights,
     }
 
     # Main ModelClass instance used for validation
@@ -654,12 +672,21 @@ if __name__ == "__main__":
     }
     link_funs = {k: fn() for k, fn in model_class_config["link_funs"].items()}
     model_class = ModelClass(model_families=model_families, link_funs=link_funs,
-                             train_contexts=model_class_config.get("train_contexts"))
+                             train_contexts=model_class_config.get("train_contexts"),
+                             weights=family_weights)
 
     adapter = Adapter()
 
     torch.set_float32_matmul_precision("high")
     cogformer = CogFormer(**cogformer_config).to(device).train()
+    if args.init_checkpoint is not None:
+        # Before compile, so the keys carry no _orig_mod. prefix. Strict: a checkpoint
+        # trained with different architecture flags must fail here, not train silently.
+        state = torch.load(args.init_checkpoint, map_location=device)
+        state = state["state_dict"] if isinstance(state, dict) and "state_dict" in state else state
+        cogformer.load_state_dict({k.removeprefix("_orig_mod."): v for k, v in state.items()},
+                                  strict=True)
+        logging.info(f"[rank {rank}] initialised from {args.init_checkpoint}")
     cogformer = compile_cogformer(cogformer, args.compile_mode, args.decoder_groups)
     if is_distributed:
         from torch.nn.parallel import DistributedDataParallel as DDP
@@ -691,11 +718,15 @@ if __name__ == "__main__":
         init_wandb(
             project="cogformer-model-class",
             name=(f"mc_r{max_num_regressors}c{max_num_categories}_b{args.train_batch_size}"
-                  f"_e{args.epochs}" + (f"_{world_size}gpu" if world_size > 1 else "")),
-            tags=["CogFormer", "ModelClass", "DDM", "RDM", "CDM"],
+                  f"_e{args.epochs}" + (f"_{world_size}gpu" if world_size > 1 else "")
+                  + (f"_{args.run_tag}" if args.run_tag else "")),
+            tags=["CogFormer", "ModelClass", "DDM", "RDM", "CDM"]
+                 + ([args.run_tag] if args.run_tag else []),
             config={**train_config, "cogformer": cogformer_config,
                     "total_batch_size": args.train_batch_size, "world_size": world_size,
-                    "checkpoint": str(Path(CHECKPOINT_DIR) / checkpoint_path)},
+                    "checkpoint": str(Path(CHECKPOINT_DIR) / checkpoint_path),
+                    "init_checkpoint": args.init_checkpoint,
+                    "family_weights": family_weights},
             run_id=wandb_run_id_from(Path(CHECKPOINT_DIR) / checkpoint_path) if args.resume else None,
         )
 
