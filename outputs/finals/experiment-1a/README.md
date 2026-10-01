@@ -28,8 +28,7 @@ datasets: the shared benchmark files written once by the `e1_data` stage.
 | RDM | 5 | 116 files: fixed, fixed_regressed, interaction, intercept_only, regressed |
 | CDM | 5 | 116 files: fixed, fixed_regressed, interaction, intercept_only, regressed |
 
-`amortization_gap.tex` is hand-written (the paper section) and has no manifest row —
-it is authored, not copied. `amortization_gap_tables.tex` is generated from the same
+`amortization_gap_tables.tex` has no manifest row: it is generated from the same
 sources by `python -m experiments.experiment_1a.gap_tables` (re-run it after this script).
 
 ## How to read it

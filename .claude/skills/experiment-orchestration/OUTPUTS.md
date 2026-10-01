@@ -71,7 +71,7 @@ all source trees ─► e{1,1a,2,3,4}_finalize ─► outputs/finals/experiment-
 | | | table: NRMSE / calibration / contraction | `outputs/evaluations/model_family/bf/<fam>_families_bf_<case>_evaluations.csv` | `<fam>/<case>/bf_evaluations.csv` |
 | (CogFormer arm) | = `e1_validate` | figures: same datasets, CogFormer `<plots>` | `FIG/TAG_validate/<fam>/<case>/` | `<fam>/<case>/cf_<plot>[_pi].pdf` |
 | `e1a_c2st` | `experiment_1a/model_family_c2st.py` (`BF_vs_Original`) | tables: per-cell + joint C2ST per case; family summary | `outputs/figures/c2st/<fam>/<case>/<fam>_<case>_orig_vs_bf_c2st.csv`, `outputs/figures/c2st/<fam>/<fam>_c2st_summary.csv` | `<fam>/<case>/orig_vs_bf.csv`, `<fam>/summary.csv` |
-| `e1a_finalize` | `finalize_experiment_1a.py` | tables | — | `MANIFEST.csv`, `README.md` (`amortization_gap.tex` is hand-written, never overwritten) |
+| `e1a_finalize` | `finalize_experiment_1a.py` | tables | — | `MANIFEST.csv`, `README.md` (`amortization_gap_tables.tex`: `experiment_1a/gap_tables.py`, re-run after finalize) |
 
 ## Experiment 2 — real data, DDM/RDM/CDM → `outputs/finals/experiment-2/`
 

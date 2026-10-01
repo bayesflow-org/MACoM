@@ -59,11 +59,10 @@ FAMILIES = ["ddm", "rdm", "cdm"]
 # "mixed_predictor", so both are absent by construction, not by omission.
 CASES = ["intercept_only", "fixed", "regressed", "fixed_regressed", "interaction"]
 
-# Hand-written, not copied from any source, so it has no manifest row and no source
-# to regenerate from. Listed here so a reader does not mistake it for an orphan.
 # amortization_gap_tables.tex is generated (experiments.experiment_1a.gap_tables) from the
-# sources, not copied, so it has no manifest row either.
-AUTHORED = ["amortization_gap.tex", "amortization_gap_tables.tex"]
+# sources, not copied, so it has no manifest row. Listed here so a reader does not
+# mistake it for an orphan.
+AUTHORED = ["amortization_gap_tables.tex"]
 
 
 def plan() -> tuple[list[tuple[Path, Path]], list[Path]]:
@@ -221,8 +220,7 @@ datasets: the shared benchmark files written once by the `e1_data` stage.
 |---|---|---|
 {_family_rows()}
 
-`amortization_gap.tex` is hand-written (the paper section) and has no manifest row —
-it is authored, not copied. `amortization_gap_tables.tex` is generated from the same
+`amortization_gap_tables.tex` has no manifest row: it is generated from the same
 sources by `python -m experiments.experiment_1a.gap_tables` (re-run it after this script).
 
 ## How to read it
