@@ -3,7 +3,8 @@
 Reads the two arms' per-case outputs on the shared bench5 test set and writes
 outputs/finals/experiment-1a/amortization_gap_tables.tex with three tables:
 
-  tab:absolute-metrics  NRMSE / calibration error / contraction, median +- SEM pooled over
+  tab:absolute-metrics  NRMSE, NRMSE (BayesFlow convention), calibration error, contraction,
+                        median +- SEM pooled over
                         the five bench5 cases and every active parameter in each case.
   tab:c2st              per-dataset joint / per-parameter C2ST and the pooled joint
                         (median +- SEM over the five cases).
@@ -48,12 +49,15 @@ CASE_LABELS = {
     "interaction": "Interaction",
 }
 METRICS = [("NRMSE", r"\textbf{NRMSE} ($\downarrow$)"),
+           ("NRMSE_BF", r"\textbf{NRMSE}$^\dagger$ ($\downarrow$)"),
            ("Calibration Error", r"\textbf{Cal. Error} ($\downarrow$)"),
            ("Posterior Contraction", r"\textbf{Post. Contr.} ($\uparrow$)")]
 CF_NAME = r"\textbf{CogFormer}-$\mathcal{C}$"
 BF_NAME = r"\textbf{Baseline}"
 
 BF_FIG = Path("outputs/figures/model_family/bf")
+BF_DATA = Path("outputs/data/model_family")
+CF_PRED = Path("outputs/data/model_class") / f"{shared_config.get('MC_TAG')}_validate"
 CF_VAL = Path("outputs/figures/model_class/cf") / f"{shared_config.get('MC_TAG')}_validate"
 C2ST = Path("outputs/figures/c2st")
 OUT = Path("outputs/finals/experiment-1a/amortization_gap_tables.tex")
@@ -68,6 +72,30 @@ def fmt(x) -> str:
     return rf"${np.median(x):.3f} \pm {sem(x):.3f}$"
 
 
+def nrmse_bayesflow_convention(pred: np.ndarray, true: np.ndarray) -> np.ndarray:
+    """BayesFlow's NRMSE (root_mean_squared_error, normalize="range", median aggregation).
+
+    pred (datasets, draws, params), true (datasets, params) -> (params,): the RMSE of each
+    dataset's posterior draws against its truth, divided by the range of the true values,
+    then the median over datasets. The repo's _rmse (the NRMSE column, and every figure)
+    instead takes the RMSE over datasets per draw and the median over draws. Computed here
+    with the same code for both arms, from their saved posteriors.
+    """
+    rmse = np.sqrt(np.mean((pred - true[:, None, :]) ** 2, axis=1))
+    return np.median(rmse / (true.max(0) - true.min(0)), axis=0)
+
+
+def bayesflow_nrmse(fam: str, case: str) -> dict[str, np.ndarray]:
+    """{arm: BayesFlow-convention NRMSE per active parameter}. The parameter ORDER differs
+    between the arms' files, which is harmless: the table pools them by median."""
+    b = np.load(BF_DATA / f"{fam}_{case}_data.npz")
+    act = b["param_masks"][0].astype(bool)
+    c = np.load(CF_PRED / f"{fam}_{case}_cf_pred.npz")
+    m = (c["params_mask"][0] if c["params_mask"].ndim == 3 else c["params_mask"]) == 1
+    return {"bf": nrmse_bayesflow_convention(b["pred_set"][:, :, act], b["true_set"][:, act]),
+            "cf": nrmse_bayesflow_convention(c["pred_set"][:, :, m], c["true_set"][:, m])}
+
+
 def load_metrics(fam: str) -> dict[str, pd.DataFrame]:
     """{arm: DataFrame of per-parameter metrics pooled over the five cases}."""
     bf, cf = [], []
@@ -80,6 +108,11 @@ def load_metrics(fam: str) -> dict[str, pd.DataFrame]:
                        pd.read_csv(d / f"{fam}_{case}_fm_metrics_global.csv", index_col=0)])
         if len(b) != len(c):
             raise SystemExit(f"{fam}/{case}: BF has {len(b)} parameters, CogFormer {len(c)}")
+        conv = bayesflow_nrmse(fam, case)
+        if not len(conv["bf"]) == len(conv["cf"]) == len(b):
+            raise SystemExit(f"{fam}/{case}: posterior files disagree with the metric CSVs")
+        b = b.assign(NRMSE_BF=np.sort(conv["bf"]))   # order-free: pooled by median below
+        c = c.assign(NRMSE_BF=np.sort(conv["cf"]))
         bf.append(b)
         cf.append(c)
     return {"bf": pd.concat(bf), "cf": pd.concat(cf)}
@@ -118,9 +151,16 @@ def absolute_table(metrics: dict) -> str:
         r"\centering",
         r"\small",
         r"\caption{Absolute metric values (median $\pm$ SEM) aggregated across the five "
-        r"benchmark design configurations and all parameters in each configuration.}",
+        r"benchmark design configurations and all parameters in each configuration, both "
+        r"networks scored on the same test datasets with the same code. NRMSE: for each "
+        r"posterior draw, the root mean squared error against the ground truth across "
+        r"datasets, median over draws, divided by the range of the ground-truth values (the "
+        r"definition used in all figures). NRMSE$^\dagger$: the BayesFlow convention, the "
+        r"root mean squared error of each dataset's posterior draws, divided by the same "
+        r"range, median over datasets; it reflects the typical dataset and is less "
+        r"sensitive to poorly recovered ones.}",
         r"\label{tab:absolute-metrics}",
-        r"\begin{tabularx}{\textwidth}{llCCC}",
+        r"\begin{tabularx}{\textwidth}{llCCCC}",
         r"\toprule",
         r"\textbf{Model} & \textbf{Method} & " + " & ".join(h for _, h in METRICS) + r" \\",
     ]
