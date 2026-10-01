@@ -1,6 +1,6 @@
 # Experiment 1a — amortization gap
 
-Assembled 2026-10-01 06:12:50Z by `experiments/finalize_experiment_1a.py` at commit `845bc6688474f9230a7706fc3511d9a6be902b14`.
+Assembled 2026-10-01 17:30:50Z by `experiments/finalize_experiment_1a.py` at commit `83da939863fde7d098a98037b24e706c3f0d6ea5`.
 348 files copied this run, 0 carried from earlier runs.
 
 ## What this measures

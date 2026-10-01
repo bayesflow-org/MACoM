@@ -1,124 +1,80 @@
 # Experiment 3 — LBA zero-shot inference and finetuning
 
-Frozen snapshot of the three-arm paired validation. Assembled
-2026-09-16 18:51:35Z by
-`experiments/finalize_experiment_3.py` — 780 files. Git commit `ecad2857aeea483ee0aa9b6d8cd9e80d68e24e49`.
+Assembled 2026-10-01 17:30:51Z by
+`experiments/finalize_experiment_3.py` — 689 files. Git commit `83da939863fde7d098a98037b24e706c3f0d6ea5`.
+Model-class run `r4c4_b128_e15000`; `MANIFEST.csv` records per-file provenance.
 
-`paired_validation_notes.md` is the original run's write-up and carries the headline
-tables; `MANIFEST.csv` records per-file provenance.
+Everything here is **stimulus-coded** (`favored_idx` drawn per trial, for LBA and for
+RDM at every K) and comes from ONE lineage: the model-class checkpoint above, its
+1000-epoch LBA finetune. The DDM/RDM/CDM bench5 cases of every arm
+score the shared benchmark files (e1_data), so comparisons on those cases are exactly
+paired.
+
+## Arms
+
+| folder | checkpoint evaluated | families |
+|---|---|---|
+| `zeroshot/` | original, pre-finetune (LBA row copied from RDM's) | LBA only |
+| `finetuned/` | LBA-finetuned | LBA + DDM/CDM/RDM |
+| `original/` | original, pre-finetune | DDM/CDM/RDM |
+| `c2st/` | original vs finetuned, paired (forgetting) | DDM/CDM/RDM |
+| `gap/` | BayesFlow LBA baselines vs finetuned, paired (amortization gap) | LBA, 5 bench cases |
+| `compare/` | paired deltas: zero-shot->finetuned (LBA), original->finetuned (others) | 4 families, 5 bench cases |
+| `predictions/` | — | posterior draws per arm |
+
+Each case folder holds `recovery`, `coverage`, `ecdf`, `metrics` as PDF (plus
+`metrics.csv`) and their `_pi` global-parameter companions.
+
+**Read `c2st/forgetting_c2st_summary.csv` alongside aggregate NRMSE, not instead of
+it.** Pooled per-cell and matched-sample C2ST approach their null by construction when
+both models are calibrated; the per-dataset columns (`perds_*`) are the ones that can
+show a posterior moved. Always read `excess` over the empirical null, not raw `c2st`.
+
+## compare/ — what finetuning changed, as paired differences
+
+`<family>/<case>_delta_r.pdf` (LBA: finetuned minus zero-shot) and
+`<family>/<case>_forgetting_delta_r.pdf` (DDM/RDM/CDM: finetuned minus original) map the
+change in recovery correlation per coefficient. `delta_metrics.csv` and
+`delta_metrics_<case>.pdf` give per-parameter NRMSE and calibration-error deltas
+(negative = better). `lba_calibration_plane.pdf` draws each LBA cell's move from
+zero-shot to finetuned in (posterior contraction, calibration error) -- how the
+improvement happens, which the mean NRMSE cannot show. Every difference is on
+identical datasets; the comparison script refuses unpaired inputs.
+
+## gap/ — LBA amortization gap
+
+The held-out family's counterpart of experiment-1a: a case-specific BayesFlow baseline
+per bench5 case against the FINETUNED checkpoint (LBA has no original-checkpoint arm).
+Both score the LBA cases of the shared benchmark files, and the baselines train at the
+same per-case budget as experiment-1a's. `summary.csv` has one row per case; read
+`joint_c2st`, not `mean_accuracy`. `<case>/bf_*` are the baseline's diagnostics; the
+CogFormer arm's for the same datasets are `finetuned/lba/<case>/`.
 
 ## ppc/ — LBA on empirical data
 
-Posterior predictive checks for the finetuned checkpoint applied to the empirical
-lexical-decision dataset (17 subjects, 500 stored draws each). It sits in experiment 3
-rather than experiment 2 because experiment 2 is the DDM/RDM/CDM real-data tree — the
-three families the model class was trained on — while LBA is the held-out family this
-experiment exists to study. Same checkpoint as `finetuned/`.
-
-**Two variants, same posterior draws.** They differ only in what the forward
-simulation holds fixed:
+The finetuned checkpoint applied to the empirical lexical-decision data, with the
+`condition_only` design (intercept + speed/accuracy condition). Lexicality needs no
+regressor under stimulus coding: it reaches the model as `favored_idx`.
 
 | folder | s_v | s_tau | what it is |
 |---|---|---|---|
 | `ppc/free/` | estimated | estimated | the model's own fit, simulated as-is |
 | `ppc/conventional/` | 1.0 | 0.0 | the standard LBA identifiability constraint |
 
-`posteriors.npz` is stored ONCE, at `ppc/`, not per variant: both PPCs read the same
-draws, so duplicating it would imply two fits where there is one.
+Both read the same draws; `posteriors.npz` is stored once, at `ppc/`. Which variant
+belongs in the paper is an open modelling decision, which is why both are kept.
 
-Which variant belongs in the paper is a modelling decision and has NOT been made here.
-Both are kept in labelled subtrees precisely so that decision stays visible — a single
-unlabelled `ppc/` would make the constraint unrecoverable from the tree.
-
-Plot names follow experiment 2 exactly, so the same check is called the same thing in
-both real-data trees: `rt_ppc_*` (RT distribution), `choice_ppc_*` (choice
-proportions), `rt_qq_*`, `rt_quantiles_*`, `choice_quantiles_*`, suffixed by condition
-(`condition`, `frequency`, `lexicality`).
-
-## trajectory/ — finetuning path, NOT just its endpoints
-
-Complete: all five checkpoints (0/500/1000/1500/2000).
-
-The three arms above are ENDPOINTS: pre-finetune and post-finetune. `trajectory/` adds
-the path between them, evaluating diagnostics at epochs 0/500/1000/1500/2000 of a
-re-run finetune. It answers a question the endpoints assert but cannot show: whether
-LBA's gain is gradual or front-loaded, and whether the three trained families drift at
-any point rather than only at the end.
-
-- `lba_finetuning_trajectory*.pdf` — NRMSE, posterior contraction and calibration
-  error against epoch, one line per family. Note contraction runs the OPPOSITE way to
-  the other two (higher is better), which is stated on each panel.
-- `trajectory_summary.csv` — the plotted means, aggregated over parameters then over
-  scenarios.
-- `trajectory_per_scenario.csv` — one row per (epoch, family, scenario, metric). Kept
-  because the family mean hides genuine disagreement between scenarios: LBA's
-  per-scenario NRMSE spans 0.20-0.48 at epoch 0.
-
-Epoch 0 is not "untrained": it is the pre-finetune checkpoint with LBA's embedding row
-warm-started by COPYING RDM's, which is exactly the zero-shot condition. Every epoch was
-scored on IDENTICAL datasets (`seed_case` with a fixed seed), verified by byte-comparing
-`true_set` across epochs, so movement along a line is the checkpoint changing and not
-the test set.
-
-**Lineage warning.** The trajectory comes from a SECOND finetune run (2026-09-09,
-seeded), while `finetuned/` above still comes from the 2026-08-14 run, which set no
-seed. The two are therefore not the same model, and the trajectory's endpoint will not
-exactly equal the `finetuned/` numbers. Reconciling them -- rebuilding the arms from the
-seeded lineage -- is pending.
-
-## Arms
-
-| folder | checkpoint evaluated | families |
-|---|---|---|
-| `zeroshot/` | original, pre-finetune | LBA only |
-| `finetuned/` | LBA-finetuned | LBA + DDM/CDM/RDM |
-| `original/` | original, pre-finetune | DDM/CDM/RDM |
-| `c2st/` | both, compared | DDM/CDM/RDM, 5 scenarios |
-| `predictions/` | — | posterior draws per arm |
-
-Each case folder holds `recovery`, `coverage`, `ecdf`, `metrics` as PDF (plus
-`metrics.csv`) and their `_pi` global-parameter companions.
-
-## Headline
-
-LBA mean NRMSE 0.2386 → 0.1237 (**-48.2%**); the three original families move
-+0.3% / +1.0% / +0.5%.
-
-**Read that second number alongside `c2st/forgetting_c2st_summary.csv`, not instead
-of it.** Aggregate NRMSE barely moves, but the per-dataset C2ST columns in that file
-report `perds_mean_excess` of 0.24-0.37 over the null with `perds_frac_excess_gt_05`
-at 0.985-1.0 — on essentially every dataset the finetuned and original posteriors are
-distinguishable. The matched-sample C2ST in the same file shows excess of only
-0.009-0.021, which is the expected degeneracy: both models are calibrated, so pooled
-draws approach the prior and the test goes to its null by construction. The two
-statistics are not in conflict, but "no catastrophic forgetting" is a stronger claim
-than aggregate NRMSE alone supports.
-
-**The NRMSE metric is also not precise enough to carry that claim.**
-`bf.diagnostics.metrics.root_mean_squared_error` is STOCHASTIC: three calls on
-byte-identical arrays return
-
-    [1.0041 0.2435 1.0260 0.1322 ...]
-    [1.0088 0.2446 1.0172 0.1329 ...]
-    [0.9887 0.2427 1.0222 0.1347 ...]
-
-i.e. roughly 1-2% spread run to run. (`posterior_contraction` on the same arrays is
-deterministic to 4 dp, so this is the RMSE estimator, not the data.) The +0.3% / +1.0%
-/ +0.5% movements reported for CDM/DDM/RDM therefore sit INSIDE the metric's own
-noise: they cannot distinguish "no forgetting" from "a small amount of forgetting" in
-either direction. Any re-derivation of those numbers should average over repeated
-calls, or use contraction, which is reproducible.
+`ppc/validation/` checks how well this design identifies the parameters: recovery,
+coverage, calibration on data SIMULATED with the real subjects' designs (condition
+coding, trial counts, per-trial word/nonword stimulus), true parameters from the
+training prior. Same script and figures as experiment-2's `<family>/validation/`.
 
 ## Excluded
 
-3 posterior pairplots (3 files, 10 per case in `original/`) were
-deleted at source and are excluded here. This assembler uses an ALLOWLIST of plot
-stems rather than copying directory contents, so a future run that forgets
-`--skip_posteriors` cannot reintroduce them silently.
+2 files outside the allowlist (posterior pairplots and similar).
 
 ## Naming
 
 Family/scenario/arm infixes (`_fm_`, `_ft_`, `_mid1_`) are stripped — the path already
-carries them. `_global` is renamed `_pi`; that panel is the global-parameter view,
-which today is exactly pi. The zeroshot arm's single extra variant level (`mid_rdm/`)
-is flattened.
+carries them. `_global` is renamed `_pi`. The zero-shot arm's `A<fixed_A>/` and
+`mid_rdm/` levels are flattened.
