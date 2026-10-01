@@ -68,11 +68,45 @@ def load_case(pred_dir: Path, family: str, case: str) -> dict | None:
         logging.warning(f"[missing] {path} — run model_class_cf_validate.py first; skipping {family}/{case}")
         return None
     data = np.load(path)
+    mask = data["params_mask"]
     return {
         "true": data["true_set"],
         "pred": data["pred_set"],
-        "mask": data["params_mask"],
+        "mask": mask[0] if mask.ndim == 3 else mask,
+        # The grid the case was SCORED in: cases read from the shared benchmark files are
+        # compact (2 categories), self-simulated ones padded to training (4). Older npz
+        # files without the key were all compact.
+        "cats": int(data["max_num_categories"]) if "max_num_categories" in data.files else 2,
     }
+
+
+def lift_compact(entry: dict, num_categories: int, num_regressors: int) -> dict:
+    """Re-lay a compact-grid case (rows 1, u_1, u_2, u_1 x u_2) onto the padded grid.
+
+    Overlaying cases row-by-INDEX is only valid when they share one layout. In the padded
+    grid a continuous regressor fills the first slot of its block and u_1 x u_2 the first
+    cell of the (u_1, u_2) interaction block, so the compact rows go to
+    [0, 1, 1 + bw, 1 + R*bw] (bw = K - 1). Without this, bench6 pooled the continuous
+    designs' u_2 slope with mixed_predictor's u_1:c_2 contrast, and their u_1 x u_2 with
+    u_1:c_3.
+    """
+    bw = num_categories - 1
+    n_rows = 1 + num_regressors * bw + (num_regressors * (num_regressors - 1) // 2) * bw * bw
+    if entry["mask"].shape[0] != 4:
+        raise ValueError(f"expected a compact 4-row grid, got {entry['mask'].shape[0]} rows")
+    rows = [0, 1, 1 + bw, 1 + num_regressors * bw]
+
+    def scatter(a, row_axis):
+        shape = list(a.shape)
+        shape[row_axis] = n_rows
+        out = np.zeros(shape, dtype=a.dtype)
+        idx = [slice(None)] * a.ndim
+        idx[row_axis] = rows
+        out[tuple(idx)] = a
+        return out
+
+    return {"true": scatter(entry["true"], 1), "pred": scatter(entry["pred"], 2),
+            "mask": scatter(entry["mask"], 0), "cats": num_categories}
 
 
 def main():
@@ -114,9 +148,23 @@ def main():
                 logging.warning(f"[skip] {family} {variant}: only {len(cases)} case(s) available")
                 continue
 
-            true_list = [loaded[c]["true"] for c in cases]
-            pred_list = [loaded[c]["pred"] for c in cases]
-            masks = [loaded[c]["mask"] for c in cases]
+            # One row layout per ensemble: the cases' own grid when they share it (bench5,
+            # all compact), else every compact case lifted onto the padded grid (bench6).
+            grid_cats = {loaded[c]["cats"] for c in cases}
+            if len(grid_cats) == 1:
+                entries = [loaded[c] for c in cases]
+                num_cats = grid_cats.pop()
+            else:
+                num_cats = args.max_num_categories
+                entries = [loaded[c] if loaded[c]["cats"] == num_cats else
+                           lift_compact(loaded[c], num_cats, args.max_num_regressors)
+                           for c in cases]
+                padded_rows = {e["mask"].shape[0] for e in entries}
+                if len(padded_rows) != 1:
+                    raise ValueError(f"{family} {variant}: row layouts still differ: {padded_rows}")
+            true_list = [e["true"] for e in entries]
+            pred_list = [e["pred"] for e in entries]
+            masks = [e["mask"] for e in entries]
             design_configs = [scenarios[c][0] for c in cases]
             categorical_list = [scenarios[c][1].get("categorical_regressors", []) for c in cases]
             colors = [case_colors[c] for c in cases]
@@ -126,7 +174,7 @@ def main():
                 pred_list=pred_list,
                 design_configs=design_configs,
                 intrinsic_params=intrinsic_params,
-                max_num_categories=args.max_num_categories,
+                max_num_categories=num_cats,
                 parameter_masks=masks,
                 variable_names=variable_names,
                 max_num_regressors=args.max_num_regressors,
