@@ -43,13 +43,24 @@ def simulate_repeats(model_family, model, n_conditions, n_repeats, num_obs,
     """
     np.random.seed(seed)
     captured: list[tuple] = []
-    orig_simulate = type(model).simulate
+    # On the GPU backend batch_sample defers simulation and resolves the whole batch in
+    # ONE model.simulate_many call, so simulate() is never invoked per dataset: spy on
+    # simulate_many there. Spying on both would double-capture, since each delegates to
+    # the other depending on the backend.
+    gpu = model.uses_gpu
+    name = "simulate_many" if gpu else "simulate"
+    orig = getattr(type(model), name)
 
-    def spy(self, params, context=None):
-        captured.append((params, context))
-        return orig_simulate(self, params, context)
+    if gpu:
+        def spy(self, requests):
+            captured.extend(requests)
+            return orig(self, requests)
+    else:
+        def spy(self, params, context=None):
+            captured.append((params, context))
+            return orig(self, params, context)
 
-    type(model).simulate = spy
+    setattr(type(model), name, spy)
     try:
         samples = model_family.batch_sample(
             batch_size=n_conditions, num_obs=num_obs, design_config=design_config,
@@ -58,17 +69,20 @@ def simulate_repeats(model_family, model, n_conditions, n_repeats, num_obs,
             fixed_config=True, flatten_param_outputs=True, link_fun=link_fun,
             **(extra_sample_kwargs or {}),
         )
-        # One capture per condition, in order. Re-invoke simulate on each with fresh
-        # noise: same theta, same design, independent data.
-        reps = []
-        for params, context in captured:
-            per_cond = []
-            for _ in range(n_repeats):
-                obs = orig_simulate(model, params, context)
-                per_cond.append(obs)
-            reps.append(per_cond)
+        if len(captured) != n_conditions:
+            raise RuntimeError(f"captured {len(captured)} simulate requests for "
+                               f"{n_conditions} conditions (backend: {name})")
+        # One capture per condition, in order. Re-simulate each with fresh noise: same
+        # theta, same design, independent data. On the GPU, all repeats of all
+        # conditions go out in a single launch.
+        if gpu:
+            flat = orig(model, [req for req in captured for _ in range(n_repeats)])
+            reps = [flat[i * n_repeats:(i + 1) * n_repeats] for i in range(n_conditions)]
+        else:
+            reps = [[orig(model, params, context) for _ in range(n_repeats)]
+                    for params, context in captured]
     finally:
-        type(model).simulate = orig_simulate
+        setattr(type(model), name, orig)
 
     return samples, reps
 

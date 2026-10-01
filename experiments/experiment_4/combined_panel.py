@@ -147,7 +147,8 @@ def parse_args():
 def main():
     logging.basicConfig(level=logging.INFO, format="%(message)s")
     a = parse_args()
-    rec = rec_args()
+    # Only combined_recovery's defaults: its parser must not see this script's argv.
+    rec = rec_args([])
 
     arms = {"frozen": load_arm(rec.frozen_data),
             "baseline": load_arm(rec.baseline_data)}

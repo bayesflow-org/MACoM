@@ -41,7 +41,7 @@ FIG = Path("outputs/figures/encoder_rep")
 DATA = Path("outputs/data/encoder_rep")
 
 
-def parse_args():
+def parse_args(argv=None):
     p = argparse.ArgumentParser()
     p.add_argument("--frozen_data", type=str,
                    default=str(DATA / "addm_vsvfixed/intercept_only"
@@ -64,7 +64,7 @@ def parse_args():
     p.add_argument("--tick_fs", type=float, default=11)
     p.add_argument("--markersize", type=float, default=2.5)
     p.add_argument("--elinewidth", type=float, default=1.0)
-    return p.parse_args()
+    return p.parse_args(argv)
 
 
 def load_arm(path):
