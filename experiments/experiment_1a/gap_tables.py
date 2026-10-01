@@ -5,8 +5,14 @@ outputs/finals/experiment-1a/amortization_gap_tables.tex with three tables:
 
   tab:absolute-metrics  NRMSE / calibration error / contraction, median +- SEM pooled over
                         the five bench5 cases and every active parameter in each case.
-  tab:c2st              joint and mean marginal C2ST (median +- SEM over the five cases).
-  tab:c2st-cases        joint C2ST per case, so the design dependence of the gap is visible.
+  tab:c2st              per-dataset joint / per-parameter C2ST and the pooled joint
+                        (median +- SEM over the five cases).
+  tab:c2st-cases        per-dataset C2ST per case, so the design dependence is visible.
+
+The pooled per-parameter C2ST is deliberately NOT reported: pooled over 200 datasets a
+single parameter's draws trace the aggregate posterior (~ the prior for any calibrated
+approximator), so it reads ~0.52 however far apart the per-dataset posteriors are. See
+model_family_c2st._dataset_task.
 
 Both arms report the same parameters per case in the same order; the CogFormer validator
 splits them into <case>_fm_metrics.csv (per-row params) + _fm_metrics_global.csv (pi), the
@@ -70,15 +76,30 @@ def load_metrics(fam: str) -> dict[str, pd.DataFrame]:
 
 
 def load_c2st(fam: str) -> pd.DataFrame:
-    """One row per case: mean marginal and joint C2ST, CogFormer vs baseline."""
+    """One row per case: pooled joint, per-dataset joint and per-parameter C2ST + floors."""
     rows = []
     for case in CASES:
         f = C2ST / fam / case / f"{fam}_{case}_orig_vs_bf_c2st.csv"
         if not f.exists():
             raise SystemExit(f"missing {f} -- has e1a_c2st finished?")
-        s = pd.read_csv(f, index_col=0)["C2ST Accuracy"]
-        rows.append({"case": case, "mean": s["_mean_accuracy_"], "joint": s["_joint_c2st_"]})
+        df = pd.read_csv(f, index_col=0)
+        if "Per-dataset C2ST" not in df:
+            raise SystemExit(f"{f} has no per-dataset arm -- re-run e1a_c2st (FORCE=1)")
+        rows.append({
+            "case": case,
+            "pooled_joint": df.loc["_joint_c2st_", "C2ST Accuracy"],
+            "joint": df.loc["_joint_c2st_", "Per-dataset C2ST"],
+            "joint_floor": df.loc["_joint_c2st_", "Per-dataset null floor"],
+            "cell": df.loc["_mean_accuracy_", "Per-dataset C2ST"],
+            "cell_floor": df.loc["_mean_accuracy_", "Per-dataset null floor"],
+        })
     return pd.DataFrame(rows).set_index("case")
+
+
+def floor_range(c2st: dict, col: str) -> str:
+    v = pd.concat([c2st[f][col] for f in FAMILIES])
+    lo, hi = f"{v.min():.2f}", f"{v.max():.2f}"
+    return lo if lo == hi else f"{lo}--{hi}"
 
 
 def absolute_table(metrics: dict) -> str:
@@ -105,22 +126,26 @@ def absolute_table(metrics: dict) -> str:
 
 def c2st_table(c2st: dict) -> str:
     fams = " & ".join(rf"\textbf{{{f.upper()}}}" for f in FAMILIES)
-    joint = " & ".join(fmt(c2st[f]["joint"]) for f in FAMILIES)
-    marg = " & ".join(fmt(c2st[f]["mean"]) for f in FAMILIES)
+    row = lambda col: " & ".join(fmt(c2st[f][col]) for f in FAMILIES)
     return "\n".join([
         r"\begin{table}[t]",
         r"\centering",
         r"\small",
         rf"\caption{{C2ST accuracy of {CF_NAME} vs.\ {BF_NAME} (median $\pm$ SEM across the "
-        r"five benchmark design configurations). Joint: one classifier over all active "
-        r"parameters; marginal: mean over per-parameter classifiers. 0.5 = indistinguishable.}",
+        r"five benchmark design configurations; 0.5 = indistinguishable). Per dataset: one "
+        r"classifier per test dataset, averaged over 200 datasets; joint over all active "
+        r"parameters (MLP), per parameter averaged over parameters (quadratic discriminant). "
+        r"Draw-split null floors: " + floor_range(c2st, "joint_floor") + " (joint), "
+        + floor_range(c2st, "cell_floor") + r" (per parameter). Pooled: one classifier over "
+        r"draws from all datasets.}",
         r"\label{tab:c2st}",
         r"\begin{tabularx}{\textwidth}{lCCC}",
         r"\toprule",
         rf"\textbf{{C2ST}} & {fams} \\",
         r"\midrule",
-        rf"Joint & {joint} \\",
-        rf"Marginal (mean) & {marg} \\",
+        rf"Joint, per dataset & {row('joint')} \\",
+        rf"Per parameter, per dataset & {row('cell')} \\",
+        rf"Joint, pooled & {row('pooled_joint')} \\",
         r"\bottomrule",
         r"\end{tabularx}",
         r"\end{table}",
@@ -128,21 +153,27 @@ def c2st_table(c2st: dict) -> str:
 
 
 def c2st_case_table(c2st: dict) -> str:
-    fams = " & ".join(rf"\textbf{{{f.upper()}}}" for f in FAMILIES)
+    fams = " & ".join(rf"\multicolumn{{2}}{{c}}{{\textbf{{{f.upper()}}}}}" for f in FAMILIES)
+    rules = " ".join(rf"\cmidrule(lr){{{2 + 2 * k}-{3 + 2 * k}}}" for k in range(len(FAMILIES)))
+    sub = " & ".join(["Joint & Param."] * len(FAMILIES))
     lines = [
         r"\begin{table}[t]",
         r"\centering",
         r"\small",
-        rf"\caption{{Joint C2ST accuracy of {CF_NAME} vs.\ {BF_NAME} per benchmark design "
-        r"configuration. 0.5 = indistinguishable.}",
+        rf"\caption{{Per-dataset C2ST accuracy of {CF_NAME} vs.\ {BF_NAME} for each benchmark "
+        r"design configuration: joint over all active parameters, and averaged over "
+        r"parameters. 0.5 = indistinguishable.}",
         r"\label{tab:c2st-cases}",
-        r"\begin{tabularx}{\textwidth}{lCCC}",
+        r"\begin{tabularx}{\textwidth}{l" + "CC" * len(FAMILIES) + "}",
         r"\toprule",
         rf"\textbf{{Configuration}} & {fams} \\",
+        rules,
+        rf" & {sub} \\",
         r"\midrule",
     ]
     for case in CASES:
-        cells = " & ".join(f"${c2st[f].loc[case, 'joint']:.3f}$" for f in FAMILIES)
+        cells = " & ".join(f"${c2st[f].loc[case, 'joint']:.3f}$ & ${c2st[f].loc[case, 'cell']:.3f}$"
+                           for f in FAMILIES)
         lines.append(rf"{CASE_LABELS[case]} & {cells} \\")
     lines += [r"\bottomrule", r"\end{tabularx}", r"\end{table}"]
     return "\n".join(lines)

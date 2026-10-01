@@ -1,7 +1,7 @@
 # Experiment 1a — amortization gap
 
-Assembled 2026-10-01 04:55:12Z by `experiments/finalize_experiment_1a.py` at commit `2ec3724dd7178aae536c28ee372b3ece1d72d9bc`.
-333 files copied this run, 0 carried from earlier runs.
+Assembled 2026-10-01 06:12:50Z by `experiments/finalize_experiment_1a.py` at commit `845bc6688474f9230a7706fc3511d9a6be902b14`.
+348 files copied this run, 0 carried from earlier runs.
 
 ## What this measures
 
@@ -24,17 +24,22 @@ datasets: the shared benchmark files written once by the `e1_data` stage.
 
 | family | cases | contents |
 |---|---|---|
-| DDM | 5 | 111 files: fixed, fixed_regressed, interaction, intercept_only, regressed |
-| RDM | 5 | 111 files: fixed, fixed_regressed, interaction, intercept_only, regressed |
-| CDM | 5 | 111 files: fixed, fixed_regressed, interaction, intercept_only, regressed |
+| DDM | 5 | 116 files: fixed, fixed_regressed, interaction, intercept_only, regressed |
+| RDM | 5 | 116 files: fixed, fixed_regressed, interaction, intercept_only, regressed |
+| CDM | 5 | 116 files: fixed, fixed_regressed, interaction, intercept_only, regressed |
 
-`amortization_gap.tex` is hand-written (the paper table) and has no manifest row —
-it is authored, not copied.
+`amortization_gap.tex` is hand-written (the paper section) and has no manifest row —
+it is authored, not copied. `amortization_gap_tables.tex` is generated from the same
+sources by `python -m experiments.experiment_1a.gap_tables` (re-run it after this script).
 
 ## How to read it
 
-`<family>/summary.csv` has one row per case with `mean_accuracy` (mean over
-per-parameter cells) and `joint_c2st` (all active cells at once).
+`<family>/summary.csv` has one row per case. Pooled arms (one classifier over draws
+from all 200 datasets): `mean_accuracy` (mean over per-parameter cells) and `joint_c2st`
+(all active cells at once). Per-dataset arm (one classifier per dataset, averaged over
+datasets): `perds_joint_c2st` and `perds_mean_accuracy`, each with its draw-split
+`*_null_floor`. `<case>/orig_vs_bf.csv` has the per-cell values of both arms, and
+`<case>/orig_vs_bf_per_dataset.csv` one row per dataset.
 
 The `cf_*` files are experiment 1's per-case validation of the same cases
 (`experiment-1/per_case/`), which scored those same shared files. So `bf_*`, `cf_*` and
@@ -42,20 +47,22 @@ The `cf_*` files are experiment 1's per-case validation of the same cases
 seed alone would NOT make that true: it pins the parameters but not the simulated RTs
 or regressor designs. Loading the saved files is what pairs the arms.)
 
-**Read `joint_c2st`, not `mean_accuracy`.** Both metrics pool draws across all 200
-datasets, and the pooled 1-D marginal of any single parameter is dominated by
-between-dataset spread, which both approximators reproduce — so `mean_accuracy` sits
-near 0.55 while `joint_c2st` runs 0.96–0.998. That is not a contradiction and not
-seven weak signals accumulating: seven independent cells at 0.55 would combine to
-about 0.63, not 0.99. Within a single dataset the posteriors genuinely differ —
-centres by 1–2.5 posterior SDs, widths by 2.3–10x — and only the joint classifier can
-localise a draw well enough to see it. Same pooling effect that
-`model_class_paired_c2st.py` documents for its per-dataset arm.
+**Read the per-dataset arm.** Pooled over 200 datasets, one parameter's draws trace
+the aggregate posterior, which is roughly the prior for any calibrated approximator, so
+the pooled `mean_accuracy` sits near 0.52 however far apart the per-dataset posteriors
+are. The pooled `joint_c2st` sees per-dataset differences only once the datasets
+separate in parameter space (9+ active cells), so it undershoots on intercept_only and
+fixed and saturates near 0.95 on the rest -- it is not comparable across cases with
+different numbers of parameters. Measured 2026-10-01: within a dataset, CogFormer's
+posterior means sit a median 0.3–0.8 baseline posterior SDs from the baseline's, and
+its posteriors are 1.2–1.6x wider. Same pooling effect `model_class_paired_c2st.py`
+documents for experiment 3.
 
-**These numbers have no null floor.** `model_family_c2st.py` has none of the
-null-calibration machinery in `model_class_paired_c2st.py`, so nothing here is
-baseline-corrected. The joint values are far past any plausible floor (~0.49), but a
-per-cell 0.545 must not be quoted as "0.045 above chance".
+**Per-dataset numbers have a null floor; read them against it.** Real = first halves of
+both arms' draws (~100 per side); floor = the larger of each arm's first-half vs
+second-half C2ST on the same dataset. The joint uses the MLP; the per-parameter test
+uses a quadratic discriminant, because at ~100 draws per side the 1-D MLP barely learns
+(0.53 vs 0.67 with QDA on ddm/interaction, null 0.50). The pooled arms have no null.
 
 **C2ST is direction-blind.** A large value says the two posteriors differ, not which
 one is better. Read it next to `bf_evaluations.csv` and `cf_metrics.csv` (NRMSE,
