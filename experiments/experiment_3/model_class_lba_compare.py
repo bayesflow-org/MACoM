@@ -162,7 +162,10 @@ def plot_delta_metrics(combined: pd.DataFrame, outdir: Path, condition: str,
                 ax.barh(y, vals, color=[better if v <= 0 else worse for v in vals], alpha=0.85)
                 ax.axvline(0.0, color="0.35", linewidth=1.0)
                 ax.set_yticks(y)
-                ax.set_yticklabels(labels if c == 0 else [], fontsize=8)
+                # Every column carries its OWN labels: the families have different
+                # parameters (v_diff, v_theta vs z) and, for regressed designs, different
+                # bar counts, so DDM's labels on the left named the wrong bars elsewhere.
+                ax.set_yticklabels(labels, fontsize=8)
                 ax.invert_yaxis()
                 ax.grid(True, axis="x", color="lightgray", linestyle="--", linewidth=0.5, alpha=0.4)
                 for sp in ("top", "right"):

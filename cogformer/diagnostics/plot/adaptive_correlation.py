@@ -167,7 +167,7 @@ def adaptive_correlation_delta(
 ) -> plt.Figure:
     """Heatmap of Δr = r_b − r_a, using the same cell layout as adaptive_correlation.
 
-    Positive values (blue) indicate improvement in b; negative values (red) indicate
+    Positive values (red, under the RdBu_r map) indicate improvement in b; negative values (blue) indicate
     degradation.  Cells inactive in either matrix are shown as N/A.
 
     r_matrix_a, r_matrix_b : outputs of compute_r_matrix (same shape, same design).
