@@ -28,8 +28,11 @@ datasets: the shared benchmark files written once by the `e1_data` stage.
 | RDM | 5 | 116 files: fixed, fixed_regressed, interaction, intercept_only, regressed |
 | CDM | 5 | 116 files: fixed, fixed_regressed, interaction, intercept_only, regressed |
 
-`amortization_gap_tables.tex` has no manifest row: it is generated from the same
-sources by `python -m experiments.experiment_1a.gap_tables` (re-run it after this script).
+`amortization_gap_tables.tex` and `captions.tex` have no manifest row: they are generated
+from the same sources by `python -m experiments.experiment_1a.gap_tables` and
+`python -m experiments.experiment_1a.appendix_captions` (re-run both after this script).
+`captions.tex` holds the appendix figures: one per case and arm (CogFormer, then the
+BayesFlow baseline) stacking recovery, ECDF and metrics, with the full caption on the first.
 
 ## How to read it
 

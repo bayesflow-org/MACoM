@@ -59,10 +59,10 @@ FAMILIES = ["ddm", "rdm", "cdm"]
 # "mixed_predictor", so both are absent by construction, not by omission.
 CASES = ["intercept_only", "fixed", "regressed", "fixed_regressed", "interaction"]
 
-# amortization_gap_tables.tex is generated (experiments.experiment_1a.gap_tables) from the
-# sources, not copied, so it has no manifest row. Listed here so a reader does not
-# mistake it for an orphan.
-AUTHORED = ["amortization_gap_tables.tex"]
+# amortization_gap_tables.tex (experiments.experiment_1a.gap_tables) and captions.tex
+# (experiments.experiment_1a.appendix_captions) are generated, not copied, so they have no
+# manifest row. Listed here so a reader does not mistake them for orphans.
+AUTHORED = ["amortization_gap_tables.tex", "captions.tex"]
 
 
 def plan() -> tuple[list[tuple[Path, Path]], list[Path]]:
@@ -220,8 +220,11 @@ datasets: the shared benchmark files written once by the `e1_data` stage.
 |---|---|---|
 {_family_rows()}
 
-`amortization_gap_tables.tex` has no manifest row: it is generated from the same
-sources by `python -m experiments.experiment_1a.gap_tables` (re-run it after this script).
+`amortization_gap_tables.tex` and `captions.tex` have no manifest row: they are generated
+from the same sources by `python -m experiments.experiment_1a.gap_tables` and
+`python -m experiments.experiment_1a.appendix_captions` (re-run both after this script).
+`captions.tex` holds the appendix figures: one per case and arm (CogFormer, then the
+BayesFlow baseline) stacking recovery, ECDF and metrics, with the full caption on the first.
 
 ## How to read it
 
