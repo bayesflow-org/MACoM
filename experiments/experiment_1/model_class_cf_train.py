@@ -442,6 +442,12 @@ def parse_args():
                         help="Comma-separated training sampling weights over DDM,RDM,CDM, e.g. "
                              "'0,1,0' to train on RDM only. The global parameter space and model "
                              "ids are those of all three families either way. Default: uniform.")
+    parser.add_argument("--fixed_design", type=str, default=None,
+                        help="'<family>:<case>', e.g. 'rdm:fixed_regressed': train on that ONE bench "
+                             "design, drawn exactly as its BayesFlow baseline draws it (fixed "
+                             "design_config with pi, its regressor count, benchmark_mix_opts, the "
+                             "default context, no random RDM alternatives). Pair with "
+                             "--family_weights selecting the family and --min/max_num_obs 500.")
     parser.add_argument("--run_tag", type=str, default=None,
                         help="Suffix for the wandb run name and an extra wandb tag.")
 
@@ -645,6 +651,20 @@ if __name__ == "__main__":
             raise SystemExit(f"--family_weights needs {num_models} weights (DDM,RDM,CDM) "
                              f"with a positive sum, got {args.family_weights!r}")
 
+    train_contexts = {"RDM": RDM.build_random_context}
+    if args.fixed_design is not None:
+        from experiments.utils import benchmark_mix_opts
+        fd_family, fd_case = args.fixed_design.split(":")
+        bf_case = _MODELS_WITH_PI[fd_family]["bf_case_configs"][fd_case]
+        train_sample_config.update(
+            design_config=bf_case["design_config"], fixed_config=True,
+            min_num_regressors=bf_case["min_num_regressors"],
+            num_regressors=bf_case["max_num_regressors"],
+            **benchmark_mix_opts(fd_family, fd_case),
+        )
+        train_contexts = {}     # the baselines simulate with each model's default context
+        logging.info(f"[rank {rank}] fixed design {args.fixed_design}: {bf_case['design_config']}")
+
     # Config dict used by trainer to reconstruct per-thread ModelClass instances
     model_class_config = {
         "families": {
@@ -656,7 +676,7 @@ if __name__ == "__main__":
         # RDM trains over 2-4 alternatives (random per batch element), matching the
         # model_family training distribution. Validation scenarios keep the default
         # context (2 alternatives), which is in-distribution.
-        "train_contexts": {"RDM": RDM.build_random_context},
+        "train_contexts": train_contexts,
         "weights": family_weights,
     }
 

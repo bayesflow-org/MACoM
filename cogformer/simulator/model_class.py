@@ -105,6 +105,7 @@ class ModelClass:
         max_num_regressors: int = 3,
         max_num_categories: int = 3,
         discrete_prob: float = 0.5,
+        categorical_regressors: list[str] | None = None,
         keep_intercept: bool = True,
         remove_intercept_on_collate: bool = False,
         mask_randomizer_kwargs: dict | None = None,
@@ -156,10 +157,16 @@ class ModelClass:
                 design_config=design_config,
                 num_obs=num_obs,
                 num_regressors=int(num_regressors_array[i]),
+                # Only used to pad an EXPLICIT design_config to u_1..u_R. Left at the
+                # family's default (5), an explicit design was laid out for 5 regressors
+                # and then cut to this grid, shifting u_5's distractor into the u_1:u_2
+                # slot. Random designs (design_config=None) never read it.
+                max_num_regressors=max_num_regressors,
                 context=ctx_i,
                 mask_randomizer_kwargs=mask_randomizer_kwargs,
                 max_num_categories=max_num_categories,
                 discrete_prob=discrete_prob,
+                categorical_regressors=categorical_regressors,
                 keep_intercept=keep_intercept,
                 flatten_param_outputs=False,
                 fixed_config=fixed_config,
