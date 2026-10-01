@@ -6,3 +6,48 @@
 
 ── e1a_bf
     · BF baseline train ddm/intercept_only
+      ok (172m)
+    · BF baseline validate ddm/intercept_only
+      ok (0m)
+    · BF baseline train ddm/fixed
+      ok (172m)
+    · BF baseline validate ddm/fixed
+      ok (0m)
+    · BF baseline train ddm/regressed
+      ok (174m)
+    · BF baseline validate ddm/regressed
+      ok (0m)
+    · BF baseline train ddm/fixed_regressed
+      ok (175m)
+    · BF baseline validate ddm/fixed_regressed
+      ok (0m)
+    · BF baseline train ddm/interaction
+      ok (175m)
+    · BF baseline validate ddm/interaction
+      ok (0m)
+    · BF baseline train cdm/intercept_only
+      ok (172m)
+    · BF baseline validate cdm/intercept_only
+      ok (0m)
+    · BF baseline train cdm/fixed
+      ok (173m)
+    · BF baseline validate cdm/fixed
+      ok (0m)
+    · BF baseline train cdm/regressed
+      ok (175m)
+    · BF baseline validate cdm/regressed
+      ok (0m)
+    · BF baseline train cdm/fixed_regressed
+      ok (175m)
+    · BF baseline validate cdm/fixed_regressed
+      ok (0m)
+    · BF baseline train cdm/interaction
+      ok (178m)
+    · BF baseline validate cdm/interaction
+      ok (0m)
+
+════════════════════════════════════════════════════════════════
+ ok    e1a_bf
+ elapsed: 1752m   logs: logs/finals/20260928_162659/
+ COMPLETE
+════════════════════════════════════════════════════════════════

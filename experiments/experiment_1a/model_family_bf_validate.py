@@ -290,8 +290,12 @@ def main(model_key: str, case: str, batch_size: int = 200, num_samples: int = 20
     )
     logging.info(f"Saved data to {data_dir}")
 
+    # normalize="range" explicitly: BayesFlow >= 2.0.14 defaults to "prior" (bootstrap
+    # prior RMSE, ~sqrt(2) sd), while the CogFormer arm divides by the range (~3.5 sd for
+    # a uniform), so the default made every baseline NRMSE look ~2.4x worse.
     rmse = bf.diagnostics.metrics.root_mean_squared_error(
-        estimates=pred_params, targets=true_params, variable_names=active_param_names
+        estimates=pred_params, targets=true_params, variable_names=active_param_names,
+        normalize="range",
     )
     calibration_errors = bf.diagnostics.metrics.calibration_error(
         estimates=pred_params, targets=true_params, variable_names=active_param_names

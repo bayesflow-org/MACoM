@@ -1,15 +1,14 @@
 # Experiment 1a — amortization gap
 
-Assembled 2026-09-11 21:51:06Z by `experiments/finalize_experiment_1a.py` at commit `675154b89ed6bfb949ab32b9755ebed45a93e3fd`.
-10 files copied this run, 162 carried from earlier runs.
+Assembled 2026-10-01 04:55:12Z by `experiments/finalize_experiment_1a.py` at commit `2ec3724dd7178aae536c28ee372b3ece1d72d9bc`.
+333 files copied this run, 0 carried from earlier runs.
 
 ## What this measures
 
 A paired C2ST per bench5 case: how distinguishable are the posteriors of a
 case-specific BayesFlow baseline from those of the single amortized ModelClass
 CogFormer? **0.5 = indistinguishable = no gap.** Both arms score the *same* simulated
-datasets — the CogFormer arm is the PAIRED validation run, not the per-case run
-behind `experiment-1/per_case/`.
+datasets: the shared benchmark files written once by the `e1_data` stage.
 
 ## Layout
 
@@ -25,9 +24,9 @@ behind `experiment-1/per_case/`.
 
 | family | cases | contents |
 |---|---|---|
-| DDM | 5 | 86 files: fixed, fixed_regressed, interaction, intercept_only, regressed |
-| RDM | — | absent — never run |
-| CDM | 5 | 86 files: fixed, fixed_regressed, interaction, intercept_only, regressed |
+| DDM | 5 | 111 files: fixed, fixed_regressed, interaction, intercept_only, regressed |
+| RDM | 5 | 111 files: fixed, fixed_regressed, interaction, intercept_only, regressed |
+| CDM | 5 | 111 files: fixed, fixed_regressed, interaction, intercept_only, regressed |
 
 `amortization_gap.tex` is hand-written (the paper table) and has no manifest row —
 it is authored, not copied.
@@ -37,11 +36,11 @@ it is authored, not copied.
 `<family>/summary.csv` has one row per case with `mean_accuracy` (mean over
 per-parameter cells) and `joint_c2st` (all active cells at once).
 
-The `cf_*` files come from the PAIRED validate run, not from
-`experiment-1/per_case/`. `per_case/` simulated its own datasets; the C2ST re-ran
-validation against the BF simulations so both arms score identical data. Compare
-`bf_*` with `cf_*` here — comparing `bf_*` against `per_case/` would be comparing
-across different data.
+The `cf_*` files are experiment 1's per-case validation of the same cases
+(`experiment-1/per_case/`), which scored those same shared files. So `bf_*`, `cf_*` and
+`experiment-1/per_case/` describe identical datasets and compare directly. (The
+seed alone would NOT make that true: it pins the parameters but not the simulated RTs
+or regressor designs. Loading the saved files is what pairs the arms.)
 
 **Read `joint_c2st`, not `mean_accuracy`.** Both metrics pool draws across all 200
 datasets, and the pooled 1-D marginal of any single parameter is dominated by
@@ -58,37 +57,19 @@ null-calibration machinery in `model_class_paired_c2st.py`, so nothing here is
 baseline-corrected. The joint values are far past any plausible floor (~0.49), but a
 per-cell 0.545 must not be quoted as "0.045 above chance".
 
-**C2ST is direction-blind, and here the direction favours CogFormer.** On identical
-datasets the amortized model beats the per-case BayesFlow baseline on every parameter
-of both families — DDM `v` correlation 0.965 vs 0.817, RMSE 0.209 vs 0.460 — while
-producing *wider* posteriors. The BF baselines are badly overconfident: their own
-diagnostics report calibration error 0.39–0.47 and posterior contraction 0.993–0.999,
-and their posterior SDs are ~10x smaller than their own RMSE. So a large gap here is
-mostly a statement about BF, not a cost of amortization. Budgets differ and are not
-matched: ~51M simulations per BF case against ~256M for the one checkpoint covering
-every case and family.
+**C2ST is direction-blind.** A large value says the two posteriors differ, not which
+one is better. Read it next to `bf_evaluations.csv` and `cf_metrics.csv` (NRMSE,
+calibration error, contraction) on the same datasets.
 
-## Provenance warning
+## Budget
 
-The DDM and CDM files here come from a run whose **sources no longer exist**:
-`outputs/figures/c2st/` and `outputs/figures/model_class/cf_paired/` are absent,
-there are zero `outputs/data/model_family/*_data.npz`, and 1 of 15 BayesFlow
-checkpoints survives. **RDM was never run** — yet `amortization_gap.tex` quotes RDM
-numbers, so that run happened and its artifacts were lost.
-
-Re-deriving any of this is a full rebuild (~15 BayesFlow trainings):
-
-```bash
-bash run_experiments.sh exp1a
-```
-
-`MANIFEST.csv` therefore carries forward rows whose sources are gone. Re-running this
-assembler never removes files it cannot regenerate.
+Matched by construction (decided 2026-09-27): the model-class CogFormer trains on
+15000 epochs x 100 steps x 128 = 192M simulated datasets
+across three families, and each of the 15 BayesFlow baselines on
+1000 x 100 x 128 = 12.8M, i.e. 64M per family on both sides, at the same batch size.
 
 ## Excluded
 
 `full` (dropped by `model_family_c2st`) and `mixed_predictor` (no BF baseline was
 ever trained on it) have no BF arm to compare against, so they are absent by
-construction rather than by omission. The 200-epoch baseline variant lands in
-`e200/` via `experiments/finalize_experiment_1a_e200.py` — a separate budget, kept
-in its own subtree and its own manifest so the two are never mixed.
+construction rather than by omission.
