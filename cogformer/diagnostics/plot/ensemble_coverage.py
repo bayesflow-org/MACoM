@@ -7,7 +7,7 @@ from cogformer.simulator.design_utils import (
     build_ensemble_row_labels,
 )
 from cogformer.diagnostics.plot.adaptive_coverage import compute_empirical_coverage
-from cogformer.utils.plot_utils import _add_mask_legend, _add_config_legend
+from cogformer.utils.plot_utils import _add_mask_legend, _add_config_legend, share_grid_ticks
 
 
 def ensemble_coverage(
@@ -269,6 +269,7 @@ def global_ensemble_coverage(
     difference: bool = True,
     ci_alpha: float = 0.15,
     max_per_row: int = 6,
+    share_axes: bool = False,
     **kwargs,
 ):
     """Ensemble empirical coverage for global parameters (e.g. ``pi``), plotted
@@ -276,6 +277,9 @@ def global_ensemble_coverage(
     rows of at most ``max_per_row`` panels (e.g. 5 configs -> one row of 5;
     12 configs -> two rows of 6), each panel in its config's color with the
     config label as title. Returns ``None`` when no global parameter is active.
+
+    ``share_axes``: every panel shows the same parameter, so give them one y range
+    and one set of ticks, labelled on the first column and bottom row only.
     """
     n_configs = len(design_configs)
     if variable_names is None:
@@ -307,6 +311,7 @@ def global_ensemble_coverage(
     if figsize is None:
         figsize = (3 * n_cols_grid, 3.2 * n_rows)
     fig, axarr = plt.subplots(n_rows, n_cols_grid, figsize=figsize, squeeze=False)
+    drawn = []
 
     for gi, c in enumerate(active_cols):
         for k in range(n_configs):
@@ -356,12 +361,15 @@ def global_ensemble_coverage(
             ax.set_title(labels[k], fontsize=title_fontsize)
             ax.set_ylabel(variable_names[c] if is_left else "", fontsize=title_fontsize)
             ax.set_xlabel("Interval width" if is_bottom else "", fontsize=label_fontsize)
+            drawn.append((ax, is_left, is_bottom))
 
     # Hide unused trailing cells in each param block
     for gi in range(len(active_cols)):
         for k in range(n_configs, rows_per_param * n_cols_grid):
             axarr[gi * rows_per_param + k // n_cols_grid, k % n_cols_grid].axis("off")
 
+    if share_axes:
+        share_grid_ticks(drawn)
     fig.tight_layout()
     return fig
 

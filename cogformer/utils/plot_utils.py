@@ -80,6 +80,35 @@ def credible_interval(x: np.ndarray, prob: float = 0.95, axis: int = None, **kwa
     # Compute quantiles
     return np.quantile(x, q=(lower_q, upper_q), axis=axis, **kwargs)
 
+def share_grid_ticks(panels, x: bool = True, y: bool = True):
+    """One scale and one set of ticks for a grid of panels showing the same quantity,
+    with tick LABELS on the first column (y) and the bottom row (x) only.
+
+    ``panels`` is a list of ``(ax, is_left, is_bottom)`` for the drawn panels (skip
+    N/A tiles). Limits are the union over the panels, and the ticks are located once
+    on that range and set on every panel, so the gridlines line up across the grid
+    and a label on the edge applies to its whole row or column. Call it before
+    ``tight_layout`` -- the labels it hides would otherwise still claim space.
+    """
+    if not panels:
+        return
+    for axis, on in (("x", x), ("y", y)):
+        if not on:
+            continue
+        lims = np.array([getattr(ax, f"get_{axis}lim")() for ax, _, _ in panels])
+        lo, hi = float(lims[:, 0].min()), float(lims[:, 1].max())
+        ref = getattr(panels[0][0], f"{axis}axis")
+        ticks = [t for t in ref.get_major_locator().tick_values(lo, hi)
+                 if lo - 1e-12 <= t <= hi + 1e-12]
+        for ax, is_left, is_bottom in panels:
+            getattr(ax, f"set_{axis}lim")(lo, hi)
+            getattr(ax, f"set_{axis}ticks")(ticks)
+            if axis == "y":
+                ax.tick_params(axis="y", labelleft=is_left)
+            else:
+                ax.tick_params(axis="x", labelbottom=is_bottom)
+
+
 # margin < 1: a label sized to exactly its cell touches its neighbour, and the
 # outermost one lands on the figure edge. The few percent held back is the gap.
 def fit_text(fig, artists, target_in, axis="x", margin=0.90, min_size=3.0,

@@ -127,6 +127,16 @@ def build_model_class():
                                       link_funs=link_funs)
 
 
+# The pi grids put one config per panel, all showing the same parameter, so they share
+# one scale and one set of ticks, labelled on the first column and bottom row only:
+# per-panel scales make a config whose pi runs to 0.08 look like one running to 0.15.
+# Recovery calls this share_limits (its x and y are the same quantity); coverage and
+# ECDF share_axes. replot_ensemble imports this so a replot draws the same layout.
+GLOBAL_SHARE = {"recovery": {"share_limits": True},
+                "coverage": {"share_axes": True},
+                "ecdf": {"share_axes": True}}
+
+
 def ensemble_colors(n_configs):
     """Per-config palette. Deterministic in n_configs, so a replot reproduces it."""
     return sns.husl_palette(n_configs, h=0.05, l=0.82)
@@ -402,8 +412,9 @@ def main():
             plt.close(fig)
             logging.info(f"[saved] {p}")
 
-        # Global params (pi): one panel per config, wrapped at 6 per row.
-        glob_fig = global_fn(**shared_kwargs, **extra)
+        # Global params (pi): one panel per config, wrapped at 6 per row, on one
+        # shared scale (GLOBAL_SHARE).
+        glob_fig = global_fn(**shared_kwargs, **extra, **GLOBAL_SHARE.get(plot_name, {}))
         if glob_fig is not None:
             p = outdir / f"model_class_ensemble_{plot_name}_global.pdf"
             glob_fig.savefig(p, bbox_inches="tight")

@@ -10,7 +10,7 @@ from cogformer.simulator.design_utils import (
     build_ensemble_row_labels,
 )
 from cogformer.utils.plot_utils import (credible_interval, _add_mask_legend,
-                                        _add_config_legend, fit_text)
+                                        _add_config_legend, fit_text, share_grid_ticks)
 
 
 def ensemble_recovery(
@@ -575,7 +575,8 @@ def global_ensemble_recovery(
         figsize = (3 * n_cols_grid, 3.2 * n_rows)
     fig, axarr = plt.subplots(n_rows, n_cols_grid, figsize=figsize, squeeze=False)
 
-    # ONE scale across every panel, ticks labelled on the first column only. These
+    # ONE scale across every panel, tick labels on the first column (y) and the bottom
+    # row (x) only, the same ticks everywhere (share_grid_ticks). These
     # panels all show the same parameter, so per-panel limits make a config whose pi
     # happens to run to 0.08 look identical to one running to 0.15 -- the comparison
     # the grid exists for is then invisible. Computed up front, over every config's
@@ -599,6 +600,7 @@ def global_ensemble_recovery(
             span = hi - lo if hi != lo else 1.0
             shared_lims = (lo - span * 0.1, hi + span * 0.1)
 
+    drawn = []
     for gi, c in enumerate(active_cols):
         for k in range(n_configs):
             ax = axarr[gi * rows_per_param + k // n_cols_grid, k % n_cols_grid]
@@ -650,15 +652,16 @@ def global_ensemble_recovery(
             sns.despine(ax=ax)
             ax.set_title(labels[k], fontsize=title_fontsize)
             ax.set_ylabel(variable_names[c] if is_left else "", fontsize=title_fontsize)
-            if shared_lims is not None and not is_left:
-                ax.tick_params(labelleft=False)
             ax.set_xlabel("Ground Truth" if is_bottom else "", fontsize=label_fontsize)
+            drawn.append((ax, is_left, is_bottom))
 
     # Hide unused trailing cells in each param block
     for gi in range(len(active_cols)):
         for k in range(n_configs, rows_per_param * n_cols_grid):
             axarr[gi * rows_per_param + k // n_cols_grid, k % n_cols_grid].axis("off")
 
+    if shared_lims is not None:
+        share_grid_ticks(drawn)
     fig.tight_layout()
     # After tight_layout, which computes its own and would discard anything set up
     # front. The panels are square, so a wide gutter is pure dead space between them.

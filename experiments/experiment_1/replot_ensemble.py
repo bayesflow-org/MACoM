@@ -32,7 +32,7 @@ from cogformer.diagnostics.plot.ensemble_metrics import (ensemble_metrics,
                                                          global_ensemble_metrics)
 
 from .model_class_cf_ensemble import (build_model_class, ensemble_colors,
-                                      GLOBAL_PARAMS, GLOBAL_VARIABLE_NAMES)
+                                      GLOBAL_PARAMS, GLOBAL_VARIABLE_NAMES, GLOBAL_SHARE)
 from ..configs import (ALL_PARAMS, ALL_VARIABLE_NAMES as ALL_PARAMS_VARIABLE_NAMES)
 
 DATA_NAME = "model_class_ensemble_data.npz"
@@ -201,9 +201,11 @@ def main():
             fig.savefig(path, bbox_inches="tight"); plt.close(fig)
             logging.info(f"[saved] {path}")
         # The pi grid wraps 12 configs into 2 rows of 6 and every panel shows the
-        # same parameter, so it takes one shared scale with ticks on the first column.
-        gkw = {"share_limits": True, "max_per_row": GLOBAL_PER_ROW,
-               "wspace": 0.06, "equal_gaps": True} if name == "recovery" else {}
+        # same parameter, so it takes one shared scale with tick labels on the first
+        # column and bottom row (GLOBAL_SHARE).
+        gkw = dict(GLOBAL_SHARE.get(name, {}))
+        if name == "recovery":
+            gkw.update(max_per_row=GLOBAL_PER_ROW, wspace=0.06, equal_gaps=True)
         g_rows = int(np.ceil(n / GLOBAL_PER_ROW))
         gfig = sized(global_fn, f"{name}_global", g_rows, GLOBAL_PER_ROW,
                      **shared, **extra, **gkw)

@@ -1,0 +1,222 @@
+\documentclass[11pt]{article}
+\usepackage[margin=1in]{geometry}
+\usepackage{amsmath,amssymb}
+\usepackage{bm}
+\usepackage{booktabs}
+\usepackage{xcolor}
+
+% --- Notation macros (consistent with meta_simulator.tex) ---
+\newcommand{\rmB}{\mathbf{B}}
+\newcommand{\rmW}{\mathbf{W}}
+\newcommand{\clF}{\mathcal{F}}
+\newcommand{\clM}{\mathcal{M}}
+\providecommand{\cref}[1]{Eq.~(\ref{#1})}
+
+\title{Extending a Trained Model-Class CogFormer to a New Family\\
+       via Fine-Tuning: the LBA Experiment}
+\author{CogFormer-2}
+\date{}
+
+\begin{document}
+\maketitle
+
+%============================================================================
+\section{Motivation}
+%============================================================================
+
+The base model-class CogFormer is trained as a single amortized posterior
+estimator over a \emph{model class} $\clM$ comprising three sequential-sampling
+families: the drift-diffusion model (DDM, \texttt{model\_id}~$=0$), the racing
+diffusion model (RDM, \texttt{model\_id}~$=1$), and the circular diffusion model
+(CDM, \texttt{model\_id}~$=2$). Each family is embedded through a learned model
+embedding table and shares a common encoder--decoder backbone; posterior draws
+are produced by a conditional flow-matching decoder.
+
+The experiment documented here asks a targeted transfer question:
+
+\begin{quote}
+\emph{Given a CogFormer already trained on $\{\text{DDM},\text{RDM},\text{CDM}\}$,
+can we add a fourth family --- the Linear Ballistic Accumulator (LBA,
+\texttt{model\_id}~$=3$) --- by fine-tuning, without retraining from scratch and
+without degrading inference on the original three families?}
+\end{quote}
+
+The interest is twofold. Scientifically, it tests whether the amortization
+backbone has learned a family-general representation of the shared
+generalized-linear design space, such that a new family is reachable by a small
+adaptation. Practically, it establishes a cheap protocol for growing the model
+class one family at a time.
+
+%============================================================================
+\section{Why LBA is a favorable first target}
+%============================================================================
+
+LBA is chosen as the first fine-tuning target because it is maximally aligned
+with a family the base model already knows, RDM. Concretely:
+
+\begin{itemize}
+  \item \textbf{Identical parameter space.} LBA and RDM share the same six
+    intrinsic parameters under the shared response-coding convention: a base
+    drift $v$, a drift advantage $v_{\mathrm{diff}}$ for the favored
+    accumulator, a start-point upper bound $a$, non-decision time $\tau$, and
+    the dispersions $s_v, s_\tau$. Both also carry the global contamination
+    parameter $\pi$.
+  \item \textbf{Identical intrinsic priors.} The prior over these parameters is
+    literally the same function for the two families (\texttt{lba\_priors}
+    reproduces \texttt{rdm\_priors} term for term). The two families therefore
+    occupy the same region of parameter space and differ only in the generative
+    mechanism that maps parameters to response times and choices.
+  \item \textbf{Different likelihood geometry.} What differs is the accumulation
+    process. LBA is \emph{ballistic}: within a trial there is no moment-to-moment
+    noise; a linear accumulator with a random start point (uniform on $[0,a]$)
+    and a Gaussian-perturbed but trial-constant drift races to a threshold
+    $a + b$ with the class-level offset $b=0.5$. This yields a response-time
+    distribution of a different shape from RDM's diffusive racers, even though
+    the parameters carry the same names.
+\end{itemize}
+
+The upshot is that the adaptation required of the backbone is expected to be
+\emph{small in parameter space but non-trivial in likelihood shape} --- an ideal
+regime for fine-tuning, and the reason LBA's embedding is warm-started from
+RDM's (Section~\ref{sec:setup}).
+
+%============================================================================
+\section{Setup and initialization}\label{sec:setup}
+%============================================================================
+
+\paragraph{Global parameter space.}
+The base run amortizes all families in a shared \emph{global} parameter space:
+each family's local coefficient matrix $\rmB_\clF$ is lifted, via
+\texttt{lift\_to\_global\_space}, into a fixed-width global layout whose columns
+are the union of all families' intrinsic parameters (with the global nuisance
+$\pi$ appended). Fine-tuning preserves this layout exactly. All four families
+--- including LBA --- are instantiated when constructing the \texttt{ModelClass}
+so that the global column ordering (insertion order
+DDM$\to$RDM$\to$CDM$\to$LBA) and hence the global parameter count matches the
+base run bit-for-bit.
+
+\paragraph{Loading the checkpoint.}
+The pretrained checkpoint is loaded with \texttt{strict=True}; every backbone
+weight transfers unchanged. The single structural change is the model embedding
+table, which grows from three rows to four:
+\[
+  \text{model\_embedding} \in \mathbb{R}^{3 \times d}
+  \;\longrightarrow\;
+  \mathbb{R}^{4 \times d}, \qquad d = \texttt{model\_embed\_dim}.
+\]
+The new row 3 (LBA) is \textbf{warm-started from row 1 (RDM)} rather than
+randomly initialized, exploiting the shared parameter space and priors so that
+fine-tuning begins from a sensible family representation instead of noise.
+
+\paragraph{Free and fixed intrinsics.}
+During fine-tuning the free LBA intrinsics are $\{v, v_{\mathrm{diff}}, a,
+\tau\}$; the dispersions $\{s_v, s_\tau\}$ are held at their fixed defaults
+($0$ on the link scale). The architecture hyperparameters (encoder/decoder
+depth and width, seed set, embedding dimensions, and crucially the
+\texttt{self\_attn\_padding\_mask} flag) must match the base checkpoint exactly;
+a mismatch on the padding-mask regime forces the network to re-adapt and
+squanders the transfer.
+
+%============================================================================
+\section{Fine-tuning schemes}
+%============================================================================
+
+Two schemes are implemented, differing only in the data mixture presented during
+fine-tuning.
+
+\paragraph{Scheme 1 --- LBA-only.}
+Each step samples only LBA data, lifts it to the global space, and tags it with
+\texttt{model\_id}~$=3$. This is the fastest route to LBA competence but exposes
+the shared backbone to LBA gradients exclusively, risking \emph{catastrophic
+forgetting} of DDM/RDM/CDM.
+
+\paragraph{Scheme 2 --- joint replay (default).}
+Each step samples jointly from all four families through the
+\texttt{ModelClass}, so DDM/RDM/CDM examples are continually replayed alongside
+LBA. This preserves the original families by construction, at the cost of
+slower LBA-specific progress per unit compute.
+
+\paragraph{Optimization.}
+Fine-tuning uses AdamW with a small learning rate ($1\times10^{-5}$, an order of
+magnitude below pretraining), a cosine-annealing schedule over the epoch budget,
+gradient-norm clipping at $5.0$, and light dropout ($0.05$). Nothing is frozen:
+the full backbone remains trainable in both schemes.
+
+%============================================================================
+\section{Considered alternative: parameter-efficient adaptation}
+%============================================================================
+
+We considered low-rank adaptation (LoRA) and its quantized variant (QLoRA) as
+alternative fine-tuning strategies. The conclusion is that \textbf{QLoRA is not
+relevant} here and \textbf{LoRA is relevant only after reframing}.
+
+\paragraph{QLoRA is inapplicable.}
+QLoRA's sole purpose is to fit a base model too large to hold in full precision
+by storing its frozen weights in low precision. CogFormer is small (a few
+million parameters); there is no memory wall, so quantization offers no benefit
+and only costs precision.
+
+\paragraph{LoRA, reframed as regularization rather than efficiency.}
+LoRA bundles two ideas: (i) freeze the base weights and learn only an additive
+delta, and (ii) constrain that delta to be low rank, $\Delta\rmW = \mathbf{B}
+\mathbf{A}$. At LBA's scale the efficiency motivation is void --- full
+fine-tuning is already cheap --- so the low-rank constraint stops being a
+cost-saver and becomes an \emph{inductive bias}: the hypothesis that the LBA
+adaptation lives in a low-dimensional subspace of weight space. Given the shared
+RDM parameter space, this hypothesis is plausible and would, if it holds, buy
+two things: regularization against overfitting on limited LBA coverage, and a
+\emph{toggleable} forgetting guarantee --- with the adapter disabled the network
+reproduces the pretrained checkpoint exactly, so DDM/RDM/CDM inference is
+preserved without replay.
+
+\paragraph{Caveat.}
+The low-rank delta acts on dense layers shared by every family's forward pass.
+The non-forgetting guarantee therefore holds only if the other families are run
+with the adapter disabled, or if the adapter is conditioned on
+\texttt{model\_id} (a conditional-LoRA design). This is genuine implementation
+work, not the one-line API of large-language-model tooling. A frozen-backbone,
+low-rank ``Scheme 3'' is thus recorded as a promising comparison against the
+current full-fine-tuning schemes, with its payoff riding entirely on how close
+LBA sits to the RDM subspace.
+
+%============================================================================
+\section{Validation and forgetting audit}
+%============================================================================
+
+A dedicated validation script evaluates a fine-tuned checkpoint on two axes:
+
+\begin{enumerate}
+  \item \textbf{LBA competence.} Posterior recovery for LBA under its new
+    embedding (\texttt{model\_id}~$=3$), across the benchmark design conditions
+    (intercept-only, fixed, regressed, interaction, mixed-predictor, and
+    held-out multi-factor designs).
+  \item \textbf{Forgetting audit.} Recovery for DDM, RDM, and CDM under their
+    \emph{original} embeddings ($0/1/2$), quantifying any degradation relative
+    to the base checkpoint. Scheme~1 is expected to show measurable forgetting
+    here; Scheme~2 is expected to hold.
+\end{enumerate}
+
+For each family $\times$ design condition the script emits saved posterior draws
+(\texttt{*\_pred.npz}), a metrics table (\texttt{*\_metrics.csv}), and the
+standard diagnostic panels: parameter recovery, simulation-based calibration
+coverage, ECDF calibration, and per-parameter metric summaries. Global
+parameters (e.g.\ $\pi$) are estimated jointly with the coefficient matrix but
+plotted and scored separately.
+
+%============================================================================
+\section{Summary}
+%============================================================================
+
+The experiment adds LBA to a trained three-family CogFormer by (i)~extending the
+model embedding table by one RDM-warm-started row, (ii)~loading all other weights
+unchanged, and (iii)~fine-tuning either on LBA alone (Scheme~1) or on the full
+four-family mixture (Scheme~2, default). LBA is a deliberately favorable first
+target: it shares RDM's parameter space and priors exactly while differing in
+likelihood geometry, so the required adaptation is small in parameter space but
+real in distributional shape. Success is measured jointly by LBA recovery and by
+the absence of forgetting on the original three families. A frozen-backbone
+low-rank adapter (LoRA-style, conditioned on \texttt{model\_id}) is identified as
+the natural next comparison; quantization (QLoRA) is ruled out as irrelevant at
+this scale.
+
+\end{document}

@@ -1,0 +1,188 @@
+%=============================================================================
+% Appendix section: model-class recovery and calibration figures.
+%
+% Usage (from a main document):
+%   \usepackage{graphicx}
+%   \usepackage{placeins}      % for \FloatBarrier
+%   \renewcommand{\mcfigdir}{<path to>/outputs/figures/model_class/cf}  % if needed
+%   \input{model_class_figures}
+%
+% The default \mcfigdir assumes the including file sits in outputs/docs/.
+% Compile model_class_figures_standalone.tex to preview this section alone.
+%=============================================================================
+
+% --- Figure root (override with \renewcommand before \input) -----------------
+\providecommand{\mcfigdir}{figures/cf}
+
+% --- Per-panel include macros ------------------------------------------------
+% #1 = family slug (ddm/rdm/cdm)   #2 = family label (DDM/RDM/CDM)
+% #3 = case slug                   #4 = case label
+\providecommand{\mcgraphic}[1]{%
+  \includegraphics[width=\linewidth,height=0.84\textheight,keepaspectratio]{#1}}
+
+\providecommand{\mcrec}[4]{%
+  \begin{figure}[htbp]
+    \centering
+    \mcgraphic{\mcfigdir/#1/#3/#1_#3_fm_recovery.pdf}
+    \caption[#2, #4: recovery]{\textbf{#2, #4 design --- coefficient recovery.}
+      Posterior mean (points) with 95\% credible intervals against the
+      data-generating value, one panel per active cell of the coefficient
+      matrix $\mathbf{B}$. Columns are intrinsic parameters, rows are design
+      columns (intercept, main effects, interactions), labeled by regressor and
+      category; the panel axes render this as \texttt{predictor|category}. Point
+      color encodes the row kind: intercept (purple), main effect (blue),
+      interaction (red).}
+    \label{fig:mc-#1-#3-rec}
+  \end{figure}}
+
+\providecommand{\mcecdf}[4]{%
+  \begin{figure}[htbp]
+    \centering
+    \mcgraphic{\mcfigdir/#1/#3/#1_#3_fm_ecdf.pdf}
+    \caption[#2, #4: ECDF calibration]{\textbf{#2, #4 design --- ECDF
+      calibration.} Rank-ECDF difference (empirical minus uniform) with
+      simultaneous 95\% confidence bands, on the same cell layout as the
+      corresponding recovery figure. A calibrated posterior stays inside the
+      band; excursions above/below indicate bias, and a systematically
+      shallow/steep curve indicates over-/under-dispersion.}
+    \label{fig:mc-#1-#3-ecdf}
+  \end{figure}}
+
+% --- Float placement: these panels are large ---------------------------------
+\renewcommand{\topfraction}{0.92}
+\renewcommand{\bottomfraction}{0.7}
+\renewcommand{\textfraction}{0.06}
+\renewcommand{\floatpagefraction}{0.6}
+
+%=============================================================================
+\section{Model-class diagnostics: recovery and calibration}
+\label{app:model-class-figures}
+%=============================================================================
+
+This appendix collects the per-condition diagnostic panels for the model-class
+CogFormer, which amortizes posterior inference jointly over three
+sequential-sampling families --- the drift-diffusion model (DDM), the racing
+diffusion model (RDM), and the circular diffusion model (CDM) --- within a
+shared generalized-linear design space. For every family we report the six
+validation design conditions listed in Table~\ref{tab:mc-conditions}, and for
+each condition two diagnostics: \emph{coefficient recovery} (posterior mean and
+95\% credible interval against ground truth) and \emph{ECDF calibration}
+(rank-based simulation-based calibration, plotted as the difference from the
+uniform diagonal with simultaneous 95\% bands). This gives
+$3 \times 6 \times 2 = 36$ panels, organized by family in
+Sections~\ref{sec:mc-ddm}--\ref{sec:mc-cdm}.
+
+All panels shown here cover the \emph{local} coefficient matrix only. Global
+nuisance parameters (the contamination probability $\pi$) are estimated jointly
+with the coefficients but are scored and plotted separately, and their panels
+are omitted from this appendix. Within a family, the set of active cells varies
+by condition: the ``fixed'' conditions hold the dispersion parameters
+$s_v, s_\tau$ at their defaults, so those columns disappear, and conditions
+without interaction terms drop the corresponding rows. Cell layout is therefore
+comparable across the two diagnostics of a given condition, but not across
+conditions. Panel axis labels read \texttt{predictor|category}; ``predictor''
+there denotes what the text calls a regressor.
+
+\begin{table}[htbp]
+  \centering
+  \small
+  \begin{tabular}{@{}llp{7.6cm}@{}}
+    \toprule
+    \# & Condition & Design \\
+    \midrule
+    1 & Intercept-only    & Intercept row only; all intrinsic parameters free,
+                            no regressors. \\
+    2 & Regressed         & Intercept plus two continuous main-effect
+                            regressors $u_1, u_2$; no interaction. \\
+    3 & Fixed-regressed   & As \emph{regressed}, but with the dispersion
+                            parameters $s_v, s_\tau$ held fixed. \\
+    4 & Interaction       & Intercept, both main effects, and the
+                            $u_1{:}u_2$ interaction, with hierarchical
+                            shedding of parameters across blocks. \\
+    5 & Fixed             & Intercept-only with $s_v, s_\tau$ held fixed. \\
+    6 & Mixed-predictor   & Interaction design with $u_1$ categorical (at the
+                            training-maximum number of categories) and $u_2$
+                            continuous, i.e.\ a categorical~$\times$~continuous
+                            interaction. \\
+    \bottomrule
+  \end{tabular}
+  \caption{The six validation design conditions, in the order used throughout
+    this appendix. Conditions 1--5 are the benchmark cases; condition~6 is the
+    mixed categorical/continuous stress case.}
+  \label{tab:mc-conditions}
+\end{table}
+
+\FloatBarrier
+\clearpage
+
+%-----------------------------------------------------------------------------
+\subsection{Drift-diffusion model (DDM)}
+\label{sec:mc-ddm}
+%-----------------------------------------------------------------------------
+
+Intrinsic parameters: drift rate $v$, threshold separation $a$, relative start
+point $z$, non-decision time $\tau$, and the dispersions $s_v, s_\tau$.
+
+\mcrec{ddm}{DDM}{intercept_only}{intercept-only}
+\mcecdf{ddm}{DDM}{intercept_only}{intercept-only}
+\mcrec{ddm}{DDM}{regressed}{regressed}
+\mcecdf{ddm}{DDM}{regressed}{regressed}
+\mcrec{ddm}{DDM}{fixed_regressed}{fixed-regressed}
+\mcecdf{ddm}{DDM}{fixed_regressed}{fixed-regressed}
+\mcrec{ddm}{DDM}{interaction}{interaction}
+\mcecdf{ddm}{DDM}{interaction}{interaction}
+\mcrec{ddm}{DDM}{fixed}{fixed}
+\mcecdf{ddm}{DDM}{fixed}{fixed}
+\mcrec{ddm}{DDM}{mixed_predictor}{mixed-predictor}
+\mcecdf{ddm}{DDM}{mixed_predictor}{mixed-predictor}
+
+\FloatBarrier
+\clearpage
+
+%-----------------------------------------------------------------------------
+\subsection{Racing diffusion model (RDM)}
+\label{sec:mc-rdm}
+%-----------------------------------------------------------------------------
+
+Intrinsic parameters: base drift $v$, drift advantage $v_{\mathrm{diff}}$ for
+the favored accumulator, threshold $a$, non-decision time $\tau$, and the
+dispersions $s_v, s_\tau$.
+
+\mcrec{rdm}{RDM}{intercept_only}{intercept-only}
+\mcecdf{rdm}{RDM}{intercept_only}{intercept-only}
+\mcrec{rdm}{RDM}{regressed}{regressed}
+\mcecdf{rdm}{RDM}{regressed}{regressed}
+\mcrec{rdm}{RDM}{fixed_regressed}{fixed-regressed}
+\mcecdf{rdm}{RDM}{fixed_regressed}{fixed-regressed}
+\mcrec{rdm}{RDM}{interaction}{interaction}
+\mcecdf{rdm}{RDM}{interaction}{interaction}
+\mcrec{rdm}{RDM}{fixed}{fixed}
+\mcecdf{rdm}{RDM}{fixed}{fixed}
+\mcrec{rdm}{RDM}{mixed_predictor}{mixed-predictor}
+\mcecdf{rdm}{RDM}{mixed_predictor}{mixed-predictor}
+
+\FloatBarrier
+\clearpage
+
+%-----------------------------------------------------------------------------
+\subsection{Circular diffusion model (CDM)}
+\label{sec:mc-cdm}
+%-----------------------------------------------------------------------------
+
+Intrinsic parameters: drift magnitude $v$, drift angle $v_\theta$, boundary
+radius $a$, non-decision time $\tau$, and the dispersions $s_v, s_\tau$.
+
+\mcrec{cdm}{CDM}{intercept_only}{intercept-only}
+\mcecdf{cdm}{CDM}{intercept_only}{intercept-only}
+\mcrec{cdm}{CDM}{regressed}{regressed}
+\mcecdf{cdm}{CDM}{regressed}{regressed}
+\mcrec{cdm}{CDM}{fixed_regressed}{fixed-regressed}
+\mcecdf{cdm}{CDM}{fixed_regressed}{fixed-regressed}
+\mcrec{cdm}{CDM}{interaction}{interaction}
+\mcecdf{cdm}{CDM}{interaction}{interaction}
+\mcrec{cdm}{CDM}{fixed}{fixed}
+\mcecdf{cdm}{CDM}{fixed}{fixed}
+\mcrec{cdm}{CDM}{mixed_predictor}{mixed-predictor}
+\mcecdf{cdm}{CDM}{mixed_predictor}{mixed-predictor}
+
+\FloatBarrier
