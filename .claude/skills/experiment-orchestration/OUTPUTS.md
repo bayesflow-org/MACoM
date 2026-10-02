@@ -113,23 +113,24 @@ all source trees ─► e{1,1a,2,3,4}_finalize ─► outputs/finals/experiment-
 ## Experiment 4 — encoder representation (aDDM vsvfixed) → `outputs/finals/experiment-4/`
 
 Finals here are an explicit 26-file allowlist (`KEEP_DEST` in `finalize_experiment_4.py`);
-everything else produced is excluded on purpose.
+everything else produced is excluded on purpose. Finals paths carry no variant or case
+name (no `vsvfixed`, no `intercept_only`): it is the only aDDM result. Working locations keep them.
 
 | Stage | Script (`experiment_4/…`) | Artifact | Working location | Finals |
 |---|---|---|---|---|
 | `e4_probe` (frozen) | `addm_bf_apply.py` train/validate | checkpoint: frozen encoder + FlowMatching head | `outputs/checkpoints/encoder_rep/bf/addm_vsvfixed/intercept_only/addm_encoder_rep_fm/model.keras` | — |
-| | | data: validation summaries + draws | `outputs/data/encoder_rep/addm_vsvfixed/intercept_only/addm_encoder_rep_data.npz` | `probe/vsvfixed/frozen/data.npz` |
-| | `addm_diagnostics.py --arm frozen` | figures + table: recovery, coverage, calibration_ecdf, z_score_contraction; bf_metrics | `outputs/data/encoder_rep/addm_vsvfixed/intercept_only/addm_intercept_only_<diag>.pdf`, `…_bf_metrics.csv` | `probe/vsvfixed/frozen/<diag>.pdf`, `bf_metrics.csv` |
+| | | data: validation summaries + draws | `outputs/data/encoder_rep/addm_vsvfixed/intercept_only/addm_encoder_rep_data.npz` | `probe/frozen/data.npz` |
+| | `addm_diagnostics.py --arm frozen` | figures + table: recovery, coverage, calibration_ecdf, z_score_contraction; bf_metrics | `outputs/data/encoder_rep/addm_vsvfixed/intercept_only/addm_intercept_only_<diag>.pdf`, `…_bf_metrics.csv` | `probe/frozen/<diag>.pdf`, `bf_metrics.csv` |
 | `e4_probe` (baseline) | `addm_bf_baseline.py` (checkpoint REUSED unless `FORCE`) | checkpoint: learned SetTransformer + FlowMatching | `outputs/checkpoints/encoder_rep/bf_baseline/addm_vsvfixed/intercept_only/item0_vsvfixed_e500/addm_baseline_fm/model.keras` | — |
-| | `addm_bf_baseline.py` validate + `addm_diagnostics.py --arm baseline` | data + figures + table | `outputs/figures/encoder_rep/addm_baseline_vsvfixed/intercept_only/item0_vsvfixed_e500/addm_baseline_{data.npz, intercept_only_<diag>.pdf, intercept_only_bf_metrics.csv}` | `probe/vsvfixed/baseline/{data.npz, <diag>.pdf, bf_metrics.csv}` |
-| `e4_compare` | `addm_arm_compare.py` | data + tables: shared validation set, C2ST arms/null, summary | `outputs/data/encoder_rep/addm_compare/intercept_only_vsvfixed/{shared_validation.npz, c2st_joint.npz, c2st_identified.npz, c2st_summary.csv, contraction_shared.csv, logprob_paired.csv}` | `probe/vsvfixed/compare/{shared_validation.npz, c2st_joint.npz, c2st_identified.npz, c2st_summary.csv}` |
-| | | figure: arm comparison | `outputs/figures/encoder_rep/addm_compare/intercept_only_vsvfixed/addm_arm_compare_intercept_only_vsvfixed.pdf` | `probe/vsvfixed/compare/intercept_only_vsvfixed.pdf` |
-| | `combined_recovery.py` | figure: frozen vs baseline recovery | `…/addm_compare/intercept_only_vsvfixed/addm_arm_compare_intercept_only_vsvfixed_recovery.pdf` | `probe/vsvfixed/compare/intercept_only_vsvfixed_recovery.pdf` |
+| | `addm_bf_baseline.py` validate + `addm_diagnostics.py --arm baseline` | data + figures + table | `outputs/figures/encoder_rep/addm_baseline_vsvfixed/intercept_only/item0_vsvfixed_e500/addm_baseline_{data.npz, intercept_only_<diag>.pdf, intercept_only_bf_metrics.csv}` | `probe/baseline/{data.npz, <diag>.pdf, bf_metrics.csv}` |
+| `e4_compare` | `addm_arm_compare.py` | data + tables: shared validation set, C2ST arms/null, summary | `outputs/data/encoder_rep/addm_compare/intercept_only_vsvfixed/{shared_validation.npz, c2st_joint.npz, c2st_identified.npz, c2st_summary.csv, contraction_shared.csv, logprob_paired.csv}` | `probe/compare/{shared_validation.npz, c2st_joint.npz, c2st_identified.npz, c2st_summary.csv}` |
+| | | figure: arm comparison | `outputs/figures/encoder_rep/addm_compare/intercept_only_vsvfixed/addm_arm_compare_intercept_only_vsvfixed.pdf` | `probe/compare/comparison.pdf` |
+| | `combined_recovery.py` | figure: frozen vs baseline recovery | `…/addm_compare/intercept_only_vsvfixed/addm_arm_compare_intercept_only_vsvfixed_recovery.pdf` | `probe/compare/recovery.pdf` |
 | `e4_representation` | `crossfamily_representation.py` (MC_CKPT + LBA_FT_CKPT) | figure + data: 5-family pooled MDS | `outputs/figures/encoder_rep/representation/crossfamily/app3_pooled_geometry.pdf`, `outputs/data/encoder_rep/representation/crossfamily/app3_summaries.npz` | `representation/crossfamily/…` |
 | | | data: RAW encoder inputs (reload with `--raw_data`) | `…/representation/crossfamily/app3_raw_data.npz` | — (too large) |
-| | `addm_representation.py` | figures + data: RSA/CKA frozen vs learned | `outputs/figures/encoder_rep/representation/intercept_only_vsvfixed/{rdm_rsa,gram_cka,rsa_vs_null,cka_vs_null}.pdf`, `outputs/data/encoder_rep/representation/intercept_only_vsvfixed/summaries.npz` | `representation/intercept_only_vsvfixed/…` |
+| | `addm_representation.py` | figures + data: RSA/CKA frozen vs learned | `outputs/figures/encoder_rep/representation/intercept_only_vsvfixed/{rdm_rsa,gram_cka,rsa_vs_null,cka_vs_null}.pdf`, `outputs/data/encoder_rep/representation/intercept_only_vsvfixed/summaries.npz` | `representation/frozen_vs_learned/…` |
 | | | data: RAW encoder inputs (reload with `--raw_data`) | `…/intercept_only_vsvfixed/raw_data.npz` | — (too large) |
-| | `combined_panel.py` | figure: combined page (geometry + representation) | `…/addm_compare/intercept_only_vsvfixed/addm_arm_compare_intercept_only_vsvfixed_panel.pdf` | `probe/vsvfixed/compare/intercept_only_vsvfixed_panel.pdf` |
+| | `combined_panel.py` | figure: combined page (geometry + representation) | `…/addm_compare/intercept_only_vsvfixed/addm_arm_compare_intercept_only_vsvfixed_panel.pdf` | `probe/compare/panel.pdf` |
 | `e4_finalize` | `finalize_experiment_4.py` | tables | — | `MANIFEST.csv`, `README.md` |
 
 ## Never copied to finals (but needed or useful)

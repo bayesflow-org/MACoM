@@ -376,7 +376,129 @@ def write_tables():
     print(f"[saved] {TABLES_OUT} (3 tables)")
 
 
+# ── main-text figure ─────────────────────────────────────────────────────────
+# Top: zero-shot and fine-tuned LBA recovery overlaid on one grid (overlay_recovery.py),
+# interaction design. Bottom: the per-coefficient metric deltas for the same design, all
+# four families. The interaction design is where fine-tuning shows most for the LBA, and
+# also where the trained families' posteriors move most (per-dataset C2ST), so the
+# caption states both: the metric panel alone would read as "no forgetting".
+# Every number comes from finals CSVs; only the overlay PDF is produced on the GPU host.
+MAIN_OUT = FINALS / "main_figure.tex"
+DETAILS_OUT = FINALS / "main_figure_details.tex"
+DETAILS_LABEL = "app:exp3-main-details"
+DELTA_CSV = FINALS / "compare" / "delta_metrics.csv"
+FORGET_CSV = FINALS / "c2st" / "forgetting_c2st_summary.csv"
+MAIN_CASE = "interaction"
+MAIN_PATHS = (f"compare/lba/{MAIN_CASE}_overlay_recovery.pdf",
+              f"compare/delta_metrics_{MAIN_CASE}.pdf")
+
+MAIN = (
+    r"\textbf{{Transfer to a held-out model family.}} Top: parameter recovery for the LBA, "
+    r"which was not among the training families, by the original CogFormer network without "
+    r"any LBA training (zero-shot, grey) and by the same network after fine-tuning on all four "
+    r"families (orange), on the same {N} test datasets of the {CASE} design: posterior means "
+    r"against ground truth with 90\% credible intervals, one $r$ per network. Columns are the "
+    r"parameters and rows the coefficients (intercept, slopes on $u_1$ and $u_2$, and on their "
+    r"product); N/A marks coefficients the design does not contain. Bottom: change in each "
+    r"coefficient's NRMSE (top row) and calibration error (bottom row) with fine-tuning, on the "
+    r"same design: for the LBA, fine-tuned minus zero-shot; for DDM, RDM and CDM, fine-tuned "
+    r"minus the original network on their own test datasets. Negative values (blue) are "
+    r"improvements. Each column has its own $x$-axis scale: the LBA's largest change in "
+    r"magnitude is {L_NRMSE} in NRMSE and {L_CAL} in calibration error, the trained families' "
+    r"{O_NRMSE} and {O_CAL}. Details in Appendix~\ref{{{DETAILS}}}."
+)
+DETAILS = (
+    r"The original network in Figure~\ref{{fig:exp3-main}} was trained on DDM, RDM and CDM "
+    r"only. Zero-shot, the LBA is run under the RDM's model embedding, whose parameters ($v$, "
+    r"$v_{{\mathrm{{diff}}}}$, $a$, $\tau$, $s_v$, $s_\tau$, $\pi$) it shares, with the LBA's "
+    r"start-point range fixed at $A = {A}$ so that $a$ is the mean distance an accumulator "
+    r"travels to its threshold, the quantity the RDM's $a$ measures. Fine-tuning continues "
+    r"training for {EP} epochs on all four families, drawn with equal probability, with the LBA "
+    r"under its own model embedding initialised from the RDM's. In the {CASE} design, {DESIGN} "
+    r"Both networks are evaluated on the same {N} benchmark test datasets ({T} trials, two "
+    r"stimulus-coded alternatives) with {D} posterior draws per dataset, and each cell of the "
+    r"top panel draws both on one frame; $\pi$ is estimated but not shown. NRMSE and "
+    r"calibration error are defined as in the bottom panel of Figure~\ref{{{REF}}}. "
+    r"With fine-tuning, the LBA's median NRMSE over coefficients falls from {NR0} to {NR1} "
+    r"({NR_IMP} of {NC} coefficients improve) and its median calibration error from {CE0} to "
+    r"{CE1} ({CE_IMP} of {NC}). "
+    r"The trained families' metrics barely move, but their posteriors do: classifier "
+    r"two-sample tests per dataset, against the draw-split null floor, give a median excess of "
+    r"{F_LO} to {F_HI} on this design, with {S_LO}--{S_HI}\% of datasets above 0.10 "
+    r"(Table~\ref{{tab:app3-forgetting-c2st}}); on the intercept-only design the excess is "
+    r"{I_LO} to {I_HI}, i.e.\ indistinguishable. The two arms' separate diagnostics for this "
+    r"design are in Figures~\ref{{{ZS}}} and~\ref{{{FT}}}; the metric changes for the other "
+    r"designs in Figures~\ref{{{DM0}}}--\ref{{{DM1}}}."
+)
+
+
+def main_figure(require_figures=True):
+    import pandas as pd
+    d = pd.read_csv(DELTA_CSV, index_col=0)
+    lba = d[(d.model == "LBA") & (d.condition == MAIN_CASE)]
+    oth = d[(d.model != "LBA") & (d.condition == MAIN_CASE)]
+    if lba.empty or set(oth.model) != {"DDM", "RDM", "CDM"}:
+        raise SystemExit(f"{DELTA_CSV}: missing {MAIN_CASE} rows")
+    nr0, nr1 = lba["NRMSE (zero-shot)"], lba["NRMSE (fine-tuned)"]
+    ce0, ce1 = lba["Calibration Error (zero-shot)"], lba["Calibration Error (fine-tuned)"]
+    dl = lambda m: lba[f"{m} (Δ fine-tuned−zero-shot)"].abs().max()
+    do = lambda m: oth[f"{m} (Δ fine-tuned−base)"].abs().max()
+
+    fg = pd.read_csv(FORGET_CSV)
+    fg = fg[fg.family.isin(["DDM", "RDM", "CDM"])]
+    here, io = fg[fg.scenario == MAIN_CASE], fg[fg.scenario == "intercept_only"]
+    if io.perds_median_excess.max() > 0.02:
+        raise SystemExit(f"intercept-only forgetting excess up to {io.perds_median_excess.max():.3f}: "
+                         "the details' 'indistinguishable' no longer holds")
+
+    f3 = lambda x: f"{x:.3f}"
+    sg = lambda x: f"${x:+.3f}$"
+    vals = dict(N=N_DATASETS, T=N_TRIALS, D=N_DRAWS, A=FIXED_A, EP=FT_EPOCHS, REF=REF_ENC,
+                CASE=r"\emph{" + CASE_NAMES[MAIN_CASE] + "}",
+                DESIGN=design_sentence("lba", MAIN_CASE).replace("coefficients shown",
+                                                                 "coefficients in all"),
+                NC=len(lba), NR0=f3(nr0.median()), NR1=f3(nr1.median()),
+                NR_IMP=int((nr1 < nr0).sum()), CE0=f3(ce0.median()), CE1=f3(ce1.median()),
+                CE_IMP=int((ce1 < ce0).sum()),
+                L_NRMSE=f3(dl("NRMSE")), L_CAL=f3(dl("Calibration Error")),
+                O_NRMSE=f3(do("NRMSE")), O_CAL=f3(do("Calibration Error")),
+                F_LO=sg(here.perds_median_excess.min()), F_HI=sg(here.perds_median_excess.max()),
+                S_LO=f"{100 * here.perds_frac_excess_gt_10.min():.0f}",
+                S_HI=f"{100 * here.perds_frac_excess_gt_10.max():.0f}",
+                I_LO=sg(io.perds_median_excess.min()), I_HI=sg(io.perds_median_excess.max()),
+                ZS=label("zeroshot", "lba", MAIN_CASE), FT=label("finetuned", "lba", MAIN_CASE),
+                DM0="fig:app3-delta-metrics-intercept-only",
+                DM1="fig:app3-delta-metrics-fixed-regressed", DETAILS=DETAILS_LABEL)
+
+    missing = [p for p in MAIN_PATHS if not (FINALS / p).exists()]
+    if missing and require_figures:
+        raise SystemExit(f"missing {missing} -- run e3_compare (overlay_recovery) and e3_finalize")
+    head = "% Generated by `python -m experiments.experiment_3.appendix_captions` -- do not edit by hand."
+    if missing:
+        head += f"\n% DRAFT: {', '.join(missing)} not yet in the snapshot. Do not commit."
+    MAIN_OUT.write_text("\n".join([
+        head,
+        "% Main-text figure for Experiment 3. Needs \\usepackage{graphicx}; paths are relative to",
+        "% outputs/finals/experiment-3/.",
+        r"\begin{figure}[tbp]",
+        r"  \centering",
+        rf"  \includegraphics[width=\textwidth]{{{MAIN_PATHS[0]}}}\par\vspace{{1ex}}",
+        rf"  \includegraphics[width=\textwidth]{{{MAIN_PATHS[1]}}}",
+        rf"  \caption{{{MAIN.format(**vals)}}}",
+        r"  \label{fig:exp3-main}",
+        r"\end{figure}",
+        ""]))
+    DETAILS_OUT.write_text("\n".join([
+        head,
+        "% Methods/appendix text for fig:exp3-main (main_figure.tex). Place it under a heading",
+        f"% carrying the label, e.g. \\subsection{{Transfer figure: details}}\\label{{{DETAILS_LABEL}}}",
+        DETAILS.format(**vals),
+        ""]))
+    print(f"[saved] {MAIN_OUT}, {DETAILS_OUT}" + (" (DRAFT)" if missing else ""))
+
+
 def main():
+    main_figure()
     blocks = ["% Generated by `python -m experiments.experiment_3.appendix_captions` -- do not edit by hand.",
               "% Needs \\usepackage{graphicx,subcaption}; paths are relative to outputs/finals/experiment-3/.",
               f"% Panel encodings refer to {REF_ENC} (experiment-1a/captions.tex), the mixed-predictor",

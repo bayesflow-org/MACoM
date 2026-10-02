@@ -613,7 +613,14 @@ stage_e3_compare() {
         "$PY" -m experiments.experiment_3.calibration_plane \
             --paired_root "$LBA_PAIRED" --scenarios "${GAP_CASES[@]}" \
             --out "${LBA_PAIRED}/compare/lba_calibration_plane.pdf" \
-            --csv_out "${LBA_PAIRED}/compare/lba_calibration_plane.csv"
+            --csv_out "${LBA_PAIRED}/compare/lba_calibration_plane.csv" || return 1
+    # Main-text figure: zero-shot and finetuned on one grid, interaction design.
+    run "LBA recovery overlay (zero-shot + finetuned, interaction)" -- \
+        "$PY" -m experiments.experiment_3.overlay_recovery \
+            --zero_shot_dir "${LBA_PAIRED}/zeroshot/A${LBA_FIXED_A}" \
+            --finetuned_dir "${LBA_PAIRED}/finetuned" \
+            --outdir "${LBA_PAIRED}/compare" --scenario interaction \
+            --max_num_regressors "$MC_MAX_REG"
 }
 
 # LBA AMORTIZATION GAP -- the held-out family's counterpart of experiment 1a. LBA has

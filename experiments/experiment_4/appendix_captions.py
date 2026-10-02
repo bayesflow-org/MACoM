@@ -2,7 +2,7 @@
 
 Writes, under outputs/finals/experiment-4/:
 
-- main_figure.tex: the combined panel (probe/vsvfixed/compare/intercept_only_vsvfixed_panel.pdf):
+- main_figure.tex: the combined panel (probe/compare/panel.pdf):
   recovery of both arms, the pooled five-family MDS geometry before/after the LBA
   fine-tune, and the CKA Gram block; short caption;
 - main_figure_details.tex: the methods/appendix paragraph that caption refers to;
@@ -41,9 +41,9 @@ from experiments import shared_config
 from experiments.experiment_4.addm_bf_apply import S_V_FIXED, V_FIXED
 
 FINALS = Path("outputs/finals/experiment-4")
-PROBE = FINALS / "probe/vsvfixed"
+PROBE = FINALS / "probe"
 REP = FINALS / "representation"
-PANEL = "probe/vsvfixed/compare/intercept_only_vsvfixed_panel.pdf"
+PANEL = "probe/compare/panel.pdf"
 ARMS = {"baseline": "learned SetTransformer summary (baseline arm)",
         "frozen": "frozen CogFormer encoder (frozen arm)"}
 TEX = {"v_diff": r"$v_{\mathrm{diff}}$", "omega": r"$\omega$", "a": "$a$", "tau": r"$\tau$",
@@ -136,7 +136,7 @@ def shared(names):
 
 
 def representation():
-    r = np.load(REP / "intercept_only_vsvfixed/summaries.npz", allow_pickle=True)
+    r = np.load(REP / "frozen_vs_learned/summaries.npz", allow_pickle=True)
     fro, lea = r["frozen"], r["learned"]
     nr, nc = r["null_rsa"], r["null_cka"]
     cka = float(r["cka"])
@@ -200,7 +200,7 @@ DETAILS = (
     r"\emph{{Geometry.}} Each family is simulated with an intercept-only design and 500 "
     r"trials: {Cg} parameter draws, each simulated {Rg} times independently, encoded by the "
     r"original and by the LBA-fine-tuned encoder (Experiment~3, {FT} epochs on all four "
-    r"families) on the identical datasets. The aDDM is the five-parameter variant above and "
+    r"families) on the identical datasets. The aDDM is the same five-parameter model as in the probe, and "
     r"the LBA has its start-point range fixed at $A = {A}$. A point is one parameter draw's "
     r"summary averaged over its repeats; dimensions are standardised over the pooled set of "
     r"both encoders, and a single metric MDS is fitted to all points and then split by "
@@ -286,7 +286,7 @@ def metric_list(m):
 
 
 def stacked(arm, caption):
-    d = f"probe/vsvfixed/{arm}"
+    d = f"probe/{arm}"
     parts = (("recovery", "Recovery"), ("calibration_ecdf", "Calibration (ECDF)"),
              ("coverage", "Coverage"), ("z_score_contraction", r"$z$-score vs contraction"))
     blocks = [r"\begin{figure}[p]", r"  \centering"]
@@ -306,7 +306,7 @@ def single(path, caption, lab):
 
 
 def rsa_figure(caption):
-    d = "representation/intercept_only_vsvfixed"
+    d = "representation/frozen_vs_learned"
     return "\n".join([
         r"\begin{figure}[p]", r"  \centering",
         r"  \begin{subfigure}{\textwidth}\centering",
@@ -327,10 +327,10 @@ def main():
                    help="Render with ?? for values whose source file is absent (review only).")
     args = p.parse_args()
 
-    needed = [PANEL, "probe/vsvfixed/compare/intercept_only_vsvfixed.pdf"] \
-        + [f"probe/vsvfixed/{a}/{f}.pdf" for a in ARMS
+    needed = [PANEL, "probe/compare/comparison.pdf"] \
+        + [f"probe/{a}/{f}.pdf" for a in ARMS
            for f in ("recovery", "calibration_ecdf", "coverage", "z_score_contraction")] \
-        + [f"representation/intercept_only_vsvfixed/{f}.pdf"
+        + [f"representation/frozen_vs_learned/{f}.pdf"
            for f in ("rdm_rsa", "rsa_vs_null", "cka_vs_null")]
     for f in needed:
         if not (FINALS / f).exists():
@@ -345,11 +345,11 @@ def main():
              FT=int(shared_config.get("LBA_FT_EPOCHS")), A=shared_config.get("LBA_FIXED_A"),
              om_b=f2(m["baseline"].loc["omega", "contraction"]),
              om_f=f2(m["frozen"].loc["omega", "contraction"]), DETAILS=DETAILS_LABEL)
-    v.load(["Nv", "Dv"], per_arm_counts, "probe/vsvfixed/<arm>/data.npz")
+    v.load(["Nv", "Dv"], per_arm_counts, "probe/<arm>/data.npz")
     v.load(["Ns", "Ds", "ident_n", "dropped", "lp_f", "lp_b", "lp_d", "lp_se", "lp_z",
-            "lp_share"], lambda: shared(names), "probe/vsvfixed/compare/shared_validation.npz")
+            "lp_share"], lambda: shared(names), "probe/compare/shared_validation.npz")
     v.load(["C", "R", "df", "dl", "rsa", "cka", "n_null", "nr_m", "nr_s", "nc_m", "nc_s",
-            "cka_z"], representation, "representation/intercept_only_vsvfixed/summaries.npz")
+            "cka_z"], representation, "representation/frozen_vs_learned/summaries.npz")
     v.load(["Cg", "Rg"], crossfamily, "representation/crossfamily/app3_summaries.npz")
     if v["ident_n"] != MISSING and v["ident_n"] != v["identified_dims"]:
         raise SystemExit(f"{v['ident_n']} identified cells recomputed, c2st_summary.csv has "
@@ -379,7 +379,7 @@ def main():
                                                    METRICS=metric_list(m["baseline"]), **v)), ""]
     blocks += [stacked("frozen", ARM_SHORT.format(ARM=ARMS["frozen"],
                                                   METRICS=metric_list(m["frozen"]), **v)), ""]
-    blocks += [single("probe/vsvfixed/compare/intercept_only_vsvfixed.pdf",
+    blocks += [single("probe/compare/comparison.pdf",
                       COMPARE.format(**v), "fig:app4-compare"), ""]
     blocks += [rsa_figure(RSA.format(**v)), ""]
     (FINALS / "captions.tex").write_text("\n".join(blocks))

@@ -31,13 +31,22 @@ FIG = Path("outputs/figures/encoder_rep")
 # FINAL SCOPE (2026-09-27): the 5-parameter vsvfixed aDDM (v and s_v pinned) and the
 # 5-family pooled geometry. The other variants are out of the paper.
 # variant -> (frozen data dir, frozen fig dir, baseline fig dir, compare key)
+#
+# The snapshot carries NO variant or case in its paths (2026-10-02): with one variant
+# left, "vsvfixed" / "intercept_only" read as one condition among several. The SOURCE
+# trees keep those names; only the destinations below drop them.
 VARIANTS = {
     "vsvfixed": ("addm_vsvfixed/intercept_only", "addm_vsvfixed/intercept_only",
                  "addm_baseline_vsvfixed/intercept_only/item0_vsvfixed_e500",
                  "intercept_only_vsvfixed"),
 }
 SUPERSEDED = []
-REP_DIRS = ["crossfamily", "intercept_only_vsvfixed"]
+# representation source dir -> snapshot dir
+REP_DIRS = {"crossfamily": "crossfamily", "intercept_only_vsvfixed": "frozen_vs_learned"}
+# compare/ figures, after tidy(): named for what they show, not for the variant
+COMPARE_NAMES = {"intercept_only_vsvfixed.pdf": "comparison.pdf",
+                 "intercept_only_vsvfixed_panel.pdf": "panel.pdf",
+                 "intercept_only_vsvfixed_recovery.pdf": "recovery.pdf"}
 KEEP_EXT = {".pdf", ".csv", ".npz"}
 
 # ALLOWLIST of destinations, relative to FINALS. The source trees also hold outputs
@@ -49,14 +58,13 @@ KEEP_EXT = {".pdf", ".csv", ".npz"}
 _PROBE = ["bf_metrics.csv", "calibration_ecdf.pdf", "coverage.pdf", "data.npz",
           "recovery.pdf", "z_score_contraction.pdf"]
 KEEP_DEST = (
-    {f"probe/vsvfixed/{arm}/{f}" for arm in ("frozen", "baseline") for f in _PROBE}
-    | {f"probe/vsvfixed/compare/{f}" for f in (
+    {f"probe/{arm}/{f}" for arm in ("frozen", "baseline") for f in _PROBE}
+    | {f"probe/compare/{f}" for f in (
         "c2st_identified.npz", "c2st_joint.npz", "c2st_summary.csv",
-        "shared_validation.npz", "intercept_only_vsvfixed.pdf",
-        "intercept_only_vsvfixed_panel.pdf", "intercept_only_vsvfixed_recovery.pdf")}
+        "shared_validation.npz", "comparison.pdf", "panel.pdf", "recovery.pdf")}
     | {"representation/crossfamily/app3_pooled_geometry.pdf",
        "representation/crossfamily/app3_summaries.npz"}
-    | {f"representation/intercept_only_vsvfixed/{f}" for f in (
+    | {f"representation/frozen_vs_learned/{f}" for f in (
         "cka_vs_null.pdf", "gram_cka.pdf", "rdm_rsa.pdf", "rsa_vs_null.pdf",
         "summaries.npz")}
 )
@@ -83,7 +91,7 @@ def plan():
             for src in sorted(src_dir.iterdir()):
                 if src.suffix not in KEEP_EXT:
                     skipped.append(src); continue
-                dest = FINALS / "probe" / var / dest_sub / tidy(src.name, var)
+                dest = FINALS / "probe" / dest_sub / tidy(src.name, var)
                 jobs.append((src, dest))
         for src_dir in (DATA / "addm_compare" / ckey, FIG / "addm_compare" / ckey):
             if not src_dir.is_dir():
@@ -91,9 +99,10 @@ def plan():
             for src in sorted(src_dir.iterdir()):
                 if src.suffix not in KEEP_EXT:
                     skipped.append(src); continue
-                jobs.append((src, FINALS / "probe" / var / "compare" / tidy(src.name, var)))
+                name = tidy(src.name, var)
+                jobs.append((src, FINALS / "probe" / "compare" / COMPARE_NAMES.get(name, name)))
 
-    for d in REP_DIRS:
+    for d, dest_dir in REP_DIRS.items():
         for root, sub in ((DATA / "representation" / d, None),
                           (FIG / "representation" / d, None)):
             if not root.is_dir():
@@ -101,7 +110,7 @@ def plan():
             for src in sorted(root.iterdir()):
                 if src.suffix not in KEEP_EXT:
                     skipped.append(src); continue
-                jobs.append((src, FINALS / "representation" / d / tidy(src.name, d)))
+                jobs.append((src, FINALS / "representation" / dest_dir / tidy(src.name, d)))
 
     kept_jobs = []
     for src, dest in jobs:
@@ -164,7 +173,7 @@ Assembled {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%SZ')} by
 
 ## Scope
 
-The **5-parameter aDDM** (`vsvfixed`: v and s_v pinned at 1.0375 and 0.3133, their
+The **5-parameter aDDM** (v and s_v pinned at 1.0375 and 0.3133, their
 prior medians; free: v_diff, omega, a, tau, s_tau) and the **5-family pooled geometry**
 (DDM, RDM, CDM trained; aDDM, LBA held out), before and after LBA finetuning.
 
@@ -172,11 +181,11 @@ prior medians; free: v_diff, omega, a, tau, s_tau) and the **5-family pooled geo
 
 | folder | level | what |
 |---|---|---|
-| `probe/vsvfixed/frozen` | posterior | frozen model-class encoder + FlowMatching head |
-| `probe/vsvfixed/baseline` | posterior | learned SetTransformer summary + FlowMatching |
-| `probe/vsvfixed/compare` | posterior | PAIRED shared-validation C2ST and log-density; combined recovery and panel |
+| `probe/frozen` | posterior | frozen model-class encoder + FlowMatching head |
+| `probe/baseline` | posterior | learned SetTransformer summary + FlowMatching |
+| `probe/compare` | posterior | PAIRED shared-validation C2ST and log-density (`comparison.pdf`); both arms' recovery (`recovery.pdf`); the main-text panel (`panel.pdf`) |
 | `main_figure.tex`, `main_figure_details.tex`, `captions.tex` (root) | — | main-text figure (the combined panel) + short caption, its methods/appendix paragraph, and the appendix figures (each arm's diagnostics, the paired comparison, RSA) — generated by `python -m experiments.experiment_4.appendix_captions`; no manifest row |
-| `representation/intercept_only_vsvfixed` | representation | frozen vs learned summary: RSA (crossnobis) + CKA against a dimensionality-matched null |
+| `representation/frozen_vs_learned` | representation | frozen vs learned summary: RSA (crossnobis) + CKA against a dimensionality-matched null |
 | `representation/crossfamily` | representation | pooled MDS geometry of all five families, original vs LBA-finetuned encoder |
 
 ## Reading the numbers

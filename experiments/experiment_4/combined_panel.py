@@ -132,7 +132,7 @@ def parse_args():
                            "/app3_summaries.npz")
     p.add_argument("--rep_npz", type=str,
                    default="outputs/finals/experiment-4/representation"
-                           "/intercept_only_vsvfixed/summaries.npz")
+                           "/frozen_vs_learned/summaries.npz")
     p.add_argument("--out", type=str,
                    default=str(FIG / "addm_compare/intercept_only_vsvfixed"
                                      "/addm_arm_compare_intercept_only_vsvfixed"
