@@ -35,6 +35,9 @@
 #   NUM_SIM_WORKERS=N  parallel simulation workers
 #   DRY_EPOCHS=N       truncate training stages (smoke test)
 #   BF_FAMILIES="a b"  limit e1a_bf to these families (split baselines across hosts)
+#   E2_FAMILIES="a b"  limit e2_validate to these families (split it across GPUs; "ddm"
+#                      covers both DDM runs, plain and --fix_s_v). The stage marker is the
+#                      CDM file, so a split run is complete only when every subset is done.
 #   NPROC=N            train e1_train data-parallel on N GPUs (torchrun). The total batch
 #                      stays MC_TRAIN_BATCH (N x MC_TRAIN_BATCH/N per card), so the
 #                      simulation budget is unchanged. Pick cards with CUDA_VISIBLE_DEVICES.
@@ -494,8 +497,15 @@ stage_e2_validate() {
     need "${MC_CKPT}.done" "stage e1_train" || return 1
     need "./data" "the empirical datasets (not produced by this pipeline)" || return 1
     local spec fam flag
+    # E2_FAMILIES="ddm" / "rdm cdm" restricts the stage to a subset, to split its ~12 h
+    # across GPUs (each subset in its own orchestrator run, pinned with CUDA_VISIBLE_DEVICES).
+    local fams=(${E2_FAMILIES:-${FAMILIES[*]}})
+    for fam in "${fams[@]}"; do
+        [[ " ${FAMILIES[*]} " == *" $fam "* ]] || { echo "unknown E2 family '$fam' (expected: ${FAMILIES[*]})" >&2; return 1; }
+    done
     for spec in "ddm:" "ddm:--fix_s_v" "rdm:" "cdm:"; do
         fam="${spec%%:*}"; flag="${spec#*:}"
+        [[ " ${fams[*]} " == *" $fam "* ]] || continue
         run "real-data-design validation — ${fam} ${flag}" -- \
             "$PY" -m experiments.experiment_2.realdata_validate \
                 --model "$fam" $flag \

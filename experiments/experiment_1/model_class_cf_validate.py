@@ -98,6 +98,8 @@ def parse_args():
     p.add_argument("--decoder_num_heads", type=int, default=8)
     p.add_argument("--num_seeds", type=int, default=32)
     p.add_argument("--seed_dim", type=int, default=128)
+    p.add_argument("--encoder_embed_dim", type=int, default=64,
+                   help="Per-trial embedding width; must match the training run (load is strict).")
     p.add_argument("--proj_dim", type=int, default=256)
     p.add_argument("--dropout", type=float, default=0.0)
     p.add_argument("--layer_dropout", type=float, default=0.0)
@@ -363,6 +365,7 @@ def main():
         decoder_num_heads=args.decoder_num_heads,
         num_seeds=args.num_seeds,
         seed_dim=args.seed_dim,
+        encoder_embed_dim=args.encoder_embed_dim,
         proj_dim=args.proj_dim,
         dropout=args.dropout,
         layer_dropout=args.layer_dropout,
