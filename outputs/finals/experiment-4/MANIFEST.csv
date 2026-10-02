@@ -9,7 +9,9 @@ probe/compare/c2st_identified.npz,outputs/data/encoder_rep/addm_compare/intercep
 probe/compare/c2st_joint.npz,outputs/data/encoder_rep/addm_compare/intercept_only_vsvfixed/c2st_joint.npz,5540,2026-10-01 15:46:00Z
 probe/compare/c2st_summary.csv,outputs/data/encoder_rep/addm_compare/intercept_only_vsvfixed/c2st_summary.csv,158,2026-10-01 15:46:04Z
 probe/compare/comparison.pdf,outputs/figures/encoder_rep/addm_compare/intercept_only_vsvfixed/addm_arm_compare_intercept_only_vsvfixed.pdf,41463,2026-10-01 15:46:05Z
-probe/compare/panel.pdf,outputs/figures/encoder_rep/addm_compare/intercept_only_vsvfixed/addm_arm_compare_intercept_only_vsvfixed_panel.pdf,686408,2026-10-01 17:30:45Z
+probe/compare/panel.pdf,outputs/figures/encoder_rep/addm_compare/intercept_only_vsvfixed/addm_arm_compare_intercept_only_vsvfixed_panel.pdf,686499,2026-10-02 19:02:23Z
+probe/compare/panel_recovery.pdf,outputs/figures/encoder_rep/addm_compare/intercept_only_vsvfixed/addm_arm_compare_intercept_only_vsvfixed_panel_recovery.pdf,205834,2026-10-02 19:02:23Z
+probe/compare/panel_representation.pdf,outputs/figures/encoder_rep/addm_compare/intercept_only_vsvfixed/addm_arm_compare_intercept_only_vsvfixed_panel_representation.pdf,491389,2026-10-02 19:03:06Z
 probe/compare/recovery.pdf,outputs/figures/encoder_rep/addm_compare/intercept_only_vsvfixed/addm_arm_compare_intercept_only_vsvfixed_recovery.pdf,205852,2026-10-01 15:46:10Z
 probe/compare/shared_validation.npz,outputs/data/encoder_rep/addm_compare/intercept_only_vsvfixed/shared_validation.npz,20953558,2026-10-01 15:46:04Z
 probe/frozen/bf_metrics.csv,outputs/data/encoder_rep/addm_vsvfixed/intercept_only/addm_intercept_only_bf_metrics.csv,165,2026-10-01 13:36:00Z

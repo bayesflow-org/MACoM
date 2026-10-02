@@ -19,6 +19,10 @@ mean hand-tuning two width splits against each other until they happened to agre
 Instead the common side S is solved from the width budget (`_bottom_layout`), every
 axes is positioned in inches, and the blocks are handed axes they did not create.
 
+Besides the combined page, the two rows are also written on their own
+(``<out>_recovery.pdf``, ``<out>_representation.pdf``) for layouts that place them
+apart; they are drawn by the same code at the same width, so their scale matches.
+
 Type sizes are shared by all three bottom panels (``FS_BOTTOM``) for the same reason:
 with the panels equal, different title sizes across them read as a hierarchy that
 isn't there.
@@ -170,47 +174,69 @@ def main():
     # contents need -- no slack to trim afterwards.
     S, xs = _bottom_layout(a.fig_width)
     h_bottom = TOP_PAD + S + FOOT_PAD + FOOTER + BOT_PAD
+    out = Path(a.out)
+    out.parent.mkdir(parents=True, exist_ok=True)
+
     fig = plt.figure(figsize=(a.fig_width, H_TOP + h_bottom))
     top, bottom = fig.subfigures(2, 1, height_ratios=[H_TOP, h_bottom])
+    _draw_top(top, arms, names, rec)
+    _draw_bottom(bottom, summ, (fro, lea, cka_obs), a.seed, a.fig_width, h_bottom, S, xs)
+    _row_divider(fig, top, bottom)
+    _save(fig, out)
 
-    axes = top.subplots(len(ROWS), len(names))
+    # The same two blocks as separate files, for a page layout that places them apart
+    # (e.g. with a diagram between or beside them). Each is drawn by the same code at
+    # the same width, so at equal \includegraphics width they match the combined
+    # panel's scale exactly.
+    fig = plt.figure(figsize=(a.fig_width, H_TOP))
+    _draw_top(fig, arms, names, rec)
+    _save(fig, out.with_name(out.stem + "_recovery.pdf"))
+    fig = plt.figure(figsize=(a.fig_width, h_bottom))
+    _draw_bottom(fig, summ, (fro, lea, cka_obs), a.seed, a.fig_width, h_bottom, S, xs)
+    _save(fig, out.with_name(out.stem + "_representation.pdf"))
+
+
+def _save(fig, path):
+    w, h = fig.get_size_inches()
+    fig.savefig(path, bbox_inches="tight")
+    plt.close(fig)
+    logging.info(f"[saved] {path} ({w:.2f} x {h:.2f} in)")
+
+
+def _draw_top(target, arms, names, rec):
+    """Recovery block, both arms, into a Figure or SubFigure."""
+    axes = target.subplots(len(ROWS), len(names))
     draw_grid(axes, arms, names, rec)
-    top.subplots_adjust(**ADJ_REC)
+    target.subplots_adjust(**ADJ_REC)
 
-    W, Hb = a.fig_width, h_bottom
+
+def _draw_bottom(target, summ, gram, seed, W, Hb, S, xs):
+    """Geometry + CKA block into a Figure or SubFigure of size W x Hb inches."""
+    fro, lea, cka_obs = gram
     y_panel = FOOTER + FOOT_PAD + BOT_PAD                # bottom edge of every panel
     y_foot = BOT_PAD + FOOTER                            # top of colorbar / legend
 
-    gax = np.array([bottom.add_axes(_rect(x, y_panel, S, S, W, Hb))
+    gax = np.array([target.add_axes(_rect(x, y_panel, S, S, W, Hb))
                     for x in xs["geom"]])
-    emb, fam_lab, enc_lab, fams, encs = pooled_embedding(summ, a.seed)
+    emb, fam_lab, enc_lab, fams, encs = pooled_embedding(summ, seed)
     # Legend top pinned to the same height as the colorbar's top so the two footers
     # line up across the row.
-    draw_pooled(bottom, gax, emb, fam_lab, enc_lab, fams, encs, fs=FS_GEOM,
+    draw_pooled(target, gax, emb, fam_lab, enc_lab, fams, encs, fs=FS_GEOM,
                 adjust=False, marker_size=GEOM_MARKER, contour_lw=GEOM_CONTOUR_LW,
                 legend_markerscale=GEOM_LEG_SCALE, legend_rows=GEOM_LEG_ROWS,
                 legend_kw=GEOM_LEG_KW, legend_loc="upper center",
                 legend_x=(xs["geom"][0] + S + GAP_GEOM / 2) / W,
                 legend_anchor=y_foot / Hb, legend_row_gap=GEOM_LEG_ROW_GAP)
 
-    map_axes = [bottom.add_axes(_rect(x, y_panel, S, S, W, Hb)) for x in xs["maps"]]
-    cax = bottom.add_axes(_rect(xs["maps"][0], y_foot - CB_H,
+    map_axes = [target.add_axes(_rect(x, y_panel, S, S, W, Hb)) for x in xs["maps"]]
+    cax = target.add_axes(_rect(xs["maps"][0], y_foot - CB_H,
                                 3 * S + 2 * GAP_MAP, CB_H, W, Hb))
-    sax = bottom.add_axes(_rect(xs["scatter"], y_panel, S, S, W, Hb))
-    plot_gram_panel(fro, lea, cka_obs, None, target=bottom, fs=FS_CKA,
+    sax = target.add_axes(_rect(xs["scatter"], y_panel, S, S, W, Hb))
+    plot_gram_panel(fro, lea, cka_obs, None, target=target, fs=FS_CKA,
                     axes_override=(map_axes, cax, sax))
 
-    _match_legend_to_colorbar(bottom, cax, gax[0], GEOM_LEG_ROWS,
+    _match_legend_to_colorbar(target, cax, gax[0], GEOM_LEG_ROWS,
                               (xs["geom"][0] + S + GAP_GEOM / 2) / W, y_foot / Hb)
-
-    _row_divider(fig, top, bottom)
-
-    out = Path(a.out)
-    out.parent.mkdir(parents=True, exist_ok=True)
-    fig.savefig(out, bbox_inches="tight")
-    plt.close(fig)
-    logging.info(f"[saved] {out} ({a.fig_width:.2f} x {H_TOP + h_bottom:.2f} in, "
-                 f"panel side {S:.2f} in)")
 
 
 def _match_legend_to_colorbar(fig, cax, src_ax, rows, x, anchor):

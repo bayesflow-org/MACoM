@@ -2,7 +2,8 @@
 
 Writes, under outputs/finals/experiment-4/:
 
-- main_figure.tex: the combined panel (probe/compare/panel.pdf):
+- main_figure.tex: the combined panel's two rows, placed separately
+  (probe/compare/panel_recovery.pdf, panel_representation.pdf):
   recovery of both arms, the pooled five-family MDS geometry before/after the LBA
   fine-tune, and the CKA Gram block; short caption;
 - main_figure_details.tex: the methods/appendix paragraph that caption refers to;
@@ -44,6 +45,8 @@ FINALS = Path("outputs/finals/experiment-4")
 PROBE = FINALS / "probe"
 REP = FINALS / "representation"
 PANEL = "probe/compare/panel.pdf"
+# The main figure places the panel's two rows separately, so a diagram can go with them.
+PANEL_PARTS = ("probe/compare/panel_recovery.pdf", "probe/compare/panel_representation.pdf")
 ARMS = {"baseline": "learned SetTransformer summary (baseline arm)",
         "frozen": "frozen CogFormer encoder (frozen arm)"}
 TEX = {"v_diff": r"$v_{\mathrm{diff}}$", "omega": r"$\omega$", "a": "$a$", "tau": r"$\tau$",
@@ -327,7 +330,7 @@ def main():
                    help="Render with ?? for values whose source file is absent (review only).")
     args = p.parse_args()
 
-    needed = [PANEL, "probe/compare/comparison.pdf"] \
+    needed = [PANEL, *PANEL_PARTS, "probe/compare/comparison.pdf"] \
         + [f"probe/{a}/{f}.pdf" for a in ARMS
            for f in ("recovery", "calibration_ecdf", "coverage", "z_score_contraction")] \
         + [f"representation/frozen_vs_learned/{f}.pdf"
@@ -363,7 +366,8 @@ def main():
         header + "% Main-text figure for Experiment 4. Needs \\usepackage{graphicx};"
         " paths are relative to outputs/finals/experiment-4/.",
         r"\begin{figure}[tbp]", r"  \centering",
-        rf"  \includegraphics[width=\textwidth]{{{PANEL}}}",
+        rf"  \includegraphics[width=\textwidth]{{{PANEL_PARTS[0]}}}\par\vspace{{1ex}}",
+        rf"  \includegraphics[width=\textwidth]{{{PANEL_PARTS[1]}}}",
         rf"  \caption{{{MAIN.format(**v)}}}",
         r"  \label{fig:exp4-main}", r"\end{figure}", ""]))
     (FINALS / "main_figure_details.tex").write_text("\n".join([
