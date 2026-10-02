@@ -1,7 +1,7 @@
 # Experiment 3 — LBA zero-shot inference and finetuning
 
-Assembled 2026-10-01 22:05:36Z by
-`experiments/finalize_experiment_3.py` — 689 files. Git commit `8435630e9ad83dfd30cb4960a5949767ceac2b7c`.
+Assembled 2026-10-02 18:45:44Z by
+`experiments/finalize_experiment_3.py` — 690 files. Git commit `1ce48ad70232b9c98b883d17bd2448e80fa9e3a0`.
 Model-class run `r4c4_b128_e15000`; `MANIFEST.csv` records per-file provenance.
 
 Everything here is **stimulus-coded** (`favored_idx` drawn per trial, for LBA and for

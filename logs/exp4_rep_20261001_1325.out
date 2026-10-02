@@ -1,0 +1,39 @@
+════════════════════════════════════════════════════════════════
+ CogFormer-2 — finals pipeline   run 20261001_132545
+ stages : e4_representation e4_finalize
+ logs   : logs/finals/20261001_132545/
+════════════════════════════════════════════════════════════════
+
+── e4_representation
+    · cross-family pooled geometry (5 families, before/after LBA finetune)
+      ok (0m)
+    · aDDM representation — frozen vs baseline (vsvfixed)
+      ok (0m)
+    · combined panel (probe + C2ST + representation)
+    ! FAILED (exit 2) after 0m — logs/finals/20261001_132545/e4_representation.log
+      |  omega       0.025        0.002       -0.011        -0.029               0.060
+      |      a       0.679        0.569        0.693         0.587               0.990
+      |    tau       0.395        0.520        0.412         0.526               0.970
+      |  s_tau       0.144        0.199        0.122         0.168               0.761
+      | INFO:root:[saved] outputs/data/encoder_rep/representation/intercept_only_vsvfixed  |  outputs/figures/encoder_rep/representation/intercept_only_vsvfixed
+      | INFO:bayesflow:Using backend 'torch'
+      | WARNING:bayesflow:
+      | When using torch backend, we need to disable autograd by default to avoid excessive memory usage. Use
+      | 
+      | with torch.enable_grad():
+      |     ...
+      | 
+      | in contexts where you need gradients (e.g. custom training loops).
+      | usage: combined_panel.py [-h] [--frozen_data FROZEN_DATA]
+      |                          [--baseline_data BASELINE_DATA] [--out OUT]
+      |                          [--fig_width FIG_WIDTH] [--row_height ROW_HEIGHT]
+      |                          [--title_fs TITLE_FS] [--label_fs LABEL_FS]
+      |                          [--metric_fs METRIC_FS] [--tick_fs TICK_FS]
+      |                          [--markersize MARKERSIZE] [--elinewidth ELINEWIDTH]
+      | combined_panel.py: error: unrecognized arguments: --geometry_npz ./outputs/data/encoder_rep/representation/crossfamily/app3_summaries.npz --rep_npz ./outputs/data/encoder_rep/representation/intercept_only_vsvfixed/summaries.npz
+
+════════════════════════════════════════════════════════════════
+ FAIL  e4_representation
+ elapsed: 1m   logs: logs/finals/20261001_132545/
+ ABORTED at 'e4_representation'
+════════════════════════════════════════════════════════════════

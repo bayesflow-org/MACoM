@@ -1,0 +1,44 @@
+════════════════════════════════════════════════════════════════
+ CogFormer-2 — finals pipeline   run 20260928_160604
+ stages : e1_data e1_train e1_validate e1_ensemble e1_benchmark e1_design_eig e1_finalize e2_apply e2_refit_svfix e2_ppc e2_validate e2_finalize e3_zeroshot e3_finetune e3_ft_validate e3_original e3_paired_c2st e3_compare e3_ppc_apply e3_ppc e3_realdata_validate e3_finalize e4_probe e4_compare e4_representation e4_finalize
+ logs   : logs/finals/20260928_160604/
+════════════════════════════════════════════════════════════════
+
+── e1_data — skipped (marker exists: ./outputs/data/benchmark/seed0/.done)
+
+── e1_train
+    · ModelClass CF train (r4c4, b128, e15000, 1 GPU)
+      ok (1919m)
+
+── e1_validate
+    · ModelClass CF validate — 6 scenarios x 3 families
+      ok (25m)
+
+── e1_ensemble
+    · ModelClass random-design ensemble
+    ! FAILED (exit 1) after 0m — logs/finals/20260928_160604/e1_ensemble.log
+      | INFO:root:DDM: drew 4 covering design configs
+      | INFO:root:RDM: drew 4 covering design configs
+      | INFO:root:CDM: drew 4 covering design configs
+      | INFO:root:Config 1/12: DDM | 1
+      | Traceback (most recent call last):
+      |   File "<frozen runpy>", line 198, in _run_module_as_main
+      |   File "<frozen runpy>", line 88, in _run_code
+      |   File "/home/jerry/Documents/research/projects/CogFormer-2/experiments/experiment_1/model_class_cf_ensemble.py", line 418, in <module>
+      |     main()
+      |     ~~~~^^
+      |   File "/home/jerry/Documents/research/projects/CogFormer-2/.venv/lib/python3.13/site-packages/torch/utils/_contextlib.py", line 124, in decorate_context
+      |     return func(*args, **kwargs)
+      |   File "/home/jerry/Documents/research/projects/CogFormer-2/experiments/experiment_1/model_class_cf_ensemble.py", line 232, in main
+      |     link_fun = link_funs[model_name]
+      |                ^^^^^^^^^
+      | NameError: name 'link_funs' is not defined
+
+════════════════════════════════════════════════════════════════
+ skip  e1_data
+ ok    e1_train
+ ok    e1_validate
+ FAIL  e1_ensemble
+ elapsed: 1944m   logs: logs/finals/20260928_160604/
+ ABORTED at 'e1_ensemble'
+════════════════════════════════════════════════════════════════

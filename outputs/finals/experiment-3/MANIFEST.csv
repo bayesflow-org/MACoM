@@ -49,6 +49,7 @@ compare/delta_metrics_regressed.pdf,outputs/figures/model_class/cf/r4c4_b128_e15
 compare/lba/fixed_delta_r.pdf,outputs/figures/model_class/cf/r4c4_b128_e15000_lba/compare/lba/fixed_delta_r.pdf,21170,2026-10-01 22:05:27Z,False
 compare/lba/fixed_regressed_delta_r.pdf,outputs/figures/model_class/cf/r4c4_b128_e15000_lba/compare/lba/fixed_regressed_delta_r.pdf,28100,2026-10-01 22:05:28Z,False
 compare/lba/interaction_delta_r.pdf,outputs/figures/model_class/cf/r4c4_b128_e15000_lba/compare/lba/interaction_delta_r.pdf,31356,2026-10-01 22:05:28Z,False
+compare/lba/interaction_overlay_recovery.pdf,outputs/figures/model_class/cf/r4c4_b128_e15000_lba/compare/lba/interaction_overlay_recovery.pdf,290467,2026-10-02 18:45:25Z,False
 compare/lba/intercept_only_delta_r.pdf,outputs/figures/model_class/cf/r4c4_b128_e15000_lba/compare/lba/intercept_only_delta_r.pdf,22309,2026-10-01 22:05:27Z,False
 compare/lba/regressed_delta_r.pdf,outputs/figures/model_class/cf/r4c4_b128_e15000_lba/compare/lba/regressed_delta_r.pdf,28492,2026-10-01 22:05:27Z,False
 compare/lba_calibration_plane.csv,outputs/figures/model_class/cf/r4c4_b128_e15000_lba/compare/lba_calibration_plane.csv,2594,2026-10-01 22:05:34Z,False
