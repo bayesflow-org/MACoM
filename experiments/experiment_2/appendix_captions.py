@@ -135,7 +135,7 @@ def main():
     (FINALS / "main_figure.tex").write_text("\n".join([
         header + "% Main-text figure for Experiment 2. Needs \\usepackage{graphicx};"
         " paths are relative to outputs/finals/experiment-2/.",
-        r"\begin{figure}[t]", r"  \centering",
+        r"\begin{figure}[tbp]", r"  \centering",
         r"  \includegraphics[width=\textwidth]{combined_ppc.pdf}",
         rf"  \caption{{{MAIN.format(**vals, DETAILS=DETAILS_LABEL)}}}",
         r"  \label{fig:exp2-main}", r"\end{figure}", ""]))

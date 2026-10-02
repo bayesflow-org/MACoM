@@ -362,7 +362,7 @@ def main():
     (FINALS / "main_figure.tex").write_text("\n".join([
         header + "% Main-text figure for Experiment 4. Needs \\usepackage{graphicx};"
         " paths are relative to outputs/finals/experiment-4/.",
-        r"\begin{figure}[t]", r"  \centering",
+        r"\begin{figure}[tbp]", r"  \centering",
         rf"  \includegraphics[width=\textwidth]{{{PANEL}}}",
         rf"  \caption{{{MAIN.format(**v)}}}",
         r"  \label{fig:exp4-main}", r"\end{figure}", ""]))

@@ -98,7 +98,7 @@ ZS_SHORT = (r"\textbf{{Zero-shot LBA, {CASE} design.}} (a) Recovery, (b) calibra
             r"metrics. {DESIGN} As in Figure~\ref{{{FIRST}}}.")
 MIX_CAP = (r"\textbf{{{KIND}, {WHO}, mixed-predictor design.}} {DESIGN} Datasets simulated for "
            r"this design (no shared benchmark file exists); design as in Figure~\ref{{{MIXED}}}, "
-           r"encoding as in panel {PANEL} of Figure~\ref{{{REF}}}.")
+           r"encoding as in the {PANEL} panel of Figure~\ref{{{REF}}}.")
 
 # ── section 2: fine-tuned ───────────────────────────────────────────────────
 FT_FULL = (
@@ -143,7 +143,7 @@ DM_FULL = (
     r"change in NRMSE (top row) and calibration error (bottom row) for DDM, RDM and CDM "
     r"(fine-tuned minus original network) and the LBA (fine-tuned minus zero-shot); each pair "
     r"of networks is scored on identical bench5 test datasets, with the metric definitions of "
-    r"panel (c) of Figure~\ref{{{REF}}}. Negative values (blue) are improvements, positive "
+    r"the bottom panel of Figure~\ref{{{REF}}}. Negative values (blue) are improvements, positive "
     r"values (red) deteriorations. Each column lists its own parameters and has its own "
     r"$x$-axis scale; $\pi$ is not shown. Figures~\ref{{{NEXT}}}--\ref{{{LAST}}} show the other "
     r"designs."

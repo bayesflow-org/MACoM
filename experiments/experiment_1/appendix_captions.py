@@ -6,7 +6,7 @@ Writes outputs/finals/experiment-1/captions.tex, in appendix order:
    figures (the grids are long: a 4-level categorical regressor adds three contrast rows
    to the main effect and three to the interaction).
 2. benchmark ensembles (model_class_cf_benchmark_ensemble.py), the final portion:
-   bench5 as one figure per family stacking (a) recovery, (b) ECDF, (c) metrics; bench6
+   bench5 as one figure per family stacking recovery, ECDF and metrics (top to bottom); bench6
    (bench5 + mixed_predictor; long grids) as three separate figures per family.
 
 Section 1: CogFormer only: no BayesFlow baseline was trained on this
@@ -25,8 +25,8 @@ with their count n, Log Gamma = log(gamma / gamma_0.05) (Saeilynoja et al. 2022 
 statistic against the 5% quantile of its uniform-rank null, 1000 null draws).
 
 Also writes outputs/finals/experiment-1/main_figure.tex, the main-text figure (short caption),
-and main_figure_details.tex, the methods/appendix paragraph its caption refers to: (a)
-random-design ensemble recovery of the coefficient matrix, (b) its pi companion, (c)
+and main_figure_details.tex, the methods/appendix paragraph its caption refers to: (top)
+random-design ensemble recovery of the coefficient matrix, (middle) its pi companion, (bottom)
 information gain vs trial count. Facts there follow model_class_cf_ensemble.py (12
 covering random designs, 4 per family, 2 regressors, binary categoricals, interactions
 on), the pi prior (Beta(1, 50), identity link) and ddm_design_eig.py (CC/CB/BC/BB on v and
@@ -52,7 +52,8 @@ NUM_CATEGORIES = 4          # exact_num_categories at the training grid's max_nu
 KINDS = {"recovery": "Parameter recovery", "ecdf": "Simulation-based calibration",
          "metrics": "Summary metrics"}
 # Encoding of each kind, as defined in the full caption of experiment-1a's first figure.
-PANEL = {"recovery": "(a)", "ecdf": "(b)", "metrics": "(c)"}
+# Figures carry no subcaptions, so panels are named by their position in the stack.
+PANEL = {"recovery": "top", "ecdf": "middle", "metrics": "bottom"}
 REF_1A = label_1a("ddm", "intercept_only", "cf")
 
 
@@ -94,12 +95,12 @@ FULL = (
     r"$u_1{{:}}c_k \times u_2$ are their interaction, one per contrast. {DESIGN} No BayesFlow "
     r"baseline was trained on this design, so only CogFormer is shown, on {N} datasets "
     r"({T} trials each) simulated for it, with {D} posterior draws per dataset. Encoding as "
-    r"in panel {PANEL} of Figure~\ref{{{REF}}}; the contamination probability $\pi$ is not "
+    r"in the {PANEL} panel of Figure~\ref{{{REF}}}; the contamination probability $\pi$ is not "
     r"shown. Figures~\ref{{{NEXT}}}--\ref{{{LAST}}} show the remaining diagnostics of this "
     r"design and the other two families in the same way."
 )
 SHORT = (r"\textbf{{{KIND}, {FAM}, \emph{{mixed-predictor}} design (CogFormer).}} "
-         r"{DESIGN} Design as in Figure~\ref{{{FIRST}}}; encoding as in panel {PANEL} of "
+         r"{DESIGN} Design as in Figure~\ref{{{FIRST}}}; encoding as in the {PANEL} panel of "
          r"Figure~\ref{{{REF}}}.")
 
 
@@ -128,19 +129,19 @@ def ens_label(fam, variant, kind=None):
 
 ENS_FULL = (
     r"\textbf{{Benchmark ensemble, {FAM}: the five benchmark designs overlaid (CogFormer).}} "
-    r"(a) Parameter recovery, (b) calibration and (c) summary metrics of the intercept-only, "
+    r"Parameter recovery (top), calibration (middle) and summary metrics (bottom) of the intercept-only, "
     r"fixed, regressed, fixed + regressed and interaction designs on one coefficient grid; "
     r"each design contributes its {N} bench5 test datasets ({T} trials, {D} posterior draws "
     r"each), and a cell pools every design that contains that coefficient. Rows and columns "
     r"as in Figure~\ref{{{REF}}}; $\pi$ is not shown. "
-    r"(a) Posterior means against ground truth, one colour per design, with central 90\% "
+    r"Top: posterior means against ground truth, one colour per design, with central 90\% "
     r"credible intervals; $r$ is the mean over designs of the per-design Pearson correlation. "
     r"The strip on the left draws each design's coefficient pattern in its colour, with cell "
     r"opacity proportional to that design's $|r|$ (floored at 0.2), so poorly recovered "
     r"coefficients appear faint. "
-    r"(b) Rank-ECDF difference curves, one per design, against the common pointwise 95\% band "
-    r"for {N} uniform ranks; reading as in panel (b) of Figure~\ref{{{REF}}}. "
-    r"(c) Each metric of panel (c) of Figure~\ref{{{REF}}} computed per design, then shown as "
+    r"Middle: rank-ECDF difference curves, one per design, against the common pointwise 95\% band "
+    r"for {N} uniform ranks; reading as in the middle panel of Figure~\ref{{{REF}}}. "
+    r"Bottom: each metric of the bottom panel of Figure~\ref{{{REF}}} computed per design, then shown as "
     r"the mean $\pm$ standard deviation over the $n$ designs that contain the coefficient, "
     r"coloured by the mean. The fourth heatmap, log $\gamma$, is the log ratio of the "
     r"ECDF-based uniformity statistic $\gamma$ of the calibration ranks to the 5\% quantile of "
@@ -150,7 +151,7 @@ ENS_FULL = (
     r"followed by the six-design ensembles."
 )
 ENS_SHORT = (r"\textbf{{Benchmark ensemble, {FAM}: the five benchmark designs overlaid "
-             r"(CogFormer).}} (a) Recovery, (b) calibration, (c) metrics. Layout and encoding as "
+             r"(CogFormer).}} Recovery (top), calibration (middle), metrics (bottom). Layout and encoding as "
              r"in Figure~\ref{{{FIRST}}}.")
 BENCH6_FULL = (
     r"\textbf{{{KIND}, six-design benchmark ensemble, {FAM} (CogFormer).}} The five benchmark "
@@ -161,12 +162,12 @@ BENCH6_FULL = (
     r"design), and likewise $u_1(:c_1) \times u_2$ for the interaction; the $u_2$ row pools "
     r"every design with a $u_2$ slope, and the further contrast rows ($u_1{{:}}c_2$, "
     r"$u_1{{:}}c_3$ and their interactions with $u_2$) come from the mixed-predictor design "
-    r"alone. Encoding as in panel {PANEL} of "
+    r"alone. Encoding as in the {PANEL} panel of "
     r"Figure~\ref{{{B5}}}. Shown separately because the grid is long; "
     r"Figures~\ref{{{NEXT}}}--\ref{{{LAST}}} show the remaining diagnostics and families."
 )
 BENCH6_SHORT = (r"\textbf{{{KIND}, six-design benchmark ensemble, {FAM} (CogFormer).}} Designs "
-                r"as in Figure~\ref{{{FIRST}}}; encoding as in panel {PANEL} of "
+                r"as in Figure~\ref{{{FIRST}}}; encoding as in the {PANEL} panel of "
                 r"Figure~\ref{{{B5}}}.")
 
 
@@ -174,13 +175,10 @@ def bench5_figure(fam, caption):
     d = f"{ENS}/bench5/{fam}"
     tall = r"width=\textwidth,height=0.3\textheight,keepaspectratio"
     blocks = [r"\begin{figure}[p]", r"  \centering"]
-    for i, (kind, opts, name) in enumerate((("recovery", tall, "Recovery"),
-                                            ("ecdf", tall, "Calibration (ECDF)"),
-                                            ("metrics", r"width=\textwidth", "Metrics"))):
-        blocks += [rf"  \begin{{subfigure}}{{\textwidth}}\centering",
-                   rf"    \includegraphics[{opts}]{{{d}/{kind}.pdf}}",
-                   rf"    \caption{{{name}}}",
-                   r"  \end{subfigure}" + (r"\\[1ex]" if i < 2 else "")]
+    for i, (kind, opts) in enumerate((("recovery", tall), ("ecdf", tall),
+                                      ("metrics", r"width=\textwidth"))):
+        blocks += [rf"  \includegraphics[{opts}]{{{d}/{kind}.pdf}}"
+                   + (r"\par\vspace{1ex}" if i < 2 else "")]
     return "\n".join(blocks + [rf"  \caption{{{caption}}}",
                                rf"  \label{{{ens_label(fam, 'bench5')}}}", r"\end{figure}"])
 
@@ -214,14 +212,14 @@ ENSEMBLE_CSV = FINALS / "random_ensemble" / "design_configs.csv"
 
 MAIN = (
     r"\textbf{{Amortized inference across design space.}} "
-    r"(a) Parameter recovery for {NCFG} randomly drawn regression designs ({PER} per model "
+    r"Top: parameter recovery for {NCFG} randomly drawn regression designs ({PER} per model "
     r"family; two continuous or binary regressors and their interaction), all estimated by one "
     r"CogFormer network: posterior means against ground truth with 90\% credible intervals, one "
     r"colour per design; $r$ is the mean per-design correlation. Columns are the parameters of "
     r"all three families and rows the coefficients (intercept, main effects of $u_1$ and $u_2$, "
     r"interaction); the strip on the left shows each design's coefficient pattern, with opacity "
-    r"proportional to its $|r|$. (b) The contamination probability $\pi$ for each design. "
-    r"(c) Expected information gain (left) and mean NRMSE (right) against trial count when each "
+    r"proportional to its $|r|$. Middle: the contamination probability $\pi$ for each design. "
+    r"Bottom: expected information gain (left) and mean NRMSE (right) against trial count when each "
     r"of two DDM predictors is measured continuously (C) or as a binary factor (B); bands are "
     r"$\pm 1$ standard error. Every estimate is an amortized forward pass of the same network. "
     r"Details in Appendix~\ref{{{DETAILS}}}."
@@ -229,15 +227,15 @@ MAIN = (
 DETAILS_OUT = FINALS / "main_figure_details.tex"
 DETAILS_LABEL = "app:exp1-main-details"
 DETAILS = (
-    r"Each random design in Figure~\ref{{fig:exp1-main}}a has two regressors, each continuous "
+    r"Each random design in the top panel of Figure~\ref{{fig:exp1-main}} has two regressors, each continuous "
     r"or binary (one contrast, so $u_k(:c_1)$ denotes a slope or a contrast), and their "
     r"interaction, with each parameter entering each coefficient at random; the set of "
     r"{NCFG} designs was redrawn until together they cover every coefficient of the grid. Each "
     r"design contributes {N} simulated datasets of {T} trials, with {D} posterior draws per "
     r"dataset. Coefficients are shown on the unconstrained (link) scale on which the network is "
-    r"trained; $\pi$ (Figure~\ref{{fig:exp1-main}}b) is shown on its natural scale, with prior "
+    r"trained; $\pi$ (middle panel) is shown on its natural scale, with prior "
     r"$\mathrm{{Beta}}(1, 50)$. "
-    r"For the design comparison (Figure~\ref{{fig:exp1-main}}c), both DDM predictors act on "
+    r"For the design comparison (bottom panel), both DDM predictors act on "
     r"drift rate and boundary separation ({NACT} estimated coefficients, including $\pi$). "
     r"Expected information gain is the Gaussian log-volume ratio "
     r"$\tfrac{{1}}{{2}}\log\det\Sigma_{{\text{{prior}}}} - \tfrac{{1}}{{2}}\,"
@@ -282,22 +280,13 @@ def main_figure():
             raise SystemExit(f"missing {FINALS / f} -- run e1_finalize first")
     tex = "\n".join([
         "% Generated by `python -m experiments.experiment_1.appendix_captions` -- do not edit by hand.",
-        "% Main-text figure for Experiment 1. Needs \\usepackage{graphicx,subcaption,amsmath};",
+        "% Main-text figure for Experiment 1. Needs \\usepackage{graphicx,amsmath,amssymb};",
         "% paths are relative to outputs/finals/experiment-1/.",
-        r"\begin{figure}[t]",
+        r"\begin{figure}[tbp]",
         r"  \centering",
-        r"  \begin{subfigure}{\textwidth}\centering",
-        r"    \includegraphics[width=\textwidth]{random_ensemble/recovery.pdf}",
-        r"    \caption{}\label{fig:exp1-main-recovery}",
-        r"  \end{subfigure}\\[1ex]",
-        r"  \begin{subfigure}{\textwidth}\centering",
-        r"    \includegraphics[width=0.85\textwidth]{random_ensemble/recovery_pi.pdf}",
-        r"    \caption{}\label{fig:exp1-main-pi}",
-        r"  \end{subfigure}\\[1ex]",
-        r"  \begin{subfigure}{\textwidth}\centering",
-        r"    \includegraphics[width=0.75\textwidth]{information_gain/information_gain.pdf}",
-        r"    \caption{}\label{fig:exp1-main-eig}",
-        r"  \end{subfigure}",
+        r"  \includegraphics[width=\textwidth]{random_ensemble/recovery.pdf}\par\vspace{1ex}",
+        r"  \includegraphics[width=0.85\textwidth]{random_ensemble/recovery_pi.pdf}\par\vspace{1ex}",
+        r"  \includegraphics[width=0.75\textwidth]{information_gain/information_gain.pdf}",
         rf"  \caption{{{cap}}}",
         r"  \label{fig:exp1-main}",
         r"\end{figure}",
@@ -318,7 +307,7 @@ def main():
                 raise SystemExit(f"missing {p} -- run e1_finalize first")
     blocks = [
         "% Generated by `python -m experiments.experiment_1.appendix_captions` -- do not edit by hand.",
-        "% Needs \\usepackage{graphicx,subcaption}; paths are relative to outputs/finals/experiment-1/.",
+        "% Needs \\usepackage{graphicx}; paths are relative to outputs/finals/experiment-1/.",
         f"% Mixed-predictor case and benchmark ensembles, CogFormer only; panel encodings refer to {REF_1A}",
         "% (outputs/finals/experiment-1a/captions.tex).",
         "",
