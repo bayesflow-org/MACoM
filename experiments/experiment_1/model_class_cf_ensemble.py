@@ -65,6 +65,7 @@ def parse_args():
     p.add_argument("--keep_intercept", action="store_true", default=True)
     p.add_argument("--add_interaction", action="store_true", default=True)
     p.add_argument("--num_sample_steps", type=int, default=50)
+    p.add_argument("--solver", type=str, default="euler", choices=["euler", "midpoint", "rk4"])
     p.add_argument("--num_samples", type=int, default=200)
     p.add_argument("--samples_chunk_size", type=int, default=None,
                    help="Samples per ODE loop; peak GPU memory scales with batch_size * samples_chunk_size.")
@@ -86,6 +87,7 @@ def parse_args():
     p.add_argument("--encoder_num_layers", type=int, default=8)
     p.add_argument("--decoder_num_layers", type=int, default=8)
     p.add_argument("--encoder_num_heads", type=int, default=8)
+    p.add_argument("--encoder_embed_dim", type=int, default=64)
     p.add_argument("--decoder_num_heads", type=int, default=8)
     p.add_argument("--num_seeds", type=int, default=32)
     p.add_argument("--seed_dim", type=int, default=128)
@@ -161,6 +163,7 @@ def main():
         encoder_num_layers=args.encoder_num_layers,
         decoder_num_layers=args.decoder_num_layers,
         encoder_num_heads=args.encoder_num_heads,
+        encoder_embed_dim=args.encoder_embed_dim,
         decoder_num_heads=args.decoder_num_heads,
         num_seeds=args.num_seeds,
         seed_dim=args.seed_dim,
@@ -282,7 +285,7 @@ def main():
 
         pred_set = chunked_sample(
             cogformer, adapted, num_samples=args.num_samples,
-            steps=args.num_sample_steps,
+            steps=args.num_sample_steps, solver=args.solver,
             samples_chunk_size=args.samples_chunk_size,
         )
 

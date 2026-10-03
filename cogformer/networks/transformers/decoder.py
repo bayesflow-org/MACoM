@@ -39,8 +39,17 @@ class Decoder(nn.Module):
             output_conditioning: str = "linear",
             block_conditioning: str = "film",
             gated_residual: bool = False,
+            time_power_law_alpha: float = 0.0,
     ):
         super().__init__()
+        # Training-time distribution of the flow-matching time, as in BayesFlow's
+        # FlowMatching: t = u ** (1 + alpha), u ~ U(0,1), so E[t] = 1 / (2 + alpha) and
+        # alpha=0 is uniform. t=1 is the data end in both libraries. BayesFlow defaults
+        # to 0.5 and the amortization-gap baselines train with it. Training only: it
+        # changes no parameters and has no effect on sampling.
+        assert time_power_law_alpha > -1.0, \
+            f"time_power_law_alpha must be > -1, got {time_power_law_alpha}"
+        self.time_power_law_alpha = time_power_law_alpha
         assert num_layers >= 1, "num_layers must be >= 1"
 
         # When False, self-attention does not receive a key_padding_mask. This lets
@@ -233,7 +242,7 @@ class Decoder(nn.Module):
         """Returns predicted and target velocity (potentially masked)."""
 
         # Generate time
-        t = torch.rand(theta.shape[0], device=theta.device)
+        t = torch.rand(theta.shape[0], device=theta.device) ** (1 + self.time_power_law_alpha)
         t = broadcast_right(t, theta.shape)
 
         # Generate z = theta0

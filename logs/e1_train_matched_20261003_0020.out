@@ -1,0 +1,2 @@
+wandb tracking is on (TRACK_WANDB=1) but this host has no wandb credentials.
+  run 'wandb login' (uv sync --locked --extra tracking), or WANDB_MODE=offline, or USE_WANDB=0

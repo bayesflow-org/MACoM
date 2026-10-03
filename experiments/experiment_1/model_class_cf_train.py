@@ -468,6 +468,9 @@ def parse_args():
                         help="Gated row-wise FFN on the encoder tokens before PMA pooling.")
     parser.add_argument("--weight_init", type=str, default="orthogonal", choices=["default", "orthogonal"])
     parser.add_argument("--encoder_embed_dim", type=int, default=64)
+    parser.add_argument("--time_power_law_alpha", type=float, default=0.0,
+                        help="Flow-matching training time t = u ** (1 + alpha); 0 is uniform. "
+                             "BayesFlow's FlowMatching (and so the BF baselines) uses 0.5.")
     parser.add_argument("--ffn_expansion_factor", type=float, default=4.0)
     parser.add_argument("--seed_dim", type=int, default=128)
     parser.add_argument("--model_embed_dim", type=int, default=8)
@@ -624,6 +627,7 @@ if __name__ == "__main__":
         "gated_residual": args.gated_residual,
         "pre_pool_ffn": args.pre_pool_ffn,
         "weight_init": args.weight_init,
+        "time_power_law_alpha": args.time_power_law_alpha,
     }
 
     logging.info(

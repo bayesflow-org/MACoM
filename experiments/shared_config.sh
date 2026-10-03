@@ -4,12 +4,36 @@
 # experiments/shared_config.py reads the same values for the Python assemblers.
 
 # ── Architecture ───────────────────────────────────────────────────────────────
-ENC_LAYERS=8
+# Encoder matched to the BayesFlow baselines' SetTransformer summary network (width 128,
+# 4 heads of 32, 4 blocks; adopted 2026-10-03 from the arch A/B, logs/arch_ab.sh): it
+# beat the 64/8/8 encoder on NRMSE in 237/244 parameter rows at equal budget. Head
+# count changes no parameter shape, so a loader built with the wrong ENC_HEADS loads
+# the checkpoint WITHOUT error -- every stage must pass these.
+ENC_LAYERS=4
+ENC_HEADS=4
+ENC_EMBED=128
 DEC_LAYERS=8
-HEADS=8
+HEADS=8      # decoder heads (the _h field of the checkpoint filenames)
 PROJ=256
 SEEDS=32
 MC_DIM=128   # seed_dim of the model-class checkpoint
+# Flow-matching training-time power law, t = u ** (1 + alpha): BayesFlow's default 0.5,
+# which every BF baseline trains with, so both gap arms optimise the same objective
+# (adopted 2026-10-03; it was 0, uniform). Training only: no effect on loading/sampling.
+FM_TIME_ALPHA=0.5
+# Posterior sampler for every CogFormer scoring stage. The BF baselines sample with
+# BayesFlow's default adaptive Tsit5 (5th order, min_steps=50, rtol 1e-4, atol 1e-6),
+# i.e. >= 50 steps and >= 300 network evaluations. The closest fixed-step solver here
+# is RK4 on the same 50-step floor (200 evaluations; was midpoint x 50 = 100, and
+# euler in the ensemble and design-EIG stages). Adopted 2026-10-03.
+FM_SOLVER=rk4
+FM_SAMPLE_STEPS=50
+# Posterior draws per sampling pass. At 1 the GPU is launch-bound on the 28-token bench5
+# cases: RK4 x 50 took 109 s per 200x200 case at chunk 1 and 56 s at chunk 5 (midpoint
+# at chunk 1, the old setting, 67 s). Large designs (~150+ tokens: mixed_predictor,
+# ensemble, real-data designs) are compute-bound already at 1, so 5 is neutral there.
+# Peak memory 0.5-0.7 GiB (measured 2026-10-03, RTX 5000 Ada, compact sampling).
+FM_SAMPLE_CHUNK=5
 
 # ── Data ───────────────────────────────────────────────────────────────────────
 OBS=500
@@ -50,7 +74,9 @@ MC_MAX_REG=4; MC_MAX_CAT=4
 # The directory tag must agree with the filename's _b/_e fields; both derive from
 # MC_TRAIN_BATCH / MC_EPOCHS so they cannot drift. The filename does not encode
 # r/c, which is why the tag carries it.
-MC_TAG="r${MC_MAX_REG}c${MC_MAX_CAT}_b${MC_TRAIN_BATCH}_e${MC_EPOCHS}"
+# The encoder and alpha fields keep a checkpoint from an earlier architecture (whose
+# .done would otherwise satisfy e1_train) from being picked up under the same name.
+MC_TAG="r${MC_MAX_REG}c${MC_MAX_CAT}_enc${ENC_EMBED}h${ENC_HEADS}l${ENC_LAYERS}_a${FM_TIME_ALPHA}_b${MC_TRAIN_BATCH}_e${MC_EPOCHS}"
 MC_CKPT_DIR="./outputs/checkpoints/model_class/cf/${MC_TAG}"
 MC_CKPT="${MC_CKPT_DIR}/cogformer_model_class_fm_l${DEC_LAYERS}_h${HEADS}_p${PROJ}_s${SEEDS}_d${MC_DIM}_b${MC_TRAIN_BATCH}_e${MC_EPOCHS}_t${STEPS}.pt"
 
@@ -61,7 +87,8 @@ MC_CKPT="${MC_CKPT_DIR}/cogformer_model_class_fm_l${DEC_LAYERS}_h${HEADS}_p${PRO
 LBA_FIXED_A=0.5
 # 128, matching the model-class and BayesFlow batch (decided 2026-09-28; was 256).
 LBA_FT_BATCH=128
-LBA_FT_CKPT="./outputs/checkpoints/model_class/cf/lba_finetune/cogformer_lba_finetune_s2_A${LBA_FIXED_A}_l${DEC_LAYERS}_h${HEADS}_p${PROJ}_s${SEEDS}_d${MC_DIM}_b${LBA_FT_BATCH}_e${LBA_FT_EPOCHS}_t${STEPS}.pt"
+# Under MC_TAG: the finetune's filename does not encode its base checkpoint.
+LBA_FT_CKPT="./outputs/checkpoints/model_class/cf/lba_finetune/${MC_TAG}/cogformer_lba_finetune_s2_A${LBA_FIXED_A}_l${DEC_LAYERS}_h${HEADS}_p${PROJ}_s${SEEDS}_d${MC_DIM}_b${LBA_FT_BATCH}_e${LBA_FT_EPOCHS}_t${STEPS}.pt"
 
 # Track every CogFormer training (e1_train, e3_finetune) in wandb project
 # "cogformer-model-class". The orchestrator refuses to start without credentials

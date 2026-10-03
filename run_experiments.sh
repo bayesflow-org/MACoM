@@ -143,10 +143,17 @@ MASK_ARGS=(--self_attn_padding_mask)
 MC_ARCH=(
     "${MASK_ARGS[@]}"
     --encoder_num_layers "$ENC_LAYERS" --decoder_num_layers "$DEC_LAYERS"
-    --encoder_num_heads  "$HEADS"      --decoder_num_heads  "$HEADS"
+    --encoder_num_heads  "$ENC_HEADS"  --decoder_num_heads  "$HEADS"
+    --encoder_embed_dim "$ENC_EMBED"
     --proj_dim "$PROJ" --num_seeds "$SEEDS" --seed_dim "$MC_DIM"
     --model_embed_dim 8
 )
+# The encoder half alone, for scripts whose other architecture defaults already match
+# (realdata_validate, ddm_design_eig, experiment 4). Their encoder defaults are the
+# pre-2026-10-03 64/8/8, and ENC_HEADS is invisible to a strict load.
+MC_ENC=(--encoder_num_layers "$ENC_LAYERS" --encoder_num_heads "$ENC_HEADS" --encoder_embed_dim "$ENC_EMBED")
+# Posterior sampler for every CogFormer scoring stage (see FM_SOLVER in shared_config.sh).
+MC_SAMPLER=(--solver "$FM_SOLVER" --num_sample_steps "$FM_SAMPLE_STEPS" --samples_chunk_size "$FM_SAMPLE_CHUNK")
 # A checkpoint's encoder input_embedding is sized by (max_num_regressors,
 # max_num_categories) via build_encoder_input_dim (r4c4 -> 72, r5c5 -> 186), and
 # the filename does NOT encode r/c. experiments/utils.py defaults both to 5, so an
@@ -218,6 +225,7 @@ marker_e1_train() { echo "${MC_CKPT}.done"; }
 stage_e1_train() {
     run "ModelClass CF train (r${MC_MAX_REG}c${MC_MAX_CAT}, b${MC_TRAIN_BATCH}, e${MC_EPOCHS}, ${NPROC:-1} GPU)" -- \
         "${MC_LAUNCH[@]}" experiments.experiment_1.model_class_cf_train \
+            --time_power_law_alpha "$FM_TIME_ALPHA" \
             "${MC_ARCH[@]}" "${MC_GEOM[@]}" \
             --checkpoint_dir "$MC_CKPT_DIR" \
             --min_num_obs "$MIN_OBS" --max_num_obs "$MAX_OBS" \
@@ -243,12 +251,13 @@ stage_e1_validate() {
     # because finalize's allowlist drops the 180 pairplots anyway.
     run "ModelClass CF validate — 6 scenarios x 3 families" -- \
         "$PY" -m experiments.experiment_1.model_class_cf_validate \
+            "${MC_SAMPLER[@]}" \
             "${MC_ARCH[@]}" "${MC_GEOM[@]}" \
             --checkpoint "$MC_CKPT" \
             --outdir "${FIG_MC}/${MC_TAG}_validate" \
             --pred_dir "${DATA_MC}/${MC_TAG}_validate" \
             --batch_size 200 --num_samples 200 --num_obs "$OBS" \
-            --samples_chunk_size 1 --seed "$VAL_SEED" --skip_posteriors \
+            --seed "$VAL_SEED" --skip_posteriors \
             --data_dir "$BENCH_DATA"
 }
 
@@ -259,14 +268,14 @@ stage_e1_ensemble() {
     # that file, because pre-2026-09 runs wrote figures but no npz and are the
     # stale set this stage overwrites. A directory-only marker would let a stale
     # run masquerade as complete.
-    # samples_chunk_size 1: chunk 2 OOMs the RTX 5000 Ada on ensemble sampling.
     run "ModelClass random-design ensemble" -- \
         "$PY" -m experiments.experiment_1.model_class_cf_ensemble \
+            "${MC_SAMPLER[@]}" \
             "${MC_ARCH[@]}" "${MC_GEOM[@]}" \
             --checkpoint "$MC_CKPT" \
             --outdir "${FIG_MC}/${MC_TAG}_ensemble" \
             --batch_size 200 --num_obs "$OBS" --num_samples 200 \
-            --samples_chunk_size 1 --families "DDM,RDM,CDM"
+            --families "DDM,RDM,CDM"
 }
 
 marker_e1_benchmark() { echo "${FIG_MC}/${MC_TAG}_ensemble_benchmark"; }
@@ -290,11 +299,12 @@ stage_e1_design_eig() {
     need "${MC_CKPT}.done" "stage e1_train" || return 1
     run "information gain vs trial count (static design optimisation)" -- \
         "$PY" -m experiments.experiment_1.ddm_design_eig \
+            "${MC_ENC[@]}" "${MC_SAMPLER[@]}" \
             --checkpoint "$MC_CKPT" \
             --outdir "$DESIGN_OPT_DIR" \
             --max_num_regressors "$MC_MAX_REG" --max_num_categories "$MC_MAX_CAT" \
             --num_obs_grid "200,400,600,800,1000" \
-            --batch_size 200 --num_samples 200 --samples_chunk_size 1
+            --batch_size 200 --num_samples 200
 }
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -396,9 +406,11 @@ stage_e2_apply() {
     for fam in "${FAMILIES[@]}"; do
         run "real-data model-class apply — ${fam}" -- \
             "$PY" -m "experiments.experiment_2.${fam}_mc_cf_apply" \
+                "${MC_SAMPLER[@]}" \
                 --checkpoint "$MC_CKPT" \
                 --encoder_num_layers "$ENC_LAYERS" --decoder_num_layers "$DEC_LAYERS" \
-                --encoder_num_heads "$HEADS" --decoder_num_heads "$HEADS" \
+                --encoder_num_heads "$ENC_HEADS" --decoder_num_heads "$HEADS" \
+                --encoder_embed_dim "$ENC_EMBED" \
                 --proj_dim "$PROJ" --num_seeds "$SEEDS" --seed_dim "$MC_DIM" \
                 --model_embed_dim 8 \
                 --max_num_regressors "$MC_MAX_REG" --max_num_categories "$MC_MAX_CAT" \
@@ -421,10 +433,12 @@ stage_e2_refit_svfix() {
     # free. Writes to .../ddm/mc_sv_fixed/ rather than overwriting the canonical fit.
     run "DDM refit with s_v fixed at 0 (original specification)" -- \
         "$PY" -m experiments.experiment_2.ddm_mc_cf_apply \
+            "${MC_SAMPLER[@]}" \
             --fix_s_v \
             --checkpoint "$MC_CKPT" \
             --encoder_num_layers "$ENC_LAYERS" --decoder_num_layers "$DEC_LAYERS" \
-            --encoder_num_heads "$HEADS" --decoder_num_heads "$HEADS" \
+            --encoder_num_heads "$ENC_HEADS" --decoder_num_heads "$HEADS" \
+            --encoder_embed_dim "$ENC_EMBED" \
             --proj_dim "$PROJ" --num_seeds "$SEEDS" --seed_dim "$MC_DIM" \
             --model_embed_dim 8 \
             --max_num_regressors "$MC_MAX_REG" --max_num_categories "$MC_MAX_CAT"
@@ -508,10 +522,11 @@ stage_e2_validate() {
         [[ " ${fams[*]} " == *" $fam "* ]] || continue
         run "real-data-design validation — ${fam} ${flag}" -- \
             "$PY" -m experiments.experiment_2.realdata_validate \
+                "${MC_ENC[@]}" "${MC_SAMPLER[@]}" \
                 --model "$fam" $flag \
                 --checkpoint "$MC_CKPT" \
                 --outdir "$REALDATA_FIG" --pred_dir "$REALDATA_PRED" \
-                --num_datasets 200 --num_samples 200 --samples_chunk_size 1 \
+                --num_datasets 200 --num_samples 200 \
                 --seed "$VAL_SEED" \
                 --max_num_regressors "$MC_MAX_REG" --max_num_categories "$MC_MAX_CAT" || return 1
     done
@@ -538,11 +553,12 @@ stage_e3_zeroshot() {
     # zero-shot -> finetuned change is measured on identical datasets.
     run "LBA zero-shot validate (A=${LBA_FIXED_A})" -- \
         "$PY" -m experiments.experiment_3.model_class_lba_cf_validate \
+            "${MC_SAMPLER[@]}" \
             --lba_fixed_A "$LBA_FIXED_A" "${MC_ARCH[@]}" "${MC_GEOM[@]}" \
             --checkpoint "$MC_CKPT" \
             --outdir "${LBA_PAIRED}/zeroshot" \
             --batch_size 200 --num_samples 200 --num_obs "$OBS" \
-            --samples_chunk_size 1 --seed "$VAL_SEED" --data_dir "$BENCH_DATA"
+            --seed "$VAL_SEED" --data_dir "$BENCH_DATA"
 }
 
 # Same sentinel logic as e1_train: the finetune overwrites LBA_FT_CKPT every
@@ -557,6 +573,7 @@ stage_e3_finetune() {
     # Scheme 2 = joint DDM+RDM+CDM+LBA, which is what the forgetting study measures.
     run "LBA finetune (scheme ${FINETUNE_SCHEME:-2}, A=${LBA_FIXED_A})" -- \
         "$PY" -m experiments.experiment_3.model_class_cf_finetune_lba \
+            --time_power_law_alpha "$FM_TIME_ALPHA" --checkpoint_dir "$(dirname "$LBA_FT_CKPT")" \
             --lba_fixed_A "$LBA_FIXED_A" "${MC_ARCH[@]}" "${MC_GEOM[@]}" \
             --pretrained_checkpoint "$MC_CKPT" \
             --epochs "$LBA_FT_EPOCHS" --steps_per_epoch "$STEPS" \
@@ -574,12 +591,13 @@ stage_e3_ft_validate() {
     need "${LBA_FT_CKPT}.done" "stage e3_finetune" || return 1
     run "LBA finetuned validate — 4 families" -- \
         "$PY" -m experiments.experiment_3.model_class_lba_finetune_validate \
+            "${MC_SAMPLER[@]}" \
             --lba_fixed_A "$LBA_FIXED_A" "${MC_ARCH[@]}" "${MC_GEOM[@]}" \
             --checkpoint "$LBA_FT_CKPT" \
             --outdir "${LBA_PAIRED}/finetuned" \
             --pred_dir "${LBA_PAIRED}/finetuned/predictions" \
             --batch_size 200 --num_samples 200 --num_obs "$OBS" \
-            --samples_chunk_size 1 --seed "$VAL_SEED" --data_dir "$BENCH_DATA"
+            --seed "$VAL_SEED" --data_dir "$BENCH_DATA"
 }
 
 marker_e3_original() { echo "${LBA_PAIRED}/original"; }
@@ -709,11 +727,13 @@ stage_e3_ppc_apply() {
     # checkpoint, since only it has an LBA decoder worth applying.
     run "LBA real-data apply (stimulus-coded, ${LBA_RD_DESIGN})" -- \
         "$PY" -m experiments.experiment_2.lba_mc_cf_apply \
+            "${MC_SAMPLER[@]}" \
             --checkpoint "$LBA_FT_CKPT" \
             --lba_fixed_A "$LBA_FIXED_A" --design "$LBA_RD_DESIGN" \
             --outdir "$(dirname "$LBA_RD_POST")/" \
             --encoder_num_layers "$ENC_LAYERS" --decoder_num_layers "$DEC_LAYERS" \
-            --encoder_num_heads "$HEADS" --decoder_num_heads "$HEADS" \
+            --encoder_num_heads "$ENC_HEADS" --decoder_num_heads "$HEADS" \
+            --encoder_embed_dim "$ENC_EMBED" \
             --proj_dim "$PROJ" --num_seeds "$SEEDS" --seed_dim "$MC_DIM" \
             --model_embed_dim 8 --num_models 4 \
             --max_num_regressors "$MC_MAX_REG" --max_num_categories "$MC_MAX_CAT"
@@ -729,10 +749,11 @@ stage_e3_realdata_validate() {
     need "./data/data_application_lba.csv" "the empirical LBA dataset (not produced here)" || return 1
     run "real-data-design validation — lba (${LBA_RD_DESIGN})" -- \
         "$PY" -m experiments.experiment_2.realdata_validate \
+            "${MC_ENC[@]}" "${MC_SAMPLER[@]}" \
             --model lba --design "$LBA_RD_DESIGN" --lba_fixed_A "$LBA_FIXED_A" \
             --checkpoint "$LBA_FT_CKPT" --num_models 4 \
             --outdir "$REALDATA_FIG" --pred_dir "$REALDATA_PRED" \
-            --num_datasets 200 --num_samples 200 --samples_chunk_size 1 \
+            --num_datasets 200 --num_samples 200 \
             --seed "$VAL_SEED" \
             --max_num_regressors "$MC_MAX_REG" --max_num_categories "$MC_MAX_CAT"
 }
@@ -808,6 +829,7 @@ stage_e4_probe() {
     for mode in train validate; do
         run "aDDM frozen-encoder arm — ${mode}" -- \
             "$PY" -m experiments.experiment_4.addm_bf_apply \
+                "${MC_ENC[@]}" \
                 --mode "$mode" "${E4_VARIANT[@]}" \
                 --num_models 3 --encoder_device cuda --epochs "$E4_EPOCHS" \
                 "${E4_VAL[@]}" --cogformer_checkpoint "$MC_CKPT" || return 1
@@ -849,6 +871,7 @@ stage_e4_compare() {
     # separate datasets, which is why this stage exists at all.
     run "aDDM arm comparison (shared validation C2ST)" -- \
         "$PY" -m experiments.experiment_4.addm_arm_compare \
+            "${MC_ENC[@]}" \
             "${E4_VARIANT[@]}" --tag "$E4_TAG" \
             --cogformer_checkpoint "$MC_CKPT" --num_models 3 || return 1
     run "aDDM combined recovery (frozen vs baseline)" -- \
@@ -869,11 +892,13 @@ stage_e4_representation() {
     need "${LBA_FT_CKPT}.done" "stage e3_finetune" || return 1
     run "cross-family pooled geometry (5 families, before/after LBA finetune)" -- \
         "$PY" -m experiments.experiment_4.crossfamily_representation \
+            "${MC_ENC[@]}" \
             --cogformer_checkpoint "$MC_CKPT" --num_models 3 \
             --finetuned_checkpoint "$LBA_FT_CKPT" --finetuned_num_models 4 \
             --fixed_A "$LBA_FIXED_A" || return 1
     run "aDDM representation — frozen vs baseline (vsvfixed)" -- \
         "$PY" -m experiments.experiment_4.addm_representation \
+            "${MC_ENC[@]}" \
             "${E4_VARIANT[@]}" --tag "$E4_TAG" \
             --cogformer_checkpoint "$MC_CKPT" --num_models 3 || return 1
     # The combined page reads the two summaries it plots from their SOURCES here; its

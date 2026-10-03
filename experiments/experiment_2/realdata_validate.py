@@ -146,6 +146,7 @@ def main():
         encoder_input_dim=build_encoder_input_dim(a.max_num_regressors, a.max_num_categories, True),
         encoder_num_layers=a.encoder_num_layers, decoder_num_layers=a.decoder_num_layers,
         encoder_num_heads=a.encoder_num_heads, decoder_num_heads=a.decoder_num_heads,
+        encoder_embed_dim=a.encoder_embed_dim,
         num_seeds=a.num_seeds, seed_dim=a.seed_dim, proj_dim=a.proj_dim,
         dropout=0.0, layer_dropout=0.0,
         decoder_layer_design="mixed_attention", decoder_layer_kwargs={"mab_first": True},
@@ -262,12 +263,12 @@ def parse_args():
     p.add_argument("--num_datasets", type=int, default=200)
     p.add_argument("--num_samples", type=int, default=200)
     p.add_argument("--num_sample_steps", type=int, default=50)
-    p.add_argument("--solver", default="midpoint", choices=["euler", "midpoint"])
+    p.add_argument("--solver", default="midpoint", choices=["euler", "midpoint", "rk4"])
     p.add_argument("--samples_chunk_size", type=int, default=1)
     p.add_argument("--seed", type=int, default=0)
     p.add_argument("--max_num_regressors", type=int, default=4)
     p.add_argument("--max_num_categories", type=int, default=4)
-    for k, v in [("encoder_num_layers", 8), ("decoder_num_layers", 8), ("encoder_num_heads", 8),
+    for k, v in [("encoder_num_layers", 8), ("decoder_num_layers", 8), ("encoder_num_heads", 8), ("encoder_embed_dim", 64),
                  ("decoder_num_heads", 8), ("num_seeds", 32), ("seed_dim", 128), ("proj_dim", 256),
                  ("time_embedding_dim", 32), ("pos_embedding_dim", 32),
                  ("model_embed_dim", 8)]:

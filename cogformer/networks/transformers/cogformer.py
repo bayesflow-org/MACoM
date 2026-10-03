@@ -51,6 +51,7 @@ class CogFormer(nn.Module):
             gated_residual: bool = True,
             pre_pool_ffn: bool = True,
             weight_init: str = "orthogonal",
+            time_power_law_alpha: float = 0.0,
     ):
         super().__init__()
         # gated_residual / pre_pool_ffn / weight_init="orthogonal" port BayesFlow's
@@ -110,6 +111,7 @@ class CogFormer(nn.Module):
             output_conditioning=output_conditioning,
             block_conditioning=block_conditioning,
             gated_residual=gated_residual,
+            time_power_law_alpha=time_power_law_alpha,
         )
 
         if weight_init == "orthogonal":

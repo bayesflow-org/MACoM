@@ -133,8 +133,9 @@ class LBAFinetuner:
             )
         return self.adapter.adapt(samples)
 
-    def train(self, train_config, val_config, checkpoint_path="cogformer_lba_finetune.pt", fig_path="fig"):
-        checkpoint_dir = Path("./outputs/checkpoints/model_class/cf/lba_finetune/")
+    def train(self, train_config, val_config, checkpoint_path="cogformer_lba_finetune.pt", fig_path="fig",
+              checkpoint_dir="./outputs/checkpoints/model_class/cf/lba_finetune/"):
+        checkpoint_dir = Path(checkpoint_dir)
         checkpoint_dir.mkdir(parents=True, exist_ok=True)
 
         traj = int(train_config.get("trajectory_interval", 0) or 0)
@@ -384,6 +385,7 @@ def parse_args():
     parser.add_argument("--decoder_num_layers", type=int, default=8)
     parser.add_argument("--encoder_num_heads", type=int, default=8)
     parser.add_argument("--decoder_num_heads", type=int, default=8)
+    parser.add_argument("--encoder_embed_dim", type=int, default=64)
     parser.add_argument("--proj_dim", type=int, default=256)
     parser.add_argument("--num_seeds", type=int, default=32)
     parser.add_argument("--seed_dim", type=int, default=128)
@@ -395,6 +397,13 @@ def parse_args():
                         help="Must match the flag the --pretrained_checkpoint base was trained "
                              "with, else finetuning eats a regime re-adaptation cost. Use "
                              "--no-self_attn_padding_mask for a mask-off base.")
+    parser.add_argument("--checkpoint_dir", type=str,
+                        default="./outputs/checkpoints/model_class/cf/lba_finetune/",
+                        help="The filename does not encode the pretrained base, so the "
+                             "orchestrator passes a directory scoped to it.")
+    parser.add_argument("--time_power_law_alpha", type=float, default=0.0,
+                        help="Flow-matching training time t = u ** (1 + alpha); use the "
+                             "value the pretrained base was trained with.")
 
     # Optimizer — smaller defaults than pretraining
     parser.add_argument("--lr", type=float, default=1e-5)
@@ -508,6 +517,7 @@ if __name__ == "__main__":
         "decoder_num_heads":   args.decoder_num_heads,
         "num_seeds":           args.num_seeds,
         "seed_dim":            args.seed_dim,
+        "encoder_embed_dim":   args.encoder_embed_dim,
         "proj_dim":            args.proj_dim,
         "dropout":             args.dropout,
         "layer_dropout":       args.layer_dropout,
@@ -518,6 +528,7 @@ if __name__ == "__main__":
         "decoder_layer_design": "mixed_attention",
         "decoder_layer_kwargs": {"mab_first": True},
         "self_attn_padding_mask": args.self_attn_padding_mask,
+        "time_power_law_alpha": args.time_power_law_alpha,
     }
 
     lba_with_pi = _ALL_WITH_PI["lba"]
@@ -700,6 +711,7 @@ if __name__ == "__main__":
             val_config=val_config,
             checkpoint_path=checkpoint_path,
             fig_path=fig_path,
+            checkpoint_dir=args.checkpoint_dir,
         )
 
     if args.use_wandb:

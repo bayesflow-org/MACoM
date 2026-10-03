@@ -272,6 +272,7 @@ def parse_args():
     p.add_argument("--encoder_num_layers", type=int, default=8)
     p.add_argument("--decoder_num_layers", type=int, default=8)
     p.add_argument("--encoder_num_heads", type=int, default=8)
+    p.add_argument("--encoder_embed_dim", type=int, default=64)
     p.add_argument("--decoder_num_heads", type=int, default=8)
     p.add_argument("--num_seeds", type=int, default=32)
     p.add_argument("--seed_dim", type=int, default=128)

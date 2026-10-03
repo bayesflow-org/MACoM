@@ -708,7 +708,7 @@ def parse_args():
     p.add_argument("--encoder_device", type=str, default="cuda")
     p.add_argument("--num_models", type=int, default=3)
     for k, v in [("encoder_num_layers", 8), ("decoder_num_layers", 8),
-                 ("encoder_num_heads", 8), ("decoder_num_heads", 8), ("num_seeds", 32),
+                 ("encoder_num_heads", 8), ("encoder_embed_dim", 64), ("decoder_num_heads", 8), ("num_seeds", 32),
                  ("seed_dim", 128), ("proj_dim", 256), ("model_embed_dim", 8),
                  ("time_embedding_dim", 32), ("pos_embedding_dim", 32)]:
         p.add_argument(f"--{k}", type=int, default=v)
