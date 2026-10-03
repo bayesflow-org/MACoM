@@ -41,11 +41,11 @@ compare/ddm/interaction_forgetting_delta_r.pdf,outputs/figures/model_class/cf/r4
 compare/ddm/intercept_only_forgetting_delta_r.pdf,outputs/figures/model_class/cf/r4c4_b128_e15000_lba/compare/ddm/intercept_only_forgetting_delta_r.pdf,21173,2026-10-01 22:05:28Z,False
 compare/ddm/regressed_forgetting_delta_r.pdf,outputs/figures/model_class/cf/r4c4_b128_e15000_lba/compare/ddm/regressed_forgetting_delta_r.pdf,25797,2026-10-01 22:05:28Z,False
 compare/delta_metrics.csv,outputs/figures/model_class/cf/r4c4_b128_e15000_lba/compare/delta_metrics.csv,39926,2026-10-01 22:05:30Z,False
-compare/delta_metrics_fixed.pdf,outputs/figures/model_class/cf/r4c4_b128_e15000_lba/compare/delta_metrics_fixed.pdf,24260,2026-10-01 22:05:31Z,False
-compare/delta_metrics_fixed_regressed.pdf,outputs/figures/model_class/cf/r4c4_b128_e15000_lba/compare/delta_metrics_fixed_regressed.pdf,27217,2026-10-01 22:05:32Z,False
-compare/delta_metrics_interaction.pdf,outputs/figures/model_class/cf/r4c4_b128_e15000_lba/compare/delta_metrics_interaction.pdf,31959,2026-10-01 22:05:33Z,False
-compare/delta_metrics_intercept_only.pdf,outputs/figures/model_class/cf/r4c4_b128_e15000_lba/compare/delta_metrics_intercept_only.pdf,24510,2026-10-01 22:05:31Z,False
-compare/delta_metrics_regressed.pdf,outputs/figures/model_class/cf/r4c4_b128_e15000_lba/compare/delta_metrics_regressed.pdf,27499,2026-10-01 22:05:32Z,False
+compare/delta_metrics_fixed.pdf,outputs/figures/model_class/cf/r4c4_b128_e15000_lba/compare/delta_metrics_fixed.pdf,23545,2026-10-03 22:46:10Z,False
+compare/delta_metrics_fixed_regressed.pdf,outputs/figures/model_class/cf/r4c4_b128_e15000_lba/compare/delta_metrics_fixed_regressed.pdf,30220,2026-10-03 22:46:10Z,False
+compare/delta_metrics_interaction.pdf,outputs/figures/model_class/cf/r4c4_b128_e15000_lba/compare/delta_metrics_interaction.pdf,33859,2026-10-03 22:46:10Z,False
+compare/delta_metrics_intercept_only.pdf,outputs/figures/model_class/cf/r4c4_b128_e15000_lba/compare/delta_metrics_intercept_only.pdf,25285,2026-10-03 22:46:10Z,False
+compare/delta_metrics_regressed.pdf,outputs/figures/model_class/cf/r4c4_b128_e15000_lba/compare/delta_metrics_regressed.pdf,31752,2026-10-03 22:46:10Z,False
 compare/lba/fixed_delta_r.pdf,outputs/figures/model_class/cf/r4c4_b128_e15000_lba/compare/lba/fixed_delta_r.pdf,21170,2026-10-01 22:05:27Z,False
 compare/lba/fixed_regressed_delta_r.pdf,outputs/figures/model_class/cf/r4c4_b128_e15000_lba/compare/lba/fixed_regressed_delta_r.pdf,28100,2026-10-01 22:05:28Z,False
 compare/lba/interaction_delta_r.pdf,outputs/figures/model_class/cf/r4c4_b128_e15000_lba/compare/lba/interaction_delta_r.pdf,31356,2026-10-01 22:05:28Z,False

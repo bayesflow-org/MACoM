@@ -673,35 +673,35 @@
 \begin{figure}[p]
   \centering
   \includegraphics[width=\textwidth,height=0.45\textheight,keepaspectratio]{compare/delta_metrics_intercept_only.pdf}
-  \caption{\textbf{Change in summary metrics with fine-tuning, \emph{intercept-only} design.} Per-coefficient change in NRMSE (top row) and calibration error (bottom row) for DDM, RDM and CDM (fine-tuned minus original network) and the LBA (fine-tuned minus zero-shot); each pair of networks is scored on identical bench5 test datasets, with the metric definitions of the bottom panel of Figure~\ref{fig:app1-ddm-intercept-only-cf}. Negative values (blue) are improvements, positive values (red) deteriorations. Each column lists its own parameters and has its own $x$-axis scale; $\pi$ is not shown. Figures~\ref{fig:app3-delta-metrics-fixed}--\ref{fig:app3-delta-metrics-interaction} show the other designs.}
+  \caption{\textbf{Change in the LBA's summary metrics with fine-tuning, \emph{intercept-only} design.} Per-coefficient change in NRMSE (left) and calibration error (right), fine-tuned minus zero-shot, both networks scored on identical bench5 test datasets, with the metric definitions of the bottom panel of Figure~\ref{fig:app1-ddm-intercept-only-cf}. Negative values (blue) are improvements, positive values (red) deteriorations; each panel has its own colour scale. Columns are the parameters and rows the coefficients; N/A marks coefficients the design does not contain, and $\pi$ is not shown. Figures~\ref{fig:app3-delta-metrics-fixed}--\ref{fig:app3-delta-metrics-interaction} show the other designs.}
   \label{fig:app3-delta-metrics-intercept-only}
 \end{figure}
 
 \begin{figure}[p]
   \centering
   \includegraphics[width=\textwidth,height=0.45\textheight,keepaspectratio]{compare/delta_metrics_fixed.pdf}
-  \caption{\textbf{Change in summary metrics with fine-tuning, \emph{fixed} design.} As in Figure~\ref{fig:app3-delta-metrics-intercept-only}.}
+  \caption{\textbf{Change in the LBA's summary metrics with fine-tuning, \emph{fixed} design.} As in Figure~\ref{fig:app3-delta-metrics-intercept-only}.}
   \label{fig:app3-delta-metrics-fixed}
 \end{figure}
 
 \begin{figure}[p]
   \centering
   \includegraphics[width=\textwidth,height=0.45\textheight,keepaspectratio]{compare/delta_metrics_regressed.pdf}
-  \caption{\textbf{Change in summary metrics with fine-tuning, \emph{regressed} design.} As in Figure~\ref{fig:app3-delta-metrics-intercept-only}.}
+  \caption{\textbf{Change in the LBA's summary metrics with fine-tuning, \emph{regressed} design.} As in Figure~\ref{fig:app3-delta-metrics-intercept-only}.}
   \label{fig:app3-delta-metrics-regressed}
 \end{figure}
 
 \begin{figure}[p]
   \centering
   \includegraphics[width=\textwidth,height=0.45\textheight,keepaspectratio]{compare/delta_metrics_fixed_regressed.pdf}
-  \caption{\textbf{Change in summary metrics with fine-tuning, \emph{fixed + regressed} design.} As in Figure~\ref{fig:app3-delta-metrics-intercept-only}.}
+  \caption{\textbf{Change in the LBA's summary metrics with fine-tuning, \emph{fixed + regressed} design.} As in Figure~\ref{fig:app3-delta-metrics-intercept-only}.}
   \label{fig:app3-delta-metrics-fixed-regressed}
 \end{figure}
 
 \begin{figure}[p]
   \centering
   \includegraphics[width=\textwidth,height=0.45\textheight,keepaspectratio]{compare/delta_metrics_interaction.pdf}
-  \caption{\textbf{Change in summary metrics with fine-tuning, \emph{interaction} design.} As in Figure~\ref{fig:app3-delta-metrics-intercept-only}.}
+  \caption{\textbf{Change in the LBA's summary metrics with fine-tuning, \emph{interaction} design.} As in Figure~\ref{fig:app3-delta-metrics-intercept-only}.}
   \label{fig:app3-delta-metrics-interaction}
 \end{figure}
 

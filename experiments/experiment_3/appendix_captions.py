@@ -139,16 +139,16 @@ DR_SHORT = (
 
 # ── section 4: metric deltas ────────────────────────────────────────────────
 DM_FULL = (
-    r"\textbf{{Change in summary metrics with fine-tuning, {CASE} design.}} Per-coefficient "
-    r"change in NRMSE (top row) and calibration error (bottom row) for DDM, RDM and CDM "
-    r"(fine-tuned minus original network) and the LBA (fine-tuned minus zero-shot); each pair "
-    r"of networks is scored on identical bench5 test datasets, with the metric definitions of "
-    r"the bottom panel of Figure~\ref{{{REF}}}. Negative values (blue) are improvements, positive "
-    r"values (red) deteriorations. Each column lists its own parameters and has its own "
-    r"$x$-axis scale; $\pi$ is not shown. Figures~\ref{{{NEXT}}}--\ref{{{LAST}}} show the other "
-    r"designs."
+    r"\textbf{{Change in the LBA's summary metrics with fine-tuning, {CASE} design.}} "
+    r"Per-coefficient change in NRMSE (left) and calibration error (right), fine-tuned minus "
+    r"zero-shot, both networks scored on identical bench5 test datasets, with the metric "
+    r"definitions of the bottom panel of Figure~\ref{{{REF}}}. Negative values (blue) are "
+    r"improvements, positive values (red) deteriorations; each panel has its own colour scale. "
+    r"Columns are the parameters and rows the coefficients; N/A marks coefficients the design "
+    r"does not contain, and $\pi$ is not shown. Figures~\ref{{{NEXT}}}--\ref{{{LAST}}} show the "
+    r"other designs."
 )
-DM_SHORT = (r"\textbf{{Change in summary metrics with fine-tuning, {CASE} design.}} As in "
+DM_SHORT = (r"\textbf{{Change in the LBA's summary metrics with fine-tuning, {CASE} design.}} As in "
             r"Figure~\ref{{{FIRST}}}.")
 
 # ── section 7: LBA on empirical data ────────────────────────────────────────
@@ -378,10 +378,11 @@ def write_tables():
 
 # ── main-text figure ─────────────────────────────────────────────────────────
 # Top: zero-shot and fine-tuned LBA recovery overlaid on one grid (overlay_recovery.py),
-# interaction design. Bottom: the per-coefficient metric deltas for the same design, all
-# four families. The interaction design is where fine-tuning shows most for the LBA, and
-# also where the trained families' posteriors move most (per-dataset C2ST), so the
-# caption states both: the metric panel alone would read as "no forgetting".
+# interaction design. Bottom: the LBA's per-coefficient metric deltas for the same design;
+# the trained families' largest deltas are stated in the caption, not plotted. The
+# interaction design is where fine-tuning shows most for the LBA, and also where the
+# trained families' posteriors move most (per-dataset C2ST), so the details state both:
+# their metric deltas alone would read as "no forgetting".
 # Every number comes from finals CSVs; only the overlay PDF is produced on the GPU host.
 MAIN_OUT = FINALS / "main_figure.tex"
 DETAILS_OUT = FINALS / "main_figure_details.tex"
@@ -399,13 +400,13 @@ MAIN = (
     r"families (orange), on the same {N} test datasets of the {CASE} design: posterior means "
     r"against ground truth with 90\% credible intervals, one $r$ per network. Columns are the "
     r"parameters and rows the coefficients (intercept, slopes on $u_1$ and $u_2$, and on their "
-    r"product); N/A marks coefficients the design does not contain. Bottom: change in each "
-    r"coefficient's NRMSE (top row) and calibration error (bottom row) with fine-tuning, on the "
-    r"same design: for the LBA, fine-tuned minus zero-shot; for DDM, RDM and CDM, fine-tuned "
-    r"minus the original network on their own test datasets. Negative values (blue) are "
-    r"improvements. Each column has its own $x$-axis scale: the LBA's largest change in "
-    r"magnitude is {L_NRMSE} in NRMSE and {L_CAL} in calibration error, the trained families' "
-    r"{O_NRMSE} and {O_CAL}. Details in Appendix~\ref{{{DETAILS}}}."
+    r"product); N/A marks coefficients the design does not contain. Bottom: change in each of "
+    r"the LBA's coefficients' NRMSE (left) and calibration error (right) with fine-tuning "
+    r"(fine-tuned minus zero-shot), cells laid out as in the top panel. Negative values (blue) "
+    r"are improvements, positive values (red) deteriorations; each panel has its own colour "
+    r"scale. The LBA's largest change in magnitude is {L_NRMSE} in NRMSE and {L_CAL} in "
+    r"calibration error; for DDM, RDM and CDM (fine-tuned minus the original network, not "
+    r"shown) it is {O_NRMSE} and {O_CAL}. Details in Appendix~\ref{{{DETAILS}}}."
 )
 DETAILS = (
     r"The original network in Figure~\ref{{fig:exp3-main}} was trained on DDM, RDM and CDM "

@@ -3,7 +3,8 @@
 Loads .npz prediction files from two pred_dirs and computes:
   1. Delta r heatmap (fine-tuned − zero-shot) for LBA recovery.
   2. Delta r heatmap (fine-tuned − base) for DDM, RDM, CDM (forgetting).
-  3. Delta metrics table (fine-tuned − base) for all models as CSV.
+  3. Delta metrics table (fine-tuned − base) for all models as CSV, and per case a
+     NRMSE / calibration-error delta heatmap on the LBA's coefficient grid.
 
 Expected file naming conventions:
   Zero-shot LBA  : {zero_shot_lba_pred_dir}/lba_{cfg}_mid1_cf_pred.npz
@@ -17,9 +18,12 @@ from pathlib import Path
 
 import numpy as np
 import pandas as pd
+import matplotlib.colors as mcolors
 import matplotlib.pyplot as plt
 
-from cogformer.diagnostics.plot.adaptive_correlation import compute_r_matrix, adaptive_correlation_delta
+from cogformer.diagnostics.plot.adaptive_correlation import (
+    compute_r_matrix, adaptive_correlation_delta, adaptive_metric_matrix, heatmap_axes,
+)
 from cogformer.diagnostics.metric.adaptive_metrics import adaptive_metrics as compute_adaptive_metrics
 
 from ..configs import MODELS as _BASE_MODELS, LBA_CONFIG
@@ -97,10 +101,10 @@ def _delta_metrics(df_a: pd.DataFrame, df_b: pd.DataFrame, label_a: str, label_b
     return combined[[c for c in col_order if c in combined.columns]]
 
 
-# Column order is fixed: DDM, RDM, CDM, LBA -- the three original families first, then
-# the finetune target, so "forgetting on the originals" reads left-to-right and the new
-# family sits at the end.
-DELTA_PLOT_MODELS = ["DDM", "RDM", "CDM", "LBA"]
+# Only the finetune target is plotted: the trained families' deltas are ~100x smaller
+# and stay in delta_metrics.csv; their forgetting is shown by the delta-r maps and
+# the paired C2ST.
+DELTA_PLOT_MODEL = "LBA"
 DELTA_PLOT_METRICS = ["NRMSE", "Calibration Error"]
 
 
@@ -124,60 +128,59 @@ def _delta_col(df: pd.DataFrame, metric: str) -> str | None:
     return None
 
 
-def plot_delta_metrics(combined: pd.DataFrame, outdir: Path, condition: str,
-                       figsize: tuple = (16.0, 7.0)) -> Path | None:
-    """2 x 4 grid of per-parameter metric deltas: rows = metric, cols = model family.
+def plot_delta_metrics(combined: pd.DataFrame, layouts: dict, outdir: Path, condition: str,
+                       max_num_categories: int, cell_size: float = 0.55) -> Path | None:
+    """1 x 2 grid of the LBA's per-cell metric deltas (fine-tuned minus zero-shot):
+    NRMSE on the left, calibration error on the right.
 
-    Rows are labelled on the LEFT (y-axis) rather than by per-panel titles, so the
-    metric is stated once per row instead of four times, and the top row's titles are
-    free to carry the model family.
+    Each panel lays the deltas out on the LBA's coefficient grid (coefficients down,
+    parameters across), the same layout as the delta-r heatmaps, so a cell sits where
+    its coefficient sits in the design. ``layouts[(model, condition)]`` holds the
+    (design_config, parameter_mask, model_config) the cell labels are rebuilt from.
 
-    Negative is improvement for both metrics plotted here (NRMSE and calibration error
-    are both lower-is-better), so bars are coloured by sign with that reading.
+    Negative is improvement for both metrics (both are lower-is-better), so the
+    diverging map puts improvement in blue and degradation in red, around a neutral
+    zero; each panel has its own symmetric scale.
     """
-    sub = combined[combined["condition"] == condition]
-    if sub.empty:
-        logging.warning(f"No delta rows for condition '{condition}'; skipping delta metric plot.")
+    rows = combined[(combined["condition"] == condition) & (combined["model"] == DELTA_PLOT_MODEL)]
+    if rows.empty or (DELTA_PLOT_MODEL, condition) not in layouts:
+        logging.warning(f"No {DELTA_PLOT_MODEL} delta rows for condition '{condition}'; "
+                        f"skipping delta metric plot.")
+        return None
+    dc, mask, cfg = layouts[(DELTA_PLOT_MODEL, condition)]
+
+    panels = {}
+    for metric in DELTA_PLOT_METRICS:
+        col = _delta_col(rows, metric)
+        if col is None:
+            continue
+        *panel, unplaced = adaptive_metric_matrix(
+            rows[col].dropna().to_dict(), mask, dc, cfg["intrinsic_params"], max_num_categories,
+            variable_names=cfg["variable_names"], global_params=GLOBAL_PARAMS)
+        if unplaced:
+            raise SystemExit(f"{DELTA_PLOT_MODEL}/{condition} {metric}: no grid cell for "
+                             f"{unplaced} -- metric labels and grid layout disagree")
+        panels[metric] = panel
+    if not panels:
+        logging.warning(f"No {DELTA_PLOT_MODEL} metric deltas for '{condition}'; skipping.")
         return None
 
-    fig, axes = plt.subplots(len(DELTA_PLOT_METRICS), len(DELTA_PLOT_MODELS),
-                             figsize=figsize, squeeze=False)
-    better, worse = "#2b7bba", "#d1495b"
+    n_rows, n_cols = next(iter(panels.values()))[0].shape
+    fig, axes = plt.subplots(1, len(panels), squeeze=False, layout="constrained",
+                             figsize=(len(panels) * (cell_size * n_cols + 1.6),
+                                      cell_size * max(n_rows, 2) + 1.2))
+    cmap = "RdBu_r"
+    for ax, (metric, panel) in zip(axes[0], panels.items()):
+        vmax = np.nanmax(np.abs(panel[0])) if np.isfinite(panel[0]).any() else 1.0
+        norm = mcolors.Normalize(vmin=-vmax, vmax=vmax)
+        heatmap_axes(ax, *panel, cmap=cmap, norm=norm, annot_fontsize=9, fmt="+.3f")
+        ax.tick_params(axis="x", labelsize=13)
+        ax.tick_params(axis="y", labelsize=12)
+        ax.set_title(f"\u0394 {metric}", fontsize=14)
+        sm = plt.cm.ScalarMappable(cmap=cmap, norm=norm)
+        sm.set_array([])
+        fig.colorbar(sm, ax=ax, fraction=0.046, pad=0.03)
 
-    for r, metric in enumerate(DELTA_PLOT_METRICS):
-        for c, model_name in enumerate(DELTA_PLOT_MODELS):
-            ax = axes[r, c]
-            rows = sub[sub["model"] == model_name]
-            col = _delta_col(rows, metric) if not rows.empty else None
-            if rows.empty or col is None:
-                ax.text(0.5, 0.5, "N/A", transform=ax.transAxes, ha="center", va="center",
-                        fontsize=16, weight="bold", alpha=0.45)
-                ax.set_xticks([]); ax.set_yticks([])
-                for sp in ax.spines.values():
-                    sp.set_visible(False)
-            else:
-                vals = rows[col].to_numpy(dtype=float)
-                labels = [str(i) for i in rows.index]
-                y = np.arange(len(vals))
-                ax.barh(y, vals, color=[better if v <= 0 else worse for v in vals], alpha=0.85)
-                ax.axvline(0.0, color="0.35", linewidth=1.0)
-                ax.set_yticks(y)
-                # Every column carries its OWN labels: the families have different
-                # parameters (v_diff, v_theta vs z) and, for regressed designs, different
-                # bar counts, so DDM's labels on the left named the wrong bars elsewhere.
-                ax.set_yticklabels(labels, fontsize=8)
-                ax.invert_yaxis()
-                ax.grid(True, axis="x", color="lightgray", linestyle="--", linewidth=0.5, alpha=0.4)
-                for sp in ("top", "right"):
-                    ax.spines[sp].set_visible(False)
-
-            if r == 0:
-                ax.set_title(model_name, fontsize=14)
-            # Metric named once per row, on the left, with no baseline in the label.
-            if c == 0:
-                ax.set_ylabel(f"\u0394 {metric}", fontsize=13)
-
-    fig.tight_layout()
     path = outdir / f"delta_metrics_{condition}.pdf"
     fig.savefig(path, bbox_inches="tight")
     plt.close(fig)
@@ -200,6 +203,7 @@ def main():
     base_fig, base_pred = Path(args.base_fig_dir), Path(args.base_pred_dir)
     max_cats = args.max_num_categories
     delta_rows = []
+    layouts = {}  # (family, case) -> (design_config, parameter_mask, model_config)
 
     arms = {"LBA": dict(cfg=_LBA_WITH_PI, labels=("zero-shot", "fine-tuned"),
                         a_pred=lambda sc: zs / "predictions" / f"lba_{sc}_mid1_cf_pred.npz",
@@ -224,6 +228,7 @@ def main():
             pred_b, true_b, mask_b = _load_npz(b_path)
             _paired(true_a, true_b, f"{name}/{sc}")
             dc = cfg["benchmark_configs"][sc]
+            layouts[(name, sc)] = (dc, mask_a, cfg)
             r_a, pm = compute_r_matrix(true_a, pred_a, dc, cfg["intrinsic_params"], max_cats, mask_a[None])
             r_b, _ = compute_r_matrix(true_b, pred_b, dc, cfg["intrinsic_params"], max_cats, mask_b[None])
             fig = adaptive_correlation_delta(r_a, r_b, pm, dc, cfg["intrinsic_params"], max_cats,
@@ -246,7 +251,7 @@ def main():
     combined.to_csv(outdir / "delta_metrics.csv")
     logging.info(f"[saved] {outdir / 'delta_metrics.csv'}")
     for sc in args.scenarios:
-        plot_delta_metrics(combined, outdir, condition=sc)
+        plot_delta_metrics(combined, layouts, outdir, condition=sc, max_num_categories=max_cats)
     logging.info("Done.")
 
 

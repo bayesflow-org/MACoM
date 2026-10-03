@@ -142,6 +142,75 @@ def _heatmap_axes(ax, r_matrix, parameter_mask, row_labels, row_colors, col_labe
     ax.set_ylim(num_rows - 0.5, -0.5)
 
 
+def heatmap_axes(ax, matrix, parameter_mask, row_labels, row_colors, col_labels,
+                 cmap, norm, annot_fontsize, fmt):
+    """Draw a compacted coefficient-grid matrix (e.g. from :func:`adaptive_metric_matrix`)."""
+    _heatmap_axes(ax, matrix, parameter_mask, row_labels, row_colors, col_labels,
+                  cmap, norm, annot_fontsize, fmt)
+
+
+def adaptive_metric_matrix(
+    values: dict,
+    parameter_mask: np.ndarray,
+    design_config: dict,
+    intrinsic_params: list[str],
+    max_num_categories: int,
+    variable_names: list[str] = None,
+    global_params: list[str] = None,
+    intercept_color: str = "#4e2a84",
+    main_effect_color: str = "#6969ff",
+    interaction_color: str = "#ff6969",
+    max_num_regressors: int = None,
+    categorical_regressors: list[str] = None,
+):
+    """Place per-cell values keyed like ``adaptive_metrics`` rows on the coefficient grid.
+
+    ``values`` maps the row labels of an ``adaptive_metrics`` table (bare parameter name
+    for the intercept row, ``"<param> -- <coefficient>"`` otherwise) to a number. The
+    labels are rebuilt here exactly as ``adaptive_metrics`` builds them, so any key that
+    finds no active cell means the two conventions have drifted.
+
+    Global parameters are dropped, as in ``adaptive_correlation``.
+
+    Returns ``(matrix, display_mask, row_labels, row_colors, col_labels, unplaced)``,
+    compacted for display; ``unplaced`` lists the keys of ``values`` that matched no cell.
+    """
+    if variable_names is None:
+        variable_names = intrinsic_params
+    if parameter_mask.ndim == 3:
+        parameter_mask = parameter_mask[0]
+
+    design_config = expand_design_config_to_mask(design_config, parameter_mask, max_num_categories,
+                                                 max_num_regressors=max_num_regressors)
+    metric_row_labels = build_row_labels(design_config, max_num_categories,
+                                         categorical_regressors=categorical_regressors,
+                                         parameter_mask=parameter_mask)
+    num_rows = min(parameter_mask.shape[0], len(metric_row_labels))
+    parameter_mask = parameter_mask[:num_rows].copy()
+    num_cols = parameter_mask.shape[1]
+
+    matrix = np.full((num_rows, num_cols), np.nan)
+    placed = set()
+    for r in range(num_rows):
+        for c in range(num_cols):
+            if parameter_mask[r, c] != 1.0:
+                continue
+            key = variable_names[c] if r == 0 else f"{variable_names[c]} -- {metric_row_labels[r]}"
+            if key in values:
+                matrix[r, c] = values[key]
+                placed.add(key)
+    unplaced = [k for k in values if k not in placed]
+
+    row_labels, row_colors = _build_row_labels(
+        design_config, num_rows, max_num_categories,
+        intercept_color, main_effect_color, interaction_color,
+        categorical_regressors=categorical_regressors, parameter_mask=parameter_mask,
+    )
+    global_cols = {i for i, p in enumerate(intrinsic_params) if global_params and p in global_params}
+    return (*_compact(matrix, parameter_mask, row_labels, row_colors, variable_names,
+                      global_cols=global_cols), unplaced)
+
+
 def adaptive_correlation_delta(
     r_matrix_a: np.ndarray,
     r_matrix_b: np.ndarray,

@@ -498,6 +498,9 @@ def compact_adapted(adapted):
     }
 
 
+MAX_SAMPLE_TOKENS_PER_PASS = 150_000   # B * samples_chunk_size * tokens, see chunked_sample
+
+
 def chunked_sample(model, adapted, num_samples, steps, solver="euler",
                    samples_chunk_size=None, compact=True):
     """Call model.sample() in chunks of samples_chunk_size to limit peak GPU memory.
@@ -517,6 +520,15 @@ def chunked_sample(model, adapted, num_samples, steps, solver="euler",
     regressor_idx   = adapted["regressor_indices"]
     params_mask     = adapted["param_masks"]
     model_ids       = adapted.get("model_ids")
+
+    # Cap the chunk by sequence-tokens per pass. Small designs are launch-bound and gain
+    # ~2x from chunking; large ones are compute-bound at chunk 1 and only gain memory
+    # (RK4, B=200: 576 tokens peaks 2.7 GiB at chunk 1, 11.9 at 5, 23.7 at 10; measured
+    # 2026-10-03). At B=200 the cap keeps chunk 5 up to 150 tokens and is 1 from ~375.
+    if samples_chunk_size is not None:
+        num_seq_tokens = param_indices.shape[0] * param_indices.shape[1]
+        samples_chunk_size = max(1, min(samples_chunk_size,
+                                        MAX_SAMPLE_TOKENS_PER_PASS // num_seq_tokens))
 
     if samples_chunk_size is None or samples_chunk_size >= num_samples:
         pred = model.sample(

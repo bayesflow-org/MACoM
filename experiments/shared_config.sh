@@ -32,7 +32,9 @@ FM_SAMPLE_STEPS=50
 # cases: RK4 x 50 took 109 s per 200x200 case at chunk 1 and 56 s at chunk 5 (midpoint
 # at chunk 1, the old setting, 67 s). Large designs (~150+ tokens: mixed_predictor,
 # ensemble, real-data designs) are compute-bound already at 1, so 5 is neutral there.
-# Peak memory 0.5-0.7 GiB (measured 2026-10-03, RTX 5000 Ada, compact sampling).
+# Large designs would pay in memory for nothing (576 tokens: 11.9 GiB at 5 vs 2.7 at 1),
+# so chunked_sample caps it by tokens per pass (experiments/utils.py
+# MAX_SAMPLE_TOKENS_PER_PASS): 5 up to 150 tokens, 1 from ~375 (at B=200).
 FM_SAMPLE_CHUNK=5
 
 # ── Data ───────────────────────────────────────────────────────────────────────
