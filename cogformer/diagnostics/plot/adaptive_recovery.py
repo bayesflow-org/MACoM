@@ -6,7 +6,7 @@ from collections.abc import Callable
 
 from cogformer.simulator.design_utils import build_parameter_mask, expand_design_config_to_mask, build_row_labels
 from cogformer.utils.plot_utils import (make_quadratic, credible_interval, cogformer_cm_colors,
-                                        place_legend_below)
+                                        place_legend_below, plain_coef_labels)
 
 
 def adaptive_recovery(
@@ -29,6 +29,7 @@ def adaptive_recovery(
     max_num_regressors: int = None,
     categorical_regressors: list[str] = None,
     arms: list = None,
+    plain_row_labels: bool = False,
 ):
     """Coefficient-matrix recovery grid.
 
@@ -112,6 +113,9 @@ def adaptive_recovery(
     dot = dict(s=14, edgecolor="none") if arms else {}
     row_ylabels = [row_ylabels[i] for i in row_idx]
     row_colors  = [row_colors[i]  for i in row_idx]
+    if plain_row_labels:
+        # Words instead of the design-cell symbols, as in experiment 1's figures.
+        row_ylabels = plain_coef_labels(row_ylabels)
     col_labels  = [variable_names[i] for i in col_idx]
     if global_only:
         # Global params aren't coefficient-matrix rows; the column title names them.

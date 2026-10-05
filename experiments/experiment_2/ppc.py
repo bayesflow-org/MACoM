@@ -1029,11 +1029,14 @@ def _levels_with_data(pool_obs, pool_ppc, cond_name, label_map):
 
 
 def _draw_quantile_panel(ax, obs, ppc_samples, quantiles, xs, ppc_color, ppc_fill,
-                         xlabel, ylabel, zero_guide=False):
+                         xlabel, ylabel, zero_guide=False, label_fs=None, tick_fs=None,
+                         fill_alpha=0.40):
     """One quantile panel, identical in construction to plot_rt_quantiles'."""
+    label_fs = FS_LABEL if label_fs is None else label_fs
+    tick_fs = FS_TICK if tick_fs is None else tick_fs
     obs_q, med, lo, hi = _quantile_stats(obs, ppc_samples, quantiles)
     if med is not None:
-        ax.fill_between(xs, lo, hi, color=ppc_fill, alpha=0.40,
+        ax.fill_between(xs, lo, hi, color=ppc_fill, alpha=fill_alpha,
                         label=f"PPC {PPC_CI:g}% CI", zorder=1)
         ax.plot(xs, med, "o-", color=ppc_color, lw=1.4, ms=4,
                 label="PPC median", zorder=2)
@@ -1043,10 +1046,10 @@ def _draw_quantile_panel(ax, obs, ppc_samples, quantiles, xs, ppc_color, ppc_fil
         ax.axhline(0.0, color=GUIDE_COLOR, ls=":", lw=0.8, zorder=0)
     ax.set_xticks(xs)
     ax.set_xticklabels([f"{q:g}" for q in quantiles])
-    ax.set_xlabel(xlabel, fontsize=FS_LABEL)
+    ax.set_xlabel(xlabel, fontsize=label_fs)
     if ylabel:
-        ax.set_ylabel(ylabel, fontsize=FS_LABEL)
-    ax.tick_params(labelsize=FS_TICK)
+        ax.set_ylabel(ylabel, fontsize=label_fs)
+    ax.tick_params(labelsize=tick_fs)
     ax.set_box_aspect(1)
     ax.spines[["top", "right"]].set_visible(False)
 
@@ -1504,6 +1507,20 @@ def plot_combined(obs_pooled, ppc_pooled, obs_ch, ppc_ch, conditions, model_name
     logging.info(f"[saved] {savepath}")
 
 
+def _legend_below(fig, handles, labels, fontsize):
+    """One figure legend in a single row, hung a fixed distance below the lowest x
+    label -- MEASURED, rather than at a fixed figure fraction: a fraction is a
+    different distance at every figure height, and at one of them it put the entries
+    on the bottom row's x labels. Call after the layout is final."""
+    fig.canvas.draw()
+    rend = fig.canvas.get_renderer()
+    ink_bottom = min(ax.get_tightbbox(rend).y0 for ax in fig.axes if ax.get_visible())
+    gap_px = LEGEND_GAP_PT / 72 * fig.dpi
+    y = fig.transFigure.inverted().transform((0, ink_bottom - gap_px))[1]
+    return fig.legend(handles, labels, loc="upper center", bbox_to_anchor=(0.5, y),
+                      ncol=len(handles), frameon=False, fontsize=fontsize)
+
+
 def plot_combined_all(per_family, outpath, quantiles=DEFAULT_RT_QUANTILES):
     """All three families' PPCs in ONE figure, five slots per row.
 
@@ -1668,15 +1685,7 @@ def plot_combined_all(per_family, outpath, quantiles=DEFAULT_RT_QUANTILES):
          f"PPC median + {PPC_CI:g}% CI"]
     if not any(grids.values()):
         H, L = H[:3], L[:3]
-    # Hung a fixed distance below the lowest x label, MEASURED, rather than at a fixed
-    # figure fraction: a fraction is a different distance at every figure height, and
-    # at this one it put the entries on the bottom row's "Choice quantile" labels.
-    rend = fig.canvas.get_renderer()
-    ink_bottom = min(ax.get_tightbbox(rend).y0 for ax in fig.axes if ax.get_visible())
-    gap_px = LEGEND_GAP_PT / 72 * fig.dpi
-    y = fig.transFigure.inverted().transform((0, ink_bottom - gap_px))[1]
-    fig.legend(H, L, loc="upper center", bbox_to_anchor=(0.5, y),
-               ncol=len(H), frameon=False, fontsize=FS_LEG)
+    _legend_below(fig, H, L, fontsize=FS_LEG)
 
     # Dashed: condition-group breaks, and the RT/choice break on the DDM/RDM rows.
     for r, (fam, kind, cols, breaks) in enumerate(plan):
@@ -1704,6 +1713,73 @@ def plot_combined_all(per_family, outpath, quantiles=DEFAULT_RT_QUANTILES):
     fig.savefig(outpath, bbox_inches="tight")
     plt.close(fig)
     logging.info(f"[saved] {outpath}")
+
+
+# RT-quantile row (plot_rt_quantiles_row). Drawn at FIG_W like the combined figures,
+# so \textwidth halves these: 8 / 7 / 5.5 / 6 pt on the page.
+ROW_FS_TITLE, ROW_FS_LABEL, ROW_FS_TICK, ROW_FS_LEG = 16, 14, 11, 12
+# The band takes the LINE's colour at low opacity rather than the family's light
+# stop, matching experiment 3's recovery overlay, which draws fine-tuned LBA in the
+# saturated stop alone (its error bars are that colour, translucent).
+ROW_FILL_ALPHA = 0.22
+
+
+def plot_rt_quantiles_row(obs_pooled, ppc_pooled, conditions, model_name, variant, outdir,
+                          quantiles=DEFAULT_RT_QUANTILES):
+    """Every level of every grouping variable as ONE row of RT-quantile panels.
+
+    The per-variable figures from plot_rt_quantiles, side by side and without their
+    suptitles: the level names title the panels, and a dashed rule separates one
+    grouping variable from the next, as in the experiment 2 combined figure. One y
+    scale across the row, ticks on the first panel only -- every panel is RT in
+    seconds, and per-panel scales would hide which levels are slower.
+    """
+    ppc_color = _ppc_colors(model_name)[0]
+    tag = _quantile_tag(quantiles)
+    quantiles = np.asarray(quantiles, dtype=float)
+    xs = np.arange(len(quantiles))
+
+    groups = [(c, lv) for c, _, label_map in conditions
+              if (lv := _levels_with_data(obs_pooled, ppc_pooled, c, label_map))]
+    cols = [(c, lbl) for c, lv in groups for lbl in lv]
+    if not cols:
+        logging.warning(f"{model_name}: no condition level has both observed and PPC RTs; "
+                        "skipping the RT-quantile row")
+        return
+    fig, axes = plt.subplots(1, len(cols), squeeze=False, figsize=(FIG_W, FIG_W * 0.22))
+    for j, (c, lbl) in enumerate(cols):
+        ax = axes[0, j]
+        _draw_quantile_panel(
+            ax, np.asarray(obs_pooled[c][lbl], dtype=float),
+            [np.asarray(d, dtype=float) for d in ppc_pooled[c][lbl]],
+            quantiles, xs, ppc_color, ppc_color, "RT quantile", "RT (s)" if j == 0 else "",
+            label_fs=ROW_FS_LABEL, tick_fs=ROW_FS_TICK, fill_alpha=ROW_FILL_ALPHA)
+        ax.set_title(lbl, fontsize=ROW_FS_TITLE)
+        # Every quantile keeps its tick, every other one its label: seven panels
+        # to a row leave no room for five labels at a legible size.
+        ax.set_xticklabels([f"{q:g}" if i % 2 == 0 else "" for i, q in enumerate(quantiles)])
+
+    lo = min(a.get_ylim()[0] for a in axes[0])
+    hi = max(a.get_ylim()[1] for a in axes[0])
+    for j, a in enumerate(axes[0]):
+        a.set_ylim(lo, hi)
+        if j:
+            a.tick_params(labelleft=False)
+
+    fig.tight_layout()
+    fig.subplots_adjust(wspace=WSPACE)
+    fig.canvas.draw()
+    b = 0
+    for _, lv in groups[:-1]:
+        b += len(lv)
+        _axes_divider(fig, axes[0, b - 1], axes[0, b], heavy=False)
+    _legend_below(fig, *axes[0, 0].get_legend_handles_labels(), fontsize=ROW_FS_LEG)
+
+    outdir.mkdir(parents=True, exist_ok=True)
+    savepath = outdir / f"{model_name}_{variant}_rt_quantiles_row{tag}.pdf"
+    fig.savefig(savepath, bbox_inches="tight")
+    plt.close(fig)
+    logging.info(f"[saved] {savepath}")
 
 
 def parse_args():
@@ -1816,6 +1892,11 @@ def main():
              line_alpha=args.ppc_line_alpha, line_width=args.ppc_line_width)
     plot_rt_quantiles(obs_pooled, ppc_pooled, conditions, args.model, args.variant,
                       outdir, quantiles=args.rt_quantiles)
+    if args.model == "lba":
+        # Experiment 3's figure. The other families' RT quantiles are already one
+        # figure each (plot_combined, plot_combined_all).
+        plot_rt_quantiles_row(obs_pooled, ppc_pooled, conditions, args.model,
+                              args.variant, outdir, quantiles=args.rt_quantiles)
     plot_rt_qq(obs_pooled, ppc_pooled, conditions, args.model, args.variant,
                outdir, quantiles=args.rt_quantiles)
     plot_choice_quantiles(obs_ch, ppc_ch, conditions, args.model, args.variant,

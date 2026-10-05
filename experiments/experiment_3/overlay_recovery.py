@@ -41,6 +41,9 @@ GLOBAL_VARIABLE_NAMES = [r"$\pi$"]
 # RDM's embedding.
 C_ZERO, C_FT = "#D9D9D9", family_colors("lba")["main_effect"]
 ARM_LABELS = ("zero-shot", "fine-tuned")
+# Drawn at the plotting function's default 3 in per panel (18 in wide for six
+# columns), so \textwidth scales it by ~0.31: 20 / 26 pt land at ~6.1 / 8.0 pt.
+LABEL_FS, TITLE_FS = 20, 26
 
 
 def load(path):
@@ -92,7 +95,8 @@ def main():
         intrinsic_params=cfg["intrinsic_params"], max_num_categories=cats,
         max_num_regressors=a.max_num_regressors, parameter_mask=m0,
         variable_names=cfg["variable_names"], global_params=GLOBAL_PARAMS,
-        arms=[(p0, C_ZERO, ARM_LABELS[0]), (p1, C_FT, ARM_LABELS[1])])
+        arms=[(p0, C_ZERO, ARM_LABELS[0]), (p1, C_FT, ARM_LABELS[1])],
+        plain_row_labels=True, label_fontsize=LABEL_FS, title_fontsize=TITLE_FS)
     out = Path(a.outdir) / "lba" / f"{sc}_overlay_recovery.pdf"
     out.parent.mkdir(parents=True, exist_ok=True)
     fig.savefig(out, bbox_inches="tight")

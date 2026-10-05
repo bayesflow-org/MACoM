@@ -25,6 +25,7 @@ from cogformer.diagnostics.plot.adaptive_correlation import (
     compute_r_matrix, adaptive_correlation_delta, adaptive_metric_matrix, heatmap_axes,
 )
 from cogformer.diagnostics.metric.adaptive_metrics import adaptive_metrics as compute_adaptive_metrics
+from cogformer.utils.plot_utils import plain_coef_labels
 
 from ..configs import MODELS as _BASE_MODELS, LBA_CONFIG
 from ..utils import add_global_params
@@ -160,6 +161,8 @@ def plot_delta_metrics(combined: pd.DataFrame, layouts: dict, outdir: Path, cond
         if unplaced:
             raise SystemExit(f"{DELTA_PLOT_MODEL}/{condition} {metric}: no grid cell for "
                              f"{unplaced} -- metric labels and grid layout disagree")
+        # Words instead of the design-cell symbols, as in experiment 1's figures.
+        panel[2] = plain_coef_labels(panel[2])
         panels[metric] = panel
     if not panels:
         logging.warning(f"No {DELTA_PLOT_MODEL} metric deltas for '{condition}'; skipping.")
@@ -174,9 +177,9 @@ def plot_delta_metrics(combined: pd.DataFrame, layouts: dict, outdir: Path, cond
         vmax = np.nanmax(np.abs(panel[0])) if np.isfinite(panel[0]).any() else 1.0
         norm = mcolors.Normalize(vmin=-vmax, vmax=vmax)
         heatmap_axes(ax, *panel, cmap=cmap, norm=norm, annot_fontsize=9, fmt="+.3f")
-        ax.tick_params(axis="x", labelsize=13)
-        ax.tick_params(axis="y", labelsize=12)
-        ax.set_title(f"\u0394 {metric}", fontsize=14)
+        ax.tick_params(axis="x", labelsize=16)
+        ax.tick_params(axis="y", labelsize=15)
+        ax.set_title(f"\u0394 {metric}", fontsize=18)
         sm = plt.cm.ScalarMappable(cmap=cmap, norm=norm)
         sm.set_array([])
         fig.colorbar(sm, ax=ax, fraction=0.046, pad=0.03)

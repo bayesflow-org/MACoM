@@ -1,4 +1,5 @@
 import random
+import re
 
 import numpy as np
 import matplotlib.pyplot as plt
@@ -553,6 +554,27 @@ def family_colors(family: str) -> dict:
             f"known families: {sorted(FAMILY_PALETTES)}"
         )
     return FAMILY_PALETTES[key]()
+
+
+def plain_coef_labels(labels: list[str]) -> list[str]:
+    """Coefficient row labels in words: ``$1$`` -> Intercept, ``$u_k$`` -> Main Effect k,
+    ``$u_1 \\times u_2$`` -> Interaction -- the names experiment 1's figures use.
+
+    "Main Effect k" is wrapped onto two lines: rotated as a y label, one line is longer
+    than a page-sized panel is tall. Returns ``labels`` unchanged when the plain names
+    would collide (several contrasts of one regressor, or several interaction rows),
+    since the words cannot tell those rows apart and the symbols can.
+    """
+    out = []
+    for lab in labels:
+        if "\\times" in lab or "×" in lab:
+            out.append("Interaction")
+        elif lab.strip("$ ") == "1":
+            out.append("Intercept")
+        else:
+            m = re.search(r"u_\{?(\d+)\}?", lab)
+            out.append(f"Main\nEffect {m.group(1)}" if m else lab)
+    return out if len(set(out)) == len(out) else list(labels)
 
 
 def family_line_fill(family: str) -> tuple[str, str]:
