@@ -974,6 +974,10 @@ WSPACE = 0.26
 # the lower row's titles, and a solid rule marks the break between them.
 HSPACE, ROW_BAND = 0.34, 0.46
 
+# Blank space between the lowest x label and the figure legend hung below it, in
+# DRAWN points (the page halves it).
+LEGEND_GAP_PT = 2.0
+
 # SIZED FOR THE PAGE, NOT FOR THE SCREEN. The target is a LaTeX \textwidth of 5.5 in
 # (US Letter, 1.5 in margins). The figure is drawn at FIG_SCALE times that, so
 # \includegraphics[width=\textwidth] scales it down by 1/FIG_SCALE and every point
@@ -1664,7 +1668,14 @@ def plot_combined_all(per_family, outpath, quantiles=DEFAULT_RT_QUANTILES):
          f"PPC median + {PPC_CI:g}% CI"]
     if not any(grids.values()):
         H, L = H[:3], L[:3]
-    fig.legend(H, L, loc="lower center", bbox_to_anchor=(0.5, -0.015),
+    # Hung a fixed distance below the lowest x label, MEASURED, rather than at a fixed
+    # figure fraction: a fraction is a different distance at every figure height, and
+    # at this one it put the entries on the bottom row's "Choice quantile" labels.
+    rend = fig.canvas.get_renderer()
+    ink_bottom = min(ax.get_tightbbox(rend).y0 for ax in fig.axes if ax.get_visible())
+    gap_px = LEGEND_GAP_PT / 72 * fig.dpi
+    y = fig.transFigure.inverted().transform((0, ink_bottom - gap_px))[1]
+    fig.legend(H, L, loc="upper center", bbox_to_anchor=(0.5, y),
                ncol=len(H), frameon=False, fontsize=FS_LEG)
 
     # Dashed: condition-group breaks, and the RT/choice break on the DDM/RDM rows.
