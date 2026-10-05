@@ -534,6 +534,7 @@ def global_ensemble_recovery(
     wspace: float = None,
     hspace: float = None,
     equal_gaps: bool = False,
+    extra_row_gap_in: float = 0.0,
     alpha: float = 0.7,
     max_per_row: int = 6,
     **kwargs,
@@ -543,6 +544,8 @@ def global_ensemble_recovery(
     most ``max_per_row`` panels (e.g. 5 configs -> one row of 5; 12 configs ->
     two rows of 6), each panel in its config's color with the config label as
     title. Returns ``None`` when no global parameter is active.
+    ``extra_row_gap_in`` opens the rows apart by that many inches AFTER the
+    column gaps are matched, so it separates the rows without widening the columns.
     """
     n_configs = len(design_configs)
     if variable_names is None:
@@ -699,6 +702,21 @@ def global_ensemble_recovery(
             if abs(new_w - w_in) < 0.01:
                 break
             fig.set_size_inches(new_w, h_in)
+
+    if extra_row_gap_in and n_rows > 1:
+        # Rows only, and last: equal_gaps above sizes the columns off the row gap, so
+        # widening the rows any earlier would widen the columns with them. The figure
+        # grows by the added gaps so the panels keep their size; bbox_inches='tight'
+        # then trims whatever the bottom margin does not use.
+        w_in, h_in = fig.get_size_inches()
+        positions = [[ax.get_position() for ax in row] for row in axarr]
+        new_h = h_in + extra_row_gap_in * (n_rows - 1)
+        fig.set_size_inches(w_in, new_h)
+        for r, row in enumerate(axarr):
+            shift_in = extra_row_gap_in * (n_rows - 1 - r)
+            for ax, p in zip(row, positions[r]):
+                ax.set_position([p.x0, (p.y0 * h_in + shift_in) / new_h,
+                                 p.width, p.height * h_in / new_h])
     return fig
 
 

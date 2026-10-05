@@ -75,9 +75,11 @@ PAGE_SPEC = {
     # height is what shows up as the band between rows. Only the figure height
     # closes it, and the value is tuned against the SAVED figure -- the in-figure
     # geometry before the thumbnail strip is added is not what gets written out.
-    "recovery":        dict(width=10.1, title=15, label=12, legend=10, tick=6,  annot=7,
+    # legend is also the caption allowance under each thumbnail, so it has to be at
+    # least the size fit_labels gives the captions or they land on the next row.
+    "recovery":        dict(width=10.1, title=15, label=12, legend=13, tick=8,  annot=8,
                             height_ratio=0.46),
-    "recovery_global": dict(width=11.0, title=12, label=11, legend=9,  tick=8,  annot=9),
+    "recovery_global": dict(width=11.0, title=14, label=12, legend=9,  tick=10, annot=11),
 }
 DEFAULT_SPEC = dict(width=None, title=None, label=None, legend=None, tick=None,
                     annot=None, height_ratio=None)
@@ -88,7 +90,7 @@ GLOBAL_PER_ROW = 6
 # Wrapped: rotated, a row label's length is measured against the panel's HEIGHT, and
 # "Main Effect 1" on one line is longer than a page-sized panel is tall, so the four
 # labels overprint each other. The words are unchanged.
-ROW_LABELS = ["Intercept", "Main Effect 1", "Main Effect 2", "Interaction"]
+ROW_LABELS = ["Intercept", "Main\nEffect 1", "Main\nEffect 2", "Interaction"]
 
 
 def main():
@@ -184,10 +186,10 @@ def main():
         # Labels fitted to their cell and the gutters pulled in as far as they go:
         # the panels are what the figure is for, so nothing else gets to claim space.
         row_kw = {"row_labels": ROW_LABELS, "max_ticks": 3, "fit_labels": True,
-                  "fit_delta": 1.0, "wspace": 0.20, "hspace": 0.0,
+                  "fit_delta": 3.0, "wspace": 0.20, "hspace": 0.0,
                   "tick_pad": 1.9, "marker_size": 9, "err_linewidth": 0.7,
-                  "thumb_scale": 0.8, "thumb_height_in": 0.60, "thumb_spread": False, "thumb_tight_rows": True,
-                  "pack_rows": True, "row_gap_px": 10.0,
+                  "thumb_scale": 0.8, "thumb_height_in": 0.55, "thumb_spread": False, "thumb_tight_rows": True,
+                  "pack_rows": True, "row_gap_px": 3.0,
                   "pack_cols": True, "col_gap_px": 10.0,
                   # The strip divider is drawn at 0.02..0.98 of the figure. The target
                   # is BELOW 0.02 on purpose: this aligns the grid's tight bbox, and a
@@ -205,7 +207,10 @@ def main():
         # column and bottom row (GLOBAL_SHARE).
         gkw = dict(GLOBAL_SHARE.get(name, {}))
         if name == "recovery":
-            gkw.update(max_per_row=GLOBAL_PER_ROW, wspace=0.06, equal_gaps=True)
+            # The second row's titles sit right under the first row's axes without
+            # the extra gap, and read as captions of the panels above them.
+            gkw.update(max_per_row=GLOBAL_PER_ROW, wspace=0.06, equal_gaps=True,
+                       extra_row_gap_in=0.25)
         g_rows = int(np.ceil(n / GLOBAL_PER_ROW))
         gfig = sized(global_fn, f"{name}_global", g_rows, GLOBAL_PER_ROW,
                      **shared, **extra, **gkw)
