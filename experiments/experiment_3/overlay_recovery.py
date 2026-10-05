@@ -39,7 +39,7 @@ GLOBAL_VARIABLE_NAMES = [r"$\pi$"]
 # ramp are not separable where the clouds overlap, which is most cells. Grey also says
 # the right thing: zero-shot, the network has no LBA identity and runs it through the
 # RDM's embedding.
-C_ZERO, C_FT = "#8C8C96", family_colors("lba")["main_effect"]
+C_ZERO, C_FT = "#D9D9D9", family_colors("lba")["main_effect"]
 ARM_LABELS = ("zero-shot", "fine-tuned")
 
 

@@ -457,7 +457,7 @@ def staedtler_fineliner():
 #     ddm  magenta/red  <- cogformer_fm_colors
 #     rdm  purple/blue  <- cogformer_vi_colors
 #     cdm  green        <- cdm_colors  (see below -- NOT bf_colors)
-#     lba  orange/gold  <- lba_colors
+#     lba  crimson      <- lba_colors
 #
 # Each ramp runs dark -> saturated -> light across (intercept, main_effect,
 # interaction) and keeps that effect-type meaning within a family. A figure that
@@ -488,34 +488,32 @@ def cdm_colors():
 
 
 def lba_colors():
-    """LBA's identity orange/gold.
+    """LBA's identity crimson.
 
-    Replaces ``cogformer_cm_colors`` (blue/teal) as LBA's family identity. Two
-    reasons, one practical and one structural.
+    Replaces ``cogformer_cm_colors`` (blue/teal) as LBA's family identity: every
+    model-class validate script sets ``colors = cogformer_mc_colors()``, a
+    byte-for-byte duplicate of ``cogformer_vi_colors`` -- RDM's identity -- so LBA
+    had been drawn in RDM's purple/blue in experiment 3, exactly where the two sit
+    side by side.
 
-    Practically, the LBA figures were never rendering in teal: every model-class
-    validate script sets ``colors = cogformer_mc_colors()`` once, globally, and
-    that function is a byte-for-byte duplicate of ``cogformer_vi_colors`` -- RDM's
-    identity. So LBA has been drawn in RDM's purple/blue in every arm of
-    experiment 3, which is precisely the experiment where the two sit side by side.
+    An earlier orange/gold ramp (#C96A04) was dropped: against the grey zero-shot
+    cloud of the experiment 3 overlay it managed only 1.14 contrast; #A4343A gets
+    2.01, and 6.71 on white. Pure maroon (#800000) separates further from the grey
+    but sinks into the near-black observed curve (1.56), which matters in the LBA
+    PPC; this stop keeps 2.54 there -- still below DDM 4.02 / RDM 4.11 / CDM 4.94,
+    the price of a deep red. Its hue sits 33 degrees from DDM's magenta, carried by
+    lightness and saturation as much as hue.
 
-    Structurally, orange/gold is the only warm hue left unclaimed: DDM holds
-    magenta/red, RDM purple/blue, CDM green. Its nearest neighbour is DDM at 67
-    degrees of hue, against 114 and 151 for CDM and RDM.
-
-    Gold is intrinsically luminous, so the naive bright ramp (#F59E0B ->  #FCD34D)
-    puts the light stop at 1.44 contrast against a white page -- an invisible fill.
-    The mid stop is therefore deepened to a burnt orange, which buys room beneath
-    it: light/white 1.77 against CDM's 1.66, mid/observed 4.51 (DDM 4.02, RDM 4.11,
-    CDM 4.94), dark-mid separation 2.81 (band 2.44-2.98) and mid-light 2.14.
+    Dark-mid separation 2.41 (band 2.44-2.98). The light stop keeps the same hue,
+    light/white 1.77 against CDM's 1.66, and stays apart from DDM's #FF6969 (1.59).
 
     ``cogformer_cm_colors`` is NOT removed -- it is still the default colour inside
     ``adaptive_recovery`` and ``adaptive_coverage``.
     """
     colors = {
-        "intercept": "#5E3410",
-        "main_effect": "#C96A04",
-        "interaction": "#F3B94F",
+        "intercept": "#3F1114",
+        "main_effect": "#A4343A",
+        "interaction": "#EFB4B6",
     }
     return colors
 

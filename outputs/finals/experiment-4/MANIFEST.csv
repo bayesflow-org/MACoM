@@ -9,9 +9,9 @@ probe/compare/c2st_identified.npz,outputs/data/encoder_rep/addm_compare/intercep
 probe/compare/c2st_joint.npz,outputs/data/encoder_rep/addm_compare/intercept_only_vsvfixed/c2st_joint.npz,5540,2026-10-04 11:41:06Z
 probe/compare/c2st_summary.csv,outputs/data/encoder_rep/addm_compare/intercept_only_vsvfixed/c2st_summary.csv,158,2026-10-04 11:41:11Z
 probe/compare/comparison.pdf,outputs/figures/encoder_rep/addm_compare/intercept_only_vsvfixed/addm_arm_compare_intercept_only_vsvfixed.pdf,40740,2026-10-04 11:41:11Z
-probe/compare/panel.pdf,outputs/figures/encoder_rep/addm_compare/intercept_only_vsvfixed/addm_arm_compare_intercept_only_vsvfixed_panel.pdf,691536,2026-10-04 11:43:06Z
-probe/compare/panel_recovery.pdf,outputs/figures/encoder_rep/addm_compare/intercept_only_vsvfixed/addm_arm_compare_intercept_only_vsvfixed_panel_recovery.pdf,206052,2026-10-04 11:43:06Z
-probe/compare/panel_representation.pdf,outputs/figures/encoder_rep/addm_compare/intercept_only_vsvfixed/addm_arm_compare_intercept_only_vsvfixed_panel_representation.pdf,495802,2026-10-04 11:43:44Z
+probe/compare/panel.pdf,outputs/figures/encoder_rep/addm_compare/intercept_only_vsvfixed/addm_arm_compare_intercept_only_vsvfixed_panel.pdf,691512,2026-10-05 03:57:33Z
+probe/compare/panel_recovery.pdf,outputs/figures/encoder_rep/addm_compare/intercept_only_vsvfixed/addm_arm_compare_intercept_only_vsvfixed_panel_recovery.pdf,206052,2026-10-05 03:57:34Z
+probe/compare/panel_representation.pdf,outputs/figures/encoder_rep/addm_compare/intercept_only_vsvfixed/addm_arm_compare_intercept_only_vsvfixed_panel_representation.pdf,495782,2026-10-05 03:58:15Z
 probe/compare/recovery.pdf,outputs/figures/encoder_rep/addm_compare/intercept_only_vsvfixed/addm_arm_compare_intercept_only_vsvfixed_recovery.pdf,205846,2026-10-04 11:41:17Z
 probe/compare/shared_validation.npz,outputs/data/encoder_rep/addm_compare/intercept_only_vsvfixed/shared_validation.npz,20953558,2026-10-04 11:41:11Z
 probe/frozen/bf_metrics.csv,outputs/data/encoder_rep/addm_vsvfixed/intercept_only/addm_intercept_only_bf_metrics.csv,164,2026-10-04 11:39:04Z
@@ -20,7 +20,7 @@ probe/frozen/coverage.pdf,outputs/data/encoder_rep/addm_vsvfixed/intercept_only/
 probe/frozen/data.npz,outputs/data/encoder_rep/addm_vsvfixed/intercept_only/addm_encoder_rep_data.npz,11205034,2026-10-04 11:38:55Z
 probe/frozen/recovery.pdf,outputs/data/encoder_rep/addm_vsvfixed/intercept_only/addm_intercept_only_recovery.pdf,112989,2026-10-04 11:39:00Z
 probe/frozen/z_score_contraction.pdf,outputs/data/encoder_rep/addm_vsvfixed/intercept_only/addm_intercept_only_z_score_contraction.pdf,58684,2026-10-04 11:39:04Z
-representation/crossfamily/app3_pooled_geometry.pdf,outputs/figures/encoder_rep/representation/crossfamily/app3_pooled_geometry.pdf,156495,2026-10-04 11:42:04Z
+representation/crossfamily/app3_pooled_geometry.pdf,outputs/figures/encoder_rep/representation/crossfamily/app3_pooled_geometry.pdf,156514,2026-10-05 03:56:44Z
 representation/crossfamily/app3_summaries.npz,outputs/data/encoder_rep/representation/crossfamily/app3_summaries.npz,3810007,2026-10-04 11:42:08Z
 representation/frozen_vs_learned/cka_vs_null.pdf,outputs/figures/encoder_rep/representation/intercept_only_vsvfixed/cka_vs_null.pdf,17218,2026-10-04 11:42:19Z
 representation/frozen_vs_learned/gram_cka.pdf,outputs/figures/encoder_rep/representation/intercept_only_vsvfixed/gram_cka.pdf,399756,2026-10-04 11:42:19Z
