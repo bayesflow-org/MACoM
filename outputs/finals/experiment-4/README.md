@@ -1,7 +1,7 @@
 # Experiment 4 — encoder representation
 
-Assembled 2026-10-05 04:11:23Z by
-`experiments/finalize_experiment_4.py` — 28 files. Commit `51216b8a36b2fa7e7df4ac264524f5e82becf51e`.
+Assembled 2026-10-05 16:21:00Z by
+`experiments/finalize_experiment_4.py` — 28 files. Commit `0c2f17b958ef25a649ee68ca198e91a4669accaf`.
 `MANIFEST.csv` records per-file provenance.
 
 ## Scope

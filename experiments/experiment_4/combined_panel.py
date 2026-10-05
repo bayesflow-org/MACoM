@@ -96,7 +96,7 @@ R_PAD = 0.06
 
 # --- bottom-row height budget, inches ---------------------------------------------
 TOP_PAD = 0.34      # panel titles, and clearance under the row divider
-FOOT_PAD = 0.46     # x tick labels + x label, below every panel
+FOOT_PAD = 0.52     # x tick labels + x label, below every panel, and clearance above the colorbar
 CB_H = 0.085        # colorbar bar itself
 CB_LABEL = 0.30     # "Summary similarity" under it
 # The geometry legend's two rows, measured at FS_LEG with GEOM_LEG_ROW_GAP between
