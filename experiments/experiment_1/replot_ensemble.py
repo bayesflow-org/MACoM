@@ -71,14 +71,17 @@ def parse_args():
 PAGE_SPEC = {
     # label/legend here are only STARTING sizes for recovery: fit_labels rescales
     # each one to its cell, so what matters is the cell, not this number.
-    # height_ratio: rows are square and WIDTH-limited here, so the leftover cell
-    # height is what shows up as the band between rows. Only the figure height
-    # closes it, and the value is tuned against the SAVED figure -- the in-figure
-    # geometry before the thumbnail strip is added is not what gets written out.
+    # width/height_ratio: rows are square and WIDTH-limited here, and the grid is
+    # pinned to the bottom of the divider, so any height the grid does not fill shows
+    # up as a band above it. The figure HEIGHT is held at what the thumbnail strip
+    # needs (~4.65 in) and the WIDTH grown until the grid's top meets the divider's.
+    # Tuned against the SAVED figure -- the in-figure geometry before the thumbnail
+    # strip is added is not what gets written out. Text sizes are set for the page
+    # scale this width gives (~0.46 at \textwidth).
     # legend is also the caption allowance under each thumbnail, so it has to be at
     # least the size fit_labels gives the captions or they land on the next row.
-    "recovery":        dict(width=10.1, title=15, label=12, legend=13, tick=6.3, annot=7,
-                            height_ratio=0.46),
+    "recovery":        dict(width=10.8, title=15.8, label=12, legend=13, tick=6.6, annot=7.4,
+                            height_ratio=0.4302),
     "recovery_global": dict(width=11.0, title=12.6, label=11.5, legend=9, tick=7.9, annot=9),
 }
 DEFAULT_SPEC = dict(width=None, title=None, label=None, legend=None, tick=None,
@@ -186,7 +189,7 @@ def main():
         # Labels fitted to their cell and the gutters pulled in as far as they go:
         # the panels are what the figure is for, so nothing else gets to claim space.
         row_kw = {"row_labels": ROW_LABELS, "max_ticks": 3, "fit_labels": True,
-                  "fit_delta": 2.2, "wspace": 0.20, "hspace": 0.0,
+                  "fit_delta": 2.0, "wspace": 0.20, "hspace": 0.0,
                   "tick_pad": 1.9, "marker_size": 9, "err_linewidth": 0.7,
                   "thumb_scale": 0.8, "thumb_height_in": 0.55, "thumb_spread": False, "thumb_tight_rows": True,
                   "pack_rows": True, "row_gap_px": 3.0,
