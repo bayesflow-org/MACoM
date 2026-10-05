@@ -556,12 +556,12 @@ def family_colors(family: str) -> dict:
     return FAMILY_PALETTES[key]()
 
 
-def plain_coef_labels(labels: list[str]) -> list[str]:
+def plain_coef_labels(labels: list[str], wrap: bool = True) -> list[str]:
     """Coefficient row labels in words: ``$1$`` -> Intercept, ``$u_k$`` -> Main Effect k,
     ``$u_1 \\times u_2$`` -> Interaction -- the names experiment 1's figures use.
 
-    "Main Effect k" is wrapped onto two lines: rotated as a y label, one line is longer
-    than a page-sized panel is tall. Returns ``labels`` unchanged when the plain names
+    "Main Effect k" is wrapped onto two lines unless ``wrap=False``: rotated as a y
+    label, one line is longer than a page-sized panel is tall. Returns ``labels`` unchanged when the plain names
     would collide (several contrasts of one regressor, or several interaction rows),
     since the words cannot tell those rows apart and the symbols can.
     """
@@ -573,7 +573,7 @@ def plain_coef_labels(labels: list[str]) -> list[str]:
             out.append("Intercept")
         else:
             m = re.search(r"u_\{?(\d+)\}?", lab)
-            out.append(f"Main\nEffect {m.group(1)}" if m else lab)
+            out.append(f"Main{chr(10) if wrap else ' '}Effect {m.group(1)}" if m else lab)
     return out if len(set(out)) == len(out) else list(labels)
 
 

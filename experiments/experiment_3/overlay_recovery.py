@@ -42,8 +42,8 @@ GLOBAL_VARIABLE_NAMES = [r"$\pi$"]
 C_ZERO, C_FT = "#D9D9D9", family_colors("lba")["main_effect"]
 ARM_LABELS = ("zero-shot", "fine-tuned")
 # Drawn at the plotting function's default 3 in per panel (18 in wide for six
-# columns), so \textwidth scales it by ~0.31: 20 / 26 pt land at ~6.1 / 8.0 pt.
-LABEL_FS, TITLE_FS = 20, 26
+# columns), so \textwidth scales it by ~0.31: 23 / 26 pt land at ~7.0 / 8.0 pt.
+LABEL_FS, TITLE_FS = 23, 26
 
 
 def load(path):

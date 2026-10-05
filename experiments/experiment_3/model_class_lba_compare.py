@@ -161,8 +161,10 @@ def plot_delta_metrics(combined: pd.DataFrame, layouts: dict, outdir: Path, cond
         if unplaced:
             raise SystemExit(f"{DELTA_PLOT_MODEL}/{condition} {metric}: no grid cell for "
                              f"{unplaced} -- metric labels and grid layout disagree")
-        # Words instead of the design-cell symbols, as in experiment 1's figures.
-        panel[2] = plain_coef_labels(panel[2])
+        # Words instead of the design-cell symbols, as in experiment 1's figures. One
+        # line each: horizontal tick labels have the width, and two-line labels crowd
+        # a row that is only one cell tall.
+        panel[2] = plain_coef_labels(panel[2], wrap=False)
         panels[metric] = panel
     if not panels:
         logging.warning(f"No {DELTA_PLOT_MODEL} metric deltas for '{condition}'; skipping.")
@@ -178,7 +180,7 @@ def plot_delta_metrics(combined: pd.DataFrame, layouts: dict, outdir: Path, cond
         norm = mcolors.Normalize(vmin=-vmax, vmax=vmax)
         heatmap_axes(ax, *panel, cmap=cmap, norm=norm, annot_fontsize=9, fmt="+.3f")
         ax.tick_params(axis="x", labelsize=16)
-        ax.tick_params(axis="y", labelsize=15)
+        ax.tick_params(axis="y", labelsize=13)
         ax.set_title(f"\u0394 {metric}", fontsize=18)
         sm = plt.cm.ScalarMappable(cmap=cmap, norm=norm)
         sm.set_array([])
