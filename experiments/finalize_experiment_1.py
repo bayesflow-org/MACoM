@@ -17,13 +17,20 @@ linked so the tree is self-sufficient and the sources can be removed.
 Idempotent, and missing sources are reported rather than fatal, so it can be run
 before every stage has finished and re-run afterwards.
 
+The main-figure panels are RESTYLED before they are copied (restyle()): the stages
+that produce them draw with their scripts' generic defaults, and the page styling
+lives in the replot scripts. Doing it here means a re-run of any stage cannot put
+the unstyled defaults into finals.
+
     python -m experiments.finalize_experiment_1 --dry_run
     python -m experiments.finalize_experiment_1
 """
 import argparse
 import hashlib
+import os
 import shutil
 import subprocess
+import sys
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -160,11 +167,38 @@ def git_commit() -> str:
         return "unknown"
 
 
+def restyle():
+    """Redraw the main-figure panels with their page styling, in place in the source
+    directories, from the data the stages saved -- no GPU, no resampling.
+
+    The random-ensemble recovery and pi grids come from replot_ensemble, the
+    information-gain figure from replot_design_eig; their sizes and layout are tuned
+    for main_figure.tex. Only those panels: the other ensemble figures (coverage,
+    ecdf) are appendix figures and keep the run's own styling.
+    """
+    env = {**os.environ, "MPLBACKEND": "Agg"}
+    steps = [
+        (FIG / ENSEMBLE_DIR / "model_class_ensemble_data.npz",
+         ["experiments.experiment_1.replot_ensemble",
+          "--datadir", str(FIG / ENSEMBLE_DIR), "--plots", "recovery"]),
+        (DESIGN_OPT / "design_eig.csv",
+         ["experiments.experiment_1.replot_design_eig", "--datadir", str(DESIGN_OPT)]),
+    ]
+    for needed, cmd in steps:
+        if not needed.exists():
+            print(f"  [restyle] skipped {cmd[0]}: {needed} not present yet")
+            continue
+        print(f"  [restyle] {cmd[0]}")
+        subprocess.run([sys.executable, "-m", *cmd], check=True, env=env)
+
+
 def main():
     p = argparse.ArgumentParser()
     p.add_argument("--dry_run", action="store_true")
     args = p.parse_args()
 
+    if not args.dry_run:
+        restyle()
     jobs, skipped = plan()
     present = [(s, d) for s, d in jobs if s.exists()]
     print(f"{len(present)} files to place\n")

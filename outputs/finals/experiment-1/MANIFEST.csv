@@ -49,7 +49,7 @@ benchmark_ensemble/bench6/rdm/recovery.pdf,outputs/figures/model_class/cf/r4c4_e
 benchmark_ensemble/bench6/rdm/recovery_pi.pdf,outputs/figures/model_class/cf/r4c4_enc128h4l4_a0.5_b128_e15000_ensemble_benchmark/rdm_bench6_ensemble_recovery_global.pdf,65475,2026-10-04 07:04:59Z,True
 information_gain/contraction_per_cell.npz,outputs/data/design_opt/r4c4_enc128h4l4_a0.5_b128_e15000/ddm/design_contraction.npz,6670,2026-10-04 08:08:10Z,False
 information_gain/information_gain.csv,outputs/data/design_opt/r4c4_enc128h4l4_a0.5_b128_e15000/ddm/design_eig.csv,1620,2026-10-04 08:08:10Z,False
-information_gain/information_gain.pdf,outputs/data/design_opt/r4c4_enc128h4l4_a0.5_b128_e15000/ddm/design_eig.pdf,23566,2026-10-05 15:16:05Z,False
+information_gain/information_gain.pdf,outputs/data/design_opt/r4c4_enc128h4l4_a0.5_b128_e15000/ddm/design_eig.pdf,23566,2026-10-05 15:37:26Z,False
 information_gain/nrmse_per_cell.npz,outputs/data/design_opt/r4c4_enc128h4l4_a0.5_b128_e15000/ddm/design_nrmse.npz,6670,2026-10-04 08:08:10Z,False
 information_gain/posterior_draws.npz,outputs/data/design_opt/r4c4_enc128h4l4_a0.5_b128_e15000/ddm/design_draws.npz,32841905,2026-10-04 08:08:11Z,False
 per_case/cdm/fixed/coverage.pdf,outputs/figures/model_class/cf/r4c4_enc128h4l4_a0.5_b128_e15000_validate/cdm/fixed/cdm_fixed_fm_coverage.pdf,35306,2026-10-04 06:23:38Z,False
@@ -256,5 +256,5 @@ random_ensemble/coverage_pi.pdf,outputs/figures/model_class/cf/r4c4_enc128h4l4_a
 random_ensemble/design_configs.csv,outputs/figures/model_class/cf/r4c4_enc128h4l4_a0.5_b128_e15000_ensemble/model_class_ensemble_configs.csv,1048,2026-10-04 07:03:04Z,False
 random_ensemble/ecdf.pdf,outputs/figures/model_class/cf/r4c4_enc128h4l4_a0.5_b128_e15000_ensemble/model_class_ensemble_ecdf.pdf,266429,2026-10-04 07:03:28Z,False
 random_ensemble/ecdf_pi.pdf,outputs/figures/model_class/cf/r4c4_enc128h4l4_a0.5_b128_e15000_ensemble/model_class_ensemble_ecdf_global.pdf,61078,2026-10-04 07:03:28Z,True
-random_ensemble/recovery.pdf,outputs/figures/model_class/cf/r4c4_enc128h4l4_a0.5_b128_e15000_ensemble/model_class_ensemble_recovery.pdf,1163154,2026-10-05 15:31:01Z,False
-random_ensemble/recovery_pi.pdf,outputs/figures/model_class/cf/r4c4_enc128h4l4_a0.5_b128_e15000_ensemble/model_class_ensemble_recovery_global.pdf,103772,2026-10-05 15:31:02Z,True
+random_ensemble/recovery.pdf,outputs/figures/model_class/cf/r4c4_enc128h4l4_a0.5_b128_e15000_ensemble/model_class_ensemble_recovery.pdf,1163446,2026-10-05 15:37:22Z,False
+random_ensemble/recovery_pi.pdf,outputs/figures/model_class/cf/r4c4_enc128h4l4_a0.5_b128_e15000_ensemble/model_class_ensemble_recovery_global.pdf,103772,2026-10-05 15:37:24Z,True

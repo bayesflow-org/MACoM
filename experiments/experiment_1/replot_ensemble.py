@@ -22,6 +22,7 @@ import numpy as np
 import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
+from matplotlib.lines import Line2D
 
 from cogformer.diagnostics.plot.ensemble_recovery import (ensemble_recovery,
                                                           global_ensemble_recovery)
@@ -71,22 +72,24 @@ def parse_args():
 PAGE_SPEC = {
     # label/legend here are only STARTING sizes for recovery: fit_labels rescales
     # each one to its cell, so what matters is the cell, not this number.
-    # width/height_ratio: rows are square and WIDTH-limited here, and the grid is
-    # pinned to the bottom of the divider, so any height the grid does not fill shows
-    # up as a band above it. The figure HEIGHT is held at what the thumbnail strip
-    # needs (~4.65 in) and the WIDTH grown until the grid's top meets the divider's.
-    # Tuned against the SAVED figure -- the in-figure geometry before the thumbnail
-    # strip is added is not what gets written out. Text sizes are set for the page
-    # scale this width gives (~0.46 at \textwidth).
+    # width/height: rows are square and WIDTH-limited here, and the grid is pinned to
+    # the bottom of the divider, so any height the grid does not fill shows up as a
+    # band above it. The HEIGHT is held at what the thumbnail strip needs and the
+    # width is SOLVED per run (fit_grid_to_divider) -- the tick labels depend on the
+    # data, so a width tuned once drifts on a re-run. `width` is only the first guess.
+    # Text sizes are set for the page scale that width gives (~0.46 at \textwidth).
     # legend is also the caption allowance under each thumbnail, so it has to be at
     # least the size fit_labels gives the captions or they land on the next row.
     "recovery":        dict(width=10.8, title=15.8, label=12, legend=13, tick=6.6, annot=7.4,
-                            height_ratio=0.4302),
+                            height=4.646),
     "recovery_global": dict(width=11.0, title=12.6, label=11.5, legend=9, tick=7.9, annot=9),
 }
 DEFAULT_SPEC = dict(width=None, title=None, label=None, legend=None, tick=None,
                     annot=None, height_ratio=None)
 GLOBAL_PER_ROW = 6
+# Width each figure is placed at in main_figure.tex (5.5 in \textwidth), only for
+# logging the sizes the text actually prints at.
+PAGE_WIDTH_IN = {"recovery": 5.5, "recovery_global": 0.85 * 5.5}
 
 # The design-cell names ("1", "u_1(:c_1)") are what the mask is indexed by, and are
 # unreadable as row labels on a figure. Same four rows, named for what they are.
@@ -94,6 +97,72 @@ GLOBAL_PER_ROW = 6
 # "Main Effect 1" on one line is longer than a page-sized panel is tall, so the four
 # labels overprint each other. The words are unchanged.
 ROW_LABELS = ["Intercept", "Main\nEffect 1", "Main\nEffect 2", "Interaction"]
+
+
+def divider_gaps(fig):
+    """(top, bottom) blank space in inches between the ends of the thumbnail strip's
+    divider and the recovery grid's ink; negative means the ink overhangs it.
+
+    Measured on the RENDERED pixels to the right of the divider, not on bounding
+    boxes: a text bbox reserves ascender/descender room the glyphs may not use, and
+    the eye judges the ink.
+    """
+    div = next(a for a in fig.artists
+               if isinstance(a, Line2D) and list(a.get_ydata()) == [0.02, 0.98])
+    dpi = fig.dpi
+    fig.set_dpi(200)        # 0.005 in per pixel; the default 100 is coarser than tol_in
+    try:
+        fig.canvas.draw()
+        px = np.asarray(fig.canvas.buffer_rgba())[..., :3].mean(axis=-1)
+    finally:
+        fig.set_dpi(dpi)
+    h, w = px.shape
+    rows = np.where((px[:, int(div.get_xdata()[0] * w) + 3:] < 200).any(axis=1))[0]
+    return ((rows.min() - 0.02 * h) / 200, (0.98 * h - rows.max()) / 200)
+
+
+def fit_grid_to_divider(draw, width, tol_in=0.01, max_iter=6):
+    """Redraw at the width whose grid spans the divider exactly: equal overhang top
+    and bottom. The bottom is pinned (align_bottom_frac); with square, width-limited
+    panels and a fixed figure height, a wider figure gives a taller grid, so the top
+    gap falls monotonically with width and a secant search converges in 2-3 draws."""
+    def err(fig):
+        top, bottom = divider_gaps(fig)
+        return top - bottom
+    fig = draw(width)
+    e = err(fig)
+    prev = None
+    for _ in range(max_iter):
+        if abs(e) < tol_in:
+            break
+        # Slope measured on this figure: ~0.45 in of top gap per inch of width.
+        slope = (e - prev[1]) / (width - prev[0]) if prev and width != prev[0] else -0.45
+        prev = (width, e)
+        width = width - e / slope
+        plt.close(fig)
+        fig = draw(width)
+        e = err(fig)
+    else:
+        logging.warning(f"grid/divider fit did not converge: top-bottom = {e:.3f} in")
+    logging.info(f"recovery width {width:.3f} in: top-bottom overhang {e * 72:+.1f} pt")
+    return fig
+
+
+def log_page_sizes(fig, key):
+    """Report the sizes the text PRINTS at, which is what the spec is tuned for:
+    bbox_inches='tight' sets the saved width, and the page scales that to fit."""
+    if key not in PAGE_WIDTH_IN:
+        return
+    fig.canvas.draw()
+    saved_w = (fig.get_tightbbox(fig.canvas.get_renderer()).width
+               + 2 * matplotlib.rcParams["savefig.pad_inches"])
+    scale = PAGE_WIDTH_IN[key] / saved_w
+    ax = fig.axes[0]
+    tick = ax.get_yticklabels()[0].get_fontsize() if ax.get_yticklabels() else float("nan")
+    label = next((a.xaxis.label.get_fontsize() for a in fig.axes if a.get_xlabel()),
+                 float("nan"))
+    logging.info(f"{key}: saved {saved_w:.2f} in -> x{scale:.3f} at {PAGE_WIDTH_IN[key]:.2f} in"
+                 f" | on page: labels {label * scale:.1f} pt, ticks {tick * scale:.1f} pt")
 
 
 def main():
@@ -157,13 +226,15 @@ def main():
                 s[field] = v
         return s
 
-    def sized(fig_fn, key, n_rows, n_cols, **kw):
+    def sized(fig_fn, key, n_rows, n_cols, width=None, **kw):
         """Draw one figure at its page size. Ticks go through rcParams because the
         plotting functions expose title/label sizes but not tick size."""
         s = spec_for(key)
+        if width is not None:
+            s["width"] = width
         if s["width"] is not None:
-            ratio = s.get("height_ratio") or (n_rows / n_cols)
-            kw["figsize"] = (s["width"], s["width"] * ratio)
+            height = s.get("height") or s["width"] * (s.get("height_ratio") or n_rows / n_cols)
+            kw["figsize"] = (s["width"], height)
         for field, name in (("title", "title_fontsize"), ("label", "label_fontsize"),
                             ("legend", "legend_fontsize"), ("annot", "annot_fontsize")):
             if s[field] is not None and name in fig_fn.__code__.co_varnames:
@@ -189,7 +260,7 @@ def main():
         # Labels fitted to their cell and the gutters pulled in as far as they go:
         # the panels are what the figure is for, so nothing else gets to claim space.
         row_kw = {"row_labels": ROW_LABELS, "max_ticks": 3, "fit_labels": True,
-                  "fit_delta": 2.0, "wspace": 0.20, "hspace": 0.0,
+                  "fit_delta": 1.0, "wspace": 0.20, "hspace": 0.0,
                   "tick_pad": 1.9, "marker_size": 9, "err_linewidth": 0.7,
                   "thumb_scale": 0.8, "thumb_height_in": 0.55, "thumb_spread": False, "thumb_tight_rows": True,
                   "pack_rows": True, "row_gap_px": 3.0,
@@ -199,10 +270,14 @@ def main():
                   # text bbox reserves descender space that "Ground Truth" does not
                   # use, so matching the bboxes leaves the visible ink ~8px high.
                   "align_bottom_frac": 0.0086} if name == "recovery" else {}
-        fig = sized(fn, name, n_rows_grid, n_cols_main,
-                    **shared, **extra, **main_only, **row_kw)
+        def draw(width=None):
+            return sized(fn, name, n_rows_grid, n_cols_main, width=width,
+                         **shared, **extra, **main_only, **row_kw)
+        fig = (fit_grid_to_divider(draw, spec_for(name)["width"]) if name == "recovery"
+               else draw())
         if fig is not None:
             path = outdir / f"model_class_ensemble_{name}.pdf"
+            log_page_sizes(fig, name)
             fig.savefig(path, bbox_inches="tight"); plt.close(fig)
             logging.info(f"[saved] {path}")
         # The pi grid wraps 12 configs into 2 rows of 6 and every panel shows the
@@ -219,6 +294,7 @@ def main():
                      **shared, **extra, **gkw)
         if gfig is not None:
             path = outdir / f"model_class_ensemble_{name}_global.pdf"
+            log_page_sizes(gfig, f"{name}_global")
             gfig.savefig(path, bbox_inches="tight"); plt.close(gfig)
             logging.info(f"[saved] {path}")
 
