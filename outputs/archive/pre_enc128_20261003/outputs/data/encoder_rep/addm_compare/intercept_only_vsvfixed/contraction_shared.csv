@@ -1,0 +1,6 @@
+param,contr_frozen,contr_baseline
+v_diff,0.9387,0.9411
+omega,0.1241,0.1267
+a,0.9890,0.9889
+tau,0.9512,0.9589
+s_tau,0.7207,0.7593

@@ -1,1 +1,22 @@
 2026-10-03 01:00:17 waiting for ./outputs/checkpoints/model_class/cf/r4c4_enc128h4l4_a0.5_b128_e15000/cogformer_model_class_fm_l8_h8_p256_s32_d128_b128_e15000_t100.pt.done (training orchestrator pid 2671722)
+2026-10-04 01:25:18 training done
+2026-10-04 01:25:18 archived outputs/data/real_data/ddm
+2026-10-04 01:25:18 archived outputs/data/real_data/rdm
+2026-10-04 01:25:18 archived outputs/data/real_data/cdm
+2026-10-04 01:25:18 archived outputs/data/real_data/lba_stim_cond
+2026-10-04 01:25:18 archived outputs/figures/real_data/ppc
+2026-10-04 01:25:18 archived outputs/data/encoder_rep
+2026-10-04 01:25:18 archived outputs/figures/c2st/ddm
+2026-10-04 01:25:18 archived outputs/figures/c2st/rdm
+2026-10-04 01:25:18 archived outputs/figures/c2st/cdm
+2026-10-04 01:25:18 archived outputs/figures/c2st/lba
+2026-10-04 01:25:18 archived outputs/finals/experiment-1
+2026-10-04 01:25:18 archived outputs/finals/experiment-1a
+2026-10-04 01:25:18 archived outputs/finals/experiment-2
+2026-10-04 01:25:18 archived outputs/finals/experiment-3
+2026-10-04 01:25:18 archived outputs/finals/experiment-4
+2026-10-04 01:25:18 lane A (GPU 0) and lane B (GPU 1) starting
+2026-10-04 12:13:38 lane A exited 0
+2026-10-04 12:13:38 lane B exited 0
+2026-10-04 13:01:52 exp3 comparison + finalize exited 0
+2026-10-04 13:01:52 ALL DONE

@@ -130,8 +130,8 @@ def _delta_col(df: pd.DataFrame, metric: str) -> str | None:
 
 def plot_delta_metrics(combined: pd.DataFrame, layouts: dict, outdir: Path, condition: str,
                        max_num_categories: int, cell_size: float = 0.55) -> Path | None:
-    """1 x 2 grid of the LBA's per-cell metric deltas (fine-tuned minus zero-shot):
-    NRMSE on the left, calibration error on the right.
+    """2 x 1 column of the LBA's per-cell metric deltas (fine-tuned minus zero-shot):
+    NRMSE on top, calibration error below.
 
     Each panel lays the deltas out on the LBA's coefficient grid (coefficients down,
     parameters across), the same layout as the delta-r heatmaps, so a cell sits where
@@ -166,11 +166,11 @@ def plot_delta_metrics(combined: pd.DataFrame, layouts: dict, outdir: Path, cond
         return None
 
     n_rows, n_cols = next(iter(panels.values()))[0].shape
-    fig, axes = plt.subplots(1, len(panels), squeeze=False, layout="constrained",
-                             figsize=(len(panels) * (cell_size * n_cols + 1.6),
-                                      cell_size * max(n_rows, 2) + 1.2))
+    fig, axes = plt.subplots(len(panels), 1, squeeze=False, layout="constrained",
+                             figsize=(cell_size * n_cols + 1.6,
+                                      len(panels) * (cell_size * max(n_rows, 2) + 0.9)))
     cmap = "RdBu_r"
-    for ax, (metric, panel) in zip(axes[0], panels.items()):
+    for ax, (metric, panel) in zip(axes[:, 0], panels.items()):
         vmax = np.nanmax(np.abs(panel[0])) if np.isfinite(panel[0]).any() else 1.0
         norm = mcolors.Normalize(vmin=-vmax, vmax=vmax)
         heatmap_axes(ax, *panel, cmap=cmap, norm=norm, annot_fontsize=9, fmt="+.3f")

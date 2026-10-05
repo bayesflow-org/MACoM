@@ -6,3 +6,5 @@
 
 ── e1_train
     · ModelClass CF train (r4c4, b128, e15000, 1 GPU)
+      ok (1499m)
+run_experiments.sh: line 1049: unexpected EOF while looking for matching `"'

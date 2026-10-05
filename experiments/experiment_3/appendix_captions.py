@@ -140,7 +140,7 @@ DR_SHORT = (
 # ── section 4: metric deltas ────────────────────────────────────────────────
 DM_FULL = (
     r"\textbf{{Change in the LBA's summary metrics with fine-tuning, {CASE} design.}} "
-    r"Per-coefficient change in NRMSE (left) and calibration error (right), fine-tuned minus "
+    r"Per-coefficient change in NRMSE (top) and calibration error (bottom), fine-tuned minus "
     r"zero-shot, both networks scored on identical bench5 test datasets, with the metric "
     r"definitions of the bottom panel of Figure~\ref{{{REF}}}. Negative values (blue) are "
     r"improvements, positive values (red) deteriorations; each panel has its own colour scale. "
@@ -401,7 +401,7 @@ MAIN = (
     r"against ground truth with 90\% credible intervals, one $r$ per network. Columns are the "
     r"parameters and rows the coefficients (intercept, slopes on $u_1$ and $u_2$, and on their "
     r"product); N/A marks coefficients the design does not contain. Bottom: change in each of "
-    r"the LBA's coefficients' NRMSE (left) and calibration error (right) with fine-tuning "
+    r"the LBA's coefficients' NRMSE (top) and calibration error (bottom) with fine-tuning "
     r"(fine-tuned minus zero-shot), cells laid out as in the top panel. Negative values (blue) "
     r"are improvements, positive values (red) deteriorations; each panel has its own colour "
     r"scale. The LBA's largest change in magnitude is {L_NRMSE} in NRMSE and {L_CAL} in "

@@ -1,0 +1,94 @@
+════════════════════════════════════════════════════════════════
+ CogFormer-2 — finals pipeline   run 20261004_012518
+ stages : e3_zeroshot e3_finetune e3_ft_validate e3_ppc_apply e3_ppc e3_realdata_validate e4_probe e4_compare e4_representation e3_gap_c2st
+ logs   : logs/finals/20261004_012518/
+════════════════════════════════════════════════════════════════
+
+── e3_zeroshot
+    · LBA zero-shot validate (A=0.5)
+      ok (17m)
+
+── e3_finetune
+    · LBA finetune (scheme 2, A=0.5)
+      ok (86m)
+
+── e3_ft_validate
+    · LBA finetuned validate — 4 families
+      ok (68m)
+
+── e3_ppc_apply
+    · LBA real-data apply (stimulus-coded, condition_only)
+      ok (15m)
+
+── e3_ppc
+    · LBA PPC — free (s_v, s_tau as estimated)
+      ok (4m)
+    · LBA PPC — conventional (s_v=1.0, s_tau=0.0)
+      ok (4m)
+
+── e3_realdata_validate
+    · real-data-design validation — lba (condition_only)
+      ok (72m)
+
+── e4_probe
+    · aDDM frozen-encoder arm — train
+      ok (103m)
+    · aDDM frozen-encoder arm — validate
+      ok (0m)
+    · aDDM frozen-encoder diagnostics
+      ok (0m)
+    · baseline checkpoint present, reused: ./outputs/checkpoints/encoder_rep/bf_baseline/addm_vsvfixed/intercept_only/item0_vsvfixed_e500/addm_baseline_fm/model.keras
+    · aDDM baseline arm — validate
+      ok (0m)
+    · aDDM baseline-arm diagnostics
+      ok (0m)
+
+── e4_compare
+    · aDDM arm comparison (shared validation C2ST)
+      ok (1m)
+    · aDDM combined recovery (frozen vs baseline)
+      ok (0m)
+
+── e4_representation
+    · cross-family pooled geometry (5 families, before/after LBA finetune)
+      ok (0m)
+    · aDDM representation — frozen vs baseline (vsvfixed)
+      ok (0m)
+    · combined panel (probe + C2ST + representation)
+      ok (1m)
+
+── e3_gap_c2st
+    · C2ST BF_vs_Finetuned — lba
+      ok (9m)
+
+════════════════════════════════════════════════════════════════
+ ok    e3_zeroshot
+ ok    e3_finetune
+ ok    e3_ft_validate
+ ok    e3_ppc_apply
+ ok    e3_ppc
+ ok    e3_realdata_validate
+ ok    e4_probe
+ ok    e4_compare
+ ok    e4_representation
+ ok    e3_gap_c2st
+ elapsed: 387m   logs: logs/finals/20261004_012518/
+ COMPLETE
+════════════════════════════════════════════════════════════════
+════════════════════════════════════════════════════════════════
+ CogFormer-2 — finals pipeline   run 20261004_075247
+ stages : e2_validate
+ logs   : logs/finals/20261004_075247/
+════════════════════════════════════════════════════════════════
+
+── e2_validate
+    · real-data-design validation — rdm 
+      ok (76m)
+    · real-data-design validation — cdm 
+      ok (79m)
+
+════════════════════════════════════════════════════════════════
+ ok    e2_validate
+ elapsed: 156m   logs: logs/finals/20261004_075247/
+ COMPLETE
+════════════════════════════════════════════════════════════════
