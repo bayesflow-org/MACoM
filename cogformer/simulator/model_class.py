@@ -239,6 +239,14 @@ class ModelClass:
 
         all_sim_keys = set().union(*(b["obs"].keys() for b in list_batch))
         sim_data = {k: np.zeros((batch_size, max_num_obs, 1)) for k in all_sim_keys}
+        # Per-trial context (RDM/LBA favored_idx, CDM theta), unioned across families and
+        # zero where a family has none. It used to be left out of the returned batch,
+        # so the Adapter filled every model-class training batch's favored_idx channel
+        # with 0 while validation and real data passed the real one: stimulus-coded
+        # choices then carry no information about v_diff in training (found 2026-10-05).
+        all_ptc_keys = set().union(*(b.get("per_trial_context", {}).keys() for b in list_batch))
+        per_trial_context = {k: np.zeros((batch_size, max_num_obs), dtype=np.float32)
+                             for k in all_ptc_keys}
 
         model_names_out = [None] * batch_size
         design_configs = [None] * batch_size
@@ -274,6 +282,9 @@ class ModelClass:
                     v = local["sim_data"][k]
                     sim_data[k][indices, :v.shape[1]] = v
 
+            for k, v in local.get("per_trial_context", {}).items():
+                per_trial_context[k][indices, :v.shape[1]] = v
+
             for local_i, global_i in enumerate(indices):
                 model_names_out[global_i] = model_name
                 design_configs[global_i] = items[local_i]["design_config"]
@@ -298,6 +309,7 @@ class ModelClass:
             "param_masks": param_masks,
             "param_matrices": param_matrices,
             "sim_data": sim_data,
+            "per_trial_context": per_trial_context,
             "regressor_masks": regressor_masks,
             "position_codes": position_codes,
             "discrete_masks": discrete_masks,

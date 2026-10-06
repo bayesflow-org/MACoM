@@ -736,9 +736,10 @@ def stimulus_channels(samples) -> dict:
     RDM and LBA draw the favoured accumulator per trial (favored_idx). A choice is only
     informative about the drift DIFFERENCE given which accumulator the stimulus
     favoured, so a network that sees rts/choices without it cannot learn v_diff: its
-    choices look like coin flips. Until 2026-09-27 the BF baselines dropped it, while
-    CogFormer's encoder always receives it as an input channel -- a baseline handicap,
-    not an amortization cost. Returned as (B, N, 1) float so it concatenates with rts
+    choices look like coin flips. Until 2026-09-27 the BF baselines dropped it. CogFormer
+    was believed to receive it all along, but ModelClass.collate dropped it from every
+    model-class TRAINING batch until 2026-10-05 (validation and real data did pass it).
+    Returned as (B, N, 1) float so it concatenates with rts
     and choices; empty for families that carry no per-trial stimulus (DDM, CDM).
     """
     ptc = samples.get("per_trial_context") or {}

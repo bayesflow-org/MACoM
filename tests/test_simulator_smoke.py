@@ -125,6 +125,40 @@ def test_model_class_batch_sample():
         assert len(batch["model_names"]) == 8, coefficient_prior
 
 
+def test_model_class_carries_per_trial_context():
+    """The model-class batch must carry RDM's per-trial favored_idx through to the
+    encoder input. Its collate used to drop per_trial_context, so the Adapter fed 0 for
+    every training dataset while validation and real data fed the real stimulus --
+    v_diff was then unlearnable under stimulus coding, with no error anywhere."""
+    np.random.seed(4)
+    mc = ModelClass(
+        model_families={
+            "ddm": ModelFamily(model=DDM(), prior=ddm_priors(), name="ddm", num_workers=1),
+            "rdm": ModelFamily(model=RDM(), prior=rdm_priors(), name="rdm", num_workers=1),
+        },
+        link_funs={"ddm": ddm_link_fun(), "rdm": rdm_link_fun()},
+        train_contexts={"rdm": RDM.build_random_context},
+        num_workers=1,
+    )
+    batch = mc.batch_sample(batch_size=16, num_obs=80, max_num_regressors=2,
+                            max_num_categories=3, keep_intercept=True)
+    fav = batch["per_trial_context"]["favored_idx"]
+    assert fav.shape == (16, 80), fav.shape
+    is_rdm = np.array([n == "rdm" for n in batch["model_names"]])
+    assert is_rdm.any() and (~is_rdm).any(), batch["model_names"]
+    k = batch["num_alternatives"]
+    for i in np.where(is_rdm)[0]:
+        # Uniform over K accumulators: 80 trials all on accumulator 0 has prob <= 2**-80.
+        assert fav[i].max() > 0, i
+        assert fav[i].max() <= k[i] - 1, (i, fav[i].max(), k[i])
+    assert not fav[~is_rdm].any()
+
+    # And it reaches the encoder: the favored_idx input column (second to last).
+    x = Adapter.adapt(batch, device="cpu")["input_data"].numpy()
+    assert (x[is_rdm, :, -2].max(axis=1) > 0).all()
+    assert not x[~is_rdm, :, -2].any()
+
+
 def test_cell_means_is_exchangeable_across_categories():
     """The property cell_means exists to provide.
 
