@@ -78,7 +78,9 @@ MC_MAX_REG=4; MC_MAX_CAT=4
 # r/c, which is why the tag carries it.
 # The encoder and alpha fields keep a checkpoint from an earlier architecture (whose
 # .done would otherwise satisfy e1_train) from being picked up under the same name.
-MC_TAG="r${MC_MAX_REG}c${MC_MAX_CAT}_enc${ENC_EMBED}h${ENC_HEADS}l${ENC_LAYERS}_a${FM_TIME_ALPHA}_b${MC_TRAIN_BATCH}_e${MC_EPOCHS}"
+# _ptc: trained after ModelClass.collate kept per_trial_context (2026-10-05); every
+# earlier checkpoint saw favored_idx = 0 for all RDM/LBA training data.
+MC_TAG="r${MC_MAX_REG}c${MC_MAX_CAT}_enc${ENC_EMBED}h${ENC_HEADS}l${ENC_LAYERS}_a${FM_TIME_ALPHA}_b${MC_TRAIN_BATCH}_e${MC_EPOCHS}_ptc"
 MC_CKPT_DIR="./outputs/checkpoints/model_class/cf/${MC_TAG}"
 MC_CKPT="${MC_CKPT_DIR}/cogformer_model_class_fm_l${DEC_LAYERS}_h${HEADS}_p${PROJ}_s${SEEDS}_d${MC_DIM}_b${MC_TRAIN_BATCH}_e${MC_EPOCHS}_t${STEPS}.pt"
 

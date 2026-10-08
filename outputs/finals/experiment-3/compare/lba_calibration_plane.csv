@@ -1,47 +1,47 @@
 scenario,param,Calibration Error_arm0,Calibration Error_arm1,Posterior Contraction_arm0,Posterior Contraction_arm1
-fixed,$\tau$,0.4950,0.0301,0.9919,0.4350
-fixed,$a$,0.3320,0.0147,0.7905,0.6696
-fixed,$v$,0.5000,0.0334,0.1591,0.5599
-fixed,$v_{\mathrm{diff}}$,0.2403,0.0218,0.0000,0.6112
-fixed_regressed,$\tau$,0.2875,0.1649,0.9771,0.9173
-fixed_regressed,$a$,0.4900,0.0293,0.7126,0.9257
-fixed_regressed,$a$ -- $u_1$,0.4400,0.0403,0.9440,0.9915
-fixed_regressed,$a$ -- $u_2$,0.4175,0.0117,0.9479,0.9904
-fixed_regressed,$v$,0.5000,0.0153,0.2722,0.7939
-fixed_regressed,$v_{\mathrm{diff}}$,0.4479,0.0308,0.0000,0.6926
-fixed_regressed,$v_{\mathrm{diff}}$ -- $u_1$,0.1704,0.0275,0.6013,0.9740
-fixed_regressed,$v_{\mathrm{diff}}$ -- $u_2$,0.2274,0.0245,0.6499,0.9734
-interaction,$\tau$,0.4525,0.0487,0.9660,0.7846
-interaction,$\tau$ -- $u_1$,0.3700,0.0434,0.9936,0.9810
-interaction,$\tau$ -- $u_2$,0.3125,0.0242,0.9934,0.9772
-interaction,$a$,0.1879,0.0109,0.6401,0.6113
-interaction,$a$ -- $u_1 \times u_2$,0.3525,0.1093,0.8949,0.9035
-interaction,$a$ -- $u_1$,0.2550,0.0718,0.8833,0.8746
-interaction,$a$ -- $u_2$,0.1925,0.0272,0.9101,0.9139
-interaction,$s_\tau$,0.1613,0.0149,0.9748,0.9351
-interaction,$s_v$,0.0489,0.0153,0.2834,0.6248
-interaction,$s_v$ -- $u_1$,0.0316,0.0318,0.5346,0.8162
-interaction,$v$,0.3554,0.0241,0.2940,0.4093
-interaction,$v$ -- $u_1 \times u_2$,0.0386,0.0161,0.4276,0.5651
-interaction,$v$ -- $u_1$,0.1204,0.0496,0.5376,0.6564
-interaction,$v$ -- $u_2$,0.0218,0.0387,0.4540,0.6156
-interaction,$v_{\mathrm{diff}}$,0.0949,0.0520,0.0000,0.2769
-interaction,$v_{\mathrm{diff}}$ -- $u_1 \times u_2$,0.0151,0.0437,0.2688,0.5700
-interaction,$v_{\mathrm{diff}}$ -- $u_1$,0.0489,0.0326,0.2116,0.5719
-interaction,$v_{\mathrm{diff}}$ -- $u_2$,0.0551,0.0153,0.1622,0.5931
-intercept_only,$\tau$,0.5000,0.0378,0.9863,0.4997
-intercept_only,$a$,0.2620,0.0463,0.6659,0.5433
-intercept_only,$s_\tau$,0.4125,0.0364,0.9834,0.7928
-intercept_only,$s_v$,0.0399,0.0142,0.3101,0.6873
-intercept_only,$v$,0.4400,0.0389,0.4543,0.4091
-intercept_only,$v_{\mathrm{diff}}$,0.1607,0.0089,0.0000,0.1194
-regressed,$\tau$,0.3700,0.1124,0.9839,0.8379
-regressed,$a$,0.4175,0.0168,0.7276,0.6902
-regressed,$a$ -- $u_1$,0.3900,0.0203,0.9614,0.9698
-regressed,$a$ -- $u_2$,0.3900,0.0175,0.9670,0.9724
-regressed,$s_\tau$,0.1975,0.0188,0.9771,0.9272
-regressed,$s_v$,0.0707,0.0228,0.3532,0.7147
-regressed,$v$,0.4900,0.0182,0.4089,0.5235
-regressed,$v_{\mathrm{diff}}$,0.3229,0.0124,0.0000,0.3535
-regressed,$v_{\mathrm{diff}}$ -- $u_1$,0.1729,0.0330,0.6826,0.8584
-regressed,$v_{\mathrm{diff}}$ -- $u_2$,0.1599,0.0308,0.6765,0.8646
+fixed,$\tau$,0.4775,0.0229,0.9753,0.4226
+fixed,$a$,0.2995,0.0442,0.6423,0.6559
+fixed,$v$,0.2187,0.0280,0.0000,0.6061
+fixed,$v_{\mathrm{diff}}$,0.5000,0.0067,0.2272,0.7126
+fixed_regressed,$\tau$,0.2450,0.0591,0.9807,0.9743
+fixed_regressed,$a$,0.4950,0.0470,0.7624,0.9469
+fixed_regressed,$a$ -- $u_1$,0.4275,0.0182,0.9662,0.9938
+fixed_regressed,$a$ -- $u_2$,0.4675,0.0122,0.9692,0.9932
+fixed_regressed,$v$,0.5000,0.0288,0.4391,0.8879
+fixed_regressed,$v_{\mathrm{diff}}$,0.5000,0.0301,0.6004,0.8647
+fixed_regressed,$v_{\mathrm{diff}}$ -- $u_1$,0.1329,0.0145,0.8544,0.9819
+fixed_regressed,$v_{\mathrm{diff}}$ -- $u_2$,0.1754,0.0668,0.8797,0.9830
+interaction,$\tau$,0.3725,0.0967,0.9527,0.8525
+interaction,$\tau$ -- $u_1$,0.2695,0.0934,0.9913,0.9830
+interaction,$\tau$ -- $u_2$,0.2295,0.0629,0.9898,0.9818
+interaction,$a$,0.4725,0.0191,0.7138,0.6950
+interaction,$a$ -- $u_1 \times u_2$,0.2979,0.0882,0.9250,0.9217
+interaction,$a$ -- $u_1$,0.2879,0.0313,0.9136,0.8916
+interaction,$a$ -- $u_2$,0.1895,0.0146,0.9349,0.9310
+interaction,$s_\tau$,0.1168,0.0730,0.9390,0.9312
+interaction,$s_v$,0.0893,0.0129,0.3609,0.6599
+interaction,$s_v$ -- $u_1$,0.0208,0.0108,0.5965,0.8342
+interaction,$v$,0.2749,0.0328,0.3310,0.5609
+interaction,$v$ -- $u_1 \times u_2$,0.0157,0.0468,0.5815,0.7582
+interaction,$v$ -- $u_1$,0.0470,0.0309,0.6999,0.8180
+interaction,$v$ -- $u_2$,0.0061,0.0364,0.6695,0.8152
+interaction,$v_{\mathrm{diff}}$,0.4950,0.0607,0.6742,0.6418
+interaction,$v_{\mathrm{diff}}$ -- $u_1 \times u_2$,0.1889,0.0268,0.8273,0.8988
+interaction,$v_{\mathrm{diff}}$ -- $u_1$,0.3079,0.0233,0.8715,0.8989
+interaction,$v_{\mathrm{diff}}$ -- $u_2$,0.1924,0.0146,0.8823,0.9251
+intercept_only,$\tau$,0.4625,0.0157,0.9530,0.5997
+intercept_only,$a$,0.4175,0.0368,0.6543,0.6343
+intercept_only,$s_\tau$,0.0684,0.0117,0.7884,0.7769
+intercept_only,$s_v$,0.1171,0.0101,0.3841,0.7603
+intercept_only,$v$,0.2374,0.0491,0.3830,0.6317
+intercept_only,$v_{\mathrm{diff}}$,0.5000,0.0182,0.6712,0.5624
+regressed,$\tau$,0.2045,0.0158,0.9746,0.9221
+regressed,$a$,0.5000,0.0218,0.7640,0.7275
+regressed,$a$ -- $u_1$,0.3125,0.0193,0.9778,0.9827
+regressed,$a$ -- $u_2$,0.3400,0.0430,0.9819,0.9860
+regressed,$s_\tau$,0.1349,0.0188,0.9427,0.9212
+regressed,$s_v$,0.1053,0.0253,0.4036,0.7387
+regressed,$v$,0.4550,0.0145,0.6020,0.6777
+regressed,$v_{\mathrm{diff}}$,0.5000,0.0122,0.7271,0.6731
+regressed,$v_{\mathrm{diff}}$ -- $u_1$,0.2579,0.0630,0.9085,0.9514
+regressed,$v_{\mathrm{diff}}$ -- $u_2$,0.1679,0.0630,0.9125,0.9510
