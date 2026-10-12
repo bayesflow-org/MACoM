@@ -2,20 +2,20 @@
 \usepackage[margin=1in]{geometry}
 \usepackage{amsmath,amssymb}
 \usepackage{bm}
+\usepackage{booktabs}
 
 % --- Matrix / notation macros (consistent with the predecessor description) ---
 \newcommand{\rmB}{\mathbf{B}}
 \newcommand{\rmX}{\mathbf{X}}
 \newcommand{\rmM}{\mathbf{M}}
 \newcommand{\rmY}{\mathbf{Y}}
-\newcommand{\rmSig}{\bm{\Sigma}}
-\newcommand{\rmR}{\mathbf{R}}
+\newcommand{\rmOmega}{\bm{\Omega}}
 % If the host document already provides \cref / \autoref (cleveref/hyperref),
 % delete the two lines below; they are stubs so this file compiles standalone.
 \providecommand{\cref}[1]{Eq.~(\ref{#1})}
 \providecommand{\autoref}[1]{\ref{#1}}
 
-\title{The Meta-Simulator (Updated Description)}
+\title{The Meta-Simulator}
 \author{CogFormer-2}
 \date{}
 
@@ -23,194 +23,95 @@
 \maketitle
 
 %============================================================================
-% This body is written as a drop-in replacement for the predecessor's
-% meta-simulator paragraphs. It preserves the original notation
-% (F, theta_F, D_F, B, M, X, Theta, Y, R, R_max, C_max, G, p(f|C)) and folds
-% in the collinear/imbalanced design prior (LKJ correlations + latent-class
-% categorical sampling), the variance-budget/cell-means coefficient prior, the
-% global (contamination) parameter pi, full interaction blocks,
-% realized-support masking, and the global parameter space used for
-% cross-family amortization.
+% Drop-in replacement for the predecessor's meta-simulator paragraphs.
+% Mirrors the current training code path:
+%   cogformer/simulator/design_utils.py, coefficient_priors.py,
+%   model_family.py, model_class.py;
+%   experiments/experiment_1/model_class_cf_train.py + experiments/utils.py
+%   (values in Table "tab:meta-sim-hyper").
 %============================================================================
 
-To realize the generative hierarchy in \cref{eq:generative}, we implement a meta-simulator that subsumes a broad class of cognitive models under a flexible generalized linear model (GLM) parameterization (see~\autoref{fig:meta-simulator}; see also~\autoref{alg:model-family} and~\autoref{alg:model-class} for implementation details).
-Each model family $\mathcal{F}$ is characterized by $D_{\mathcal{F}}$ intrinsic parameters $\theta_{\mathcal{F}}$.
-For example, the DDM has six intrinsic parameters: drift rate $v$, threshold $a$, bias $z$, non-decision time $\tau$, and variabilities $s_{v}, s_\tau$.
-We express each intrinsic parameter as a linear function of the regressors $u_c$, for example, $v = \beta_{0, v} + \beta_{1, v}\,u_1 + \beta_{2, v}\,u_2$.
-All regression weights are assembled into a coefficient matrix $\rmB \in \mathbb{R}^{R \times D_{\mathcal{F}}}$, where each column corresponds to one intrinsic parameter and each row to one column of the design matrix (intercept first, followed by regression weights).
-Intercepts are drawn from the intrinsic prior $p(\theta_{\mathcal{F}})$; slopes follow a per-parameter variance budget with exchangeable contrasts for categorical blocks (\emph{Coefficient prior}, below).
-A set of link functions $\mathcal{G} = \{g_j\}$ (e.g., softplus) maps the resulting linear predictors to the valid domain of each intrinsic parameter.
-
-A subset of intrinsic parameters is designated \emph{global}: these are always
-placed on the intercept and never enter a slope term, so they act as
-dataset-level nuisance parameters that are shared across all trials rather than
-regressed on the design. The canonical example is a contamination probability
-$\pi$, which governs a mixture in which each trial is, with probability $\pi$,
-replaced by a uniform guess over the response domain. Global parameters that
-carry their own valid domain (such as $\pi \in [0, 1]$) are sampled directly from
-their prior---e.g.\ $\pi \sim \mathrm{Beta}(1, 50)$---and bypass the link
-functions in $\mathcal{G}$.
-
-The generative process for a single dataset
-$\rmY \in \mathbb{R}^{N \times O_{\mathcal{F}}}$ of $N$ trials and
-$O_{\mathcal{F}}$ observables is thus:
+To realize the generative hierarchy in \cref{eq:generative}, we build a meta-simulator that treats the parameters of a cognitive model as a generalized linear model (GLM) of the experimental design (see~\autoref{fig:meta-simulator}). A model family $\mathcal{F}$ has $D_{\mathcal{F}}$ intrinsic parameters $\theta_{\mathcal{F}}$; the DDM, for example, has drift rate $v$, threshold $a$, bias $z$, non-decision time $\tau$, variabilities $s_v$ and $s_\tau$, and contamination probability $\pi$. Given a design matrix $\rmX \in \mathbb{R}^{N \times I}$ over $N$ trials, a coefficient matrix $\rmB \in \mathbb{R}^{I \times D_{\mathcal{F}}}$, and a binary mask $\rmM$ of the same shape that marks which coefficients are active, a dataset $\rmY \in \mathbb{R}^{N \times O_{\mathcal{F}}}$ is generated as
 \begin{equation}
 \label{eq:meta-simulator}
-\rmY \sim \mathrm{Model}(\Theta;\,\mathrm{RNG}), \quad
-\Theta = g\!\left(\rmX\,(\rmM \odot \rmB)\right)
+  \Theta = g\!\left(\rmX\,(\rmM \odot \rmB)\right),
+  \qquad
+  \bm{y}_n \sim (1 - \pi)\, p_{\mathcal{F}}(\bm{y} \mid \bm{\theta}_n)
+              + \pi\, \mathcal{U}(\mathcal{Y}_{\mathcal{F}}),
 \end{equation}
-where $\Theta \in \mathbb{R}^{N \times D_{\mathcal{F}}}$ is the realized parameter
-matrix, distinct from the intrinsic parameter vector $\theta_{\mathcal{F}}$, and
-$\mathrm{RNG}$ denotes the source of stochastic variation in the model outputs
-(including the contamination mixture governed by the global column of $\Theta$).
+where row $\bm{\theta}_n$ of $\Theta \in \mathbb{R}^{N \times D_{\mathcal{F}}}$ holds the parameters of trial $n$. The link functions $g$ act column-wise and map each linear predictor to the valid domain of its parameter, using softplus for positive parameters and a scaled sigmoid for bounded ones such as $z$. The second term is a contamination mixture: with probability $\pi$, a trial is replaced by a uniform guess over the response domain, with a response time drawn from $\mathcal{U}(0, 20)$ and a choice drawn uniformly over the alternatives (a uniform angle for the CDM). During training, every dataset draws its own family, design, mask, and coefficients, so that a single network learns to perform inference across all of them.
 
-\paragraph{Design prior.}
-The design matrix $\rmX \in \mathbb{R}^{N \times R}$ encodes experimental
-structure over $N$ observations and $R$ design columns, and is itself sampled per
-simulation. Its first column is an intercept; the remainder comprises one
-\emph{block} per regressor and one per interaction. A Bernoulli draw labels each
-non-context main effect continuous or categorical. Categorical regressors are
-then sampled first and continuous regressors conditionally on them, so that
-categories are nominal rather than ordinal and the categorical--continuous
-association is set directly.
+Intrinsic parameters differ in how they enter the GLM. Core parameters (e.g., $v$, $a$, $z$, $\tau$) are always estimated and may depend on the design. Optional parameters ($s_v$, $s_\tau$) are either estimated or fixed at zero, which removes trial-to-trial variability; a fixed parameter bypasses the link function. The contamination probability $\pi$ is a global parameter: it is estimated once per dataset, never regressed, and drawn directly from $\mathrm{Beta}(1, 50)$ with an identity link. For each dataset, we draw the number of regressors $R \sim \mathcal{U}\{0, \dots, R_{\max}\}$ and two inclusion rates $p_0, p_1 \sim \mathrm{Beta}(2, 2)$. Each optional parameter is included with probability $p_0$, and each included non-global parameter receives a slope on each regressor with probability $p_1$. Two regressors interact on exactly those parameters that both of them carry. Slopes therefore exist only for estimated parameters, and interactions only for main effects that are present. Because $p_0$ and $p_1$ vary across datasets, the network sees designs ranging from intercept-only to fully regressed. During validation, this structure is instead fixed to the benchmark designs in \autoref{app:design-config}.
 
-\paragraph{Categorical regressors.}
-Regressor $u_c$ receives $k_c \in \{C_{\min}, \dots, C_{\max}\}$ levels with
-marginal $\bm{p}_c$, exactly balanced with probability $q_{\mathrm{bal}}$ and
-otherwise $\bm{p}_c \sim \mathrm{Dirichlet}(\alpha\,\bm{1}_{k_c})$,
-$\alpha \sim \mathrm{LogUniform}(0.5, 50)$, spanning near-uniform to strongly
-imbalanced proportions without mass on degenerate spikes. A convex shift
-$\bm{p} \mapsto \epsilon\bm{1} + (1 - k_c\epsilon)\,\bm{p}$ enforces a minimum
-expected cell count. Writing $\mathcal{I}$ for the set of categorical regressors,
-their association follows a mixture of the orthogonal product table and a
-coupling rescaled to the same marginals by iterative proportional fitting (IPF),
+The first column of $\rmX$ is the intercept, followed by one block of columns per regressor and per interaction. Each regressor is categorical with probability $q_{\mathrm{cat}}$ and continuous otherwise. We draw the categorical regressors first and the continuous regressors conditional on them. This ordering lets us control multicollinearity separately among categorical regressors, between categorical and continuous regressors, and among continuous regressors. A categorical regressor $u_r$ has $k_r \sim \mathcal{U}\{C_{\min}, \dots, C_{\max}\}$ levels with proportions $\bm{p}_r$. These proportions are exactly balanced with probability $q_{\mathrm{bal}}$ and are otherwise drawn from $\mathrm{Dirichlet}(\alpha\,\bm{1})$ with $\alpha \sim \mathrm{LogUniform}(0.5, 50)$, subject to a minimum expected count of two trials per level. Trials are then assigned to combinations of levels according to the joint table
 \begin{equation}
 \label{eq:joint-category-table}
-\bm{P} = (1 - \lambda) \bigotimes_{c \in \mathcal{I}} \bm{p}_c
-       + \lambda\,\mathrm{IPF}\big(\bm{Q};\, \{\bm{p}_c\}_{c \in \mathcal{I}}\big), \qquad
-\bm{Q} \sim \mathrm{Dirichlet}(\kappa\,\bm{1}),
+  \bm{P} = (1 - \lambda) \bigotimes_{r} \bm{p}_r
+         + \lambda\, \mathrm{IPF}\!\left(\bm{Q};\, \{\bm{p}_r\}\right),
+  \qquad
+  \bm{Q} \sim \mathrm{Dirichlet}(\kappa\,\bm{1}),
 \end{equation}
-with $\lambda = 0$ with probability $q_{\mathrm{fac}}$, giving mutually
-orthogonal factorial designs, and $\lambda \sim \mathcal{U}(0,1)$ otherwise. Both
-components are pinned to the marginals already drawn for the main effects, and
-tables with fixed marginals form a convex set, so category balance is unaffected
-by whether an interaction is sampled. Exchangeability of the raw coupling
-$\bm{Q}$ keeps the induced association non-monotone in category index; a
-comonotone coupling would reinstate the ordering this construction removes.
-Per-trial assignments are drawn from $\bm{P}$, so cell counts carry multinomial
-variability rather than being pinned to $\bm{p}$. Unpopulated levels are dropped
-and survivors relabelled at random, leaving each dummy block contiguous and the
-reference level arbitrary.
+which mixes independent factors with a random coupling $\bm{Q}$, rescaled to the same marginals by iterative proportional fitting ($\mathrm{IPF}$). At $\lambda = 0$, the design is an orthogonal factorial. Larger values of $\lambda$ make the categorical regressors increasingly dependent without changing the proportions of any single regressor. Each categorical regressor is dummy-coded against a randomly chosen reference level, so that its levels carry no implied order.
 
-\paragraph{Continuous regressors.}
-Conditional on the category assignment, each continuous column mixes one Gaussian
-per category with a correlated residual,
+Each continuous regressor combines a component explained by the categorical regressors with a correlated residual:
 \begin{equation}
 \label{eq:continuous-columns}
-\bm{x}_c = \sqrt{\eta^2}\;\bm{\mu}_c + \sqrt{1 - \eta^2}\;\bm{\varepsilon}_c,
-\qquad
-\bm{\varepsilon} \sim \mathcal{N}(\bm{0}, \rmR), \quad \rmR \sim \mathrm{LKJ}(\zeta),
+  \bm{x}_j = \sqrt{\eta^2}\; \bm{s}_j + \sqrt{1 - \eta^2}\; \bm{\varepsilon}_j,
+  \qquad
+  \bm{\varepsilon}_n \sim \mathcal{N}(\bm{0}, \rmOmega),
+  \quad
+  \rmOmega \sim \mathrm{LKJ}(\zeta),
 \end{equation}
-where $\bm{\mu}_c$ is the standardized sum of per-category offsets. Columns are
-standardized to unit variance, an affine operation that leaves the residual
-correlation intact. The two terms separate the design's two sources of
-dependence: $\eta^2$, the joint correlation ratio of the categorical regressors
-on each continuous column, and $\rmR$, the residual collinearity among continuous
-columns, with $\zeta = 1$ uniform over correlation matrices, $\zeta > 1$
-concentrated toward the identity and $\zeta < 1$ toward near-singular designs.
+where $\bm{s}_j$ sums one Gaussian offset per level of each categorical regressor, and both terms are standardized. Thus, $\eta^2$ is the share of a continuous regressor's variance that the categorical regressors explain, and $\rmOmega$ sets the correlations among the continuous regressors. We sample $\rmOmega$ from the LKJ distribution, which places a prior directly on correlation matrices. Its single shape parameter $\zeta$ moves the designs from near-singular ($\zeta < 1$) through uniform ($\zeta = 1$) to near-orthogonal ($\zeta > 1$). Interactions enter $\rmX$ as row-wise products of the two regressor blocks. Because the number of levels and their occupancy vary across datasets, a design column can be empty, for example when an interaction cell receives no trials. The data then carry no information about the corresponding coefficients, so we remove them from $\rmM$.
 
-Writing $d$ for the number of continuous columns, we sample
-$\rmR \sim \mathrm{LKJ}(\zeta)$ directly rather than normalizing an
-inverse-Wishart draw $\rmSig \sim \mathcal{W}^{-1}(\nu, \mathbf{I}_d)$, as in
-earlier versions of the simulator. The two coincide only at $d = 2$, under
-$\nu = 2\zeta + 1$; at $d > 2$, the regime sampled here, normalization yields
-systematically more extreme pairwise correlations and requires a $d$-dependent
-range for $\nu$ to hold effective collinearity constant as the regressor count
-varies. Every LKJ pairwise marginal is
-$2\,\mathrm{Beta}(\zeta + \tfrac{d-2}{2}, \zeta + \tfrac{d-2}{2}) - 1$, so one
-range for $\zeta$ suffices across $d$.
+Intercepts are drawn from the family's prior on the pre-link scale, which is Gaussian for all parameters except $\pi$. Slopes on continuous regressors are drawn from $\mathcal{N}(0, 1)$. For a categorical regressor, we draw one latent mean per level, $\mu_k \sim \mathcal{N}(0, 1)$, and define its contrasts as differences from the reference level; interactions between categorical regressors use the corresponding double difference:
+\begin{equation}
+\label{eq:cell-means}
+  \beta_k = \mu_k - \mu_1,
+  \qquad
+  \beta_{kl} = \mu_{kl} - \mu_{k1} - \mu_{1l} + \mu_{11}.
+\end{equation}
+Independent contrasts would place the reference level a priori closer to every other level. This cell-means prior instead treats all levels symmetrically, so the choice of reference level does not affect the prior.
 
-Interaction terms are the full outer product of the two constituent dummy blocks,
-so a main-effect block spans $C_{\max} - 1$ columns and an interaction block
-$(C_{\max} - 1)^2$.
+Finally, model families share some parameters but not all. We therefore embed every family in a common parameter space of dimension $D_{\mathcal{C}}$, the ordered union of all intrinsic parameters in the model class $\mathcal{C}$, and parameters absent from the sampled family remain zero and masked. In the same way, $\rmX$, $\rmM$, and $\rmB$ are zero-padded to $I_{\max}$ columns, the size of a design with $R_{\max}$ regressors of $C_{\max}$ levels and all of their pairwise interactions. The number of trials $N$ is shared within a batch, whereas all other quantities are drawn for each dataset. \autoref{app:meta-sim-settings} lists the settings used for training.
 
-The earlier construction---one shared latent Gaussian, discretized at
-Dirichlet-sampled quantiles---remains available for reproducibility. It preserves
-collinearity through a Gaussian copula, the induced point-biserial correlation
-being $\rho\,\varphi(t)/\sqrt{p(1-p)}$ for a binary cut at threshold $t$, but
-renders categories ordinal, each level being a contiguous interval of a single
-latent axis, and caps the attainable categorical--continuous association.
+%============================================================================
+% APPENDIX BLOCK: move into the paper's appendix (e.g., next to
+% app:design-config). Drop the \appendix line if the host document already
+% has one before this point.
+%============================================================================
+\appendix
+\section{Meta-simulator settings}
+\label{app:meta-sim-settings}
 
-\paragraph{Parameter mask.}
-The parameter mask $\rmM \in \{0,1\}^{R \times D_{\mathcal{F}}}$, sharing the shape
-of $\rmB$, distinguishes active ($1$) from fixed ($0$) coefficients. During
-training, $\rmM$ is drawn hierarchically rather than as a single flat Bernoulli:
-each intrinsic parameter is included on the intercept independently with
-probability $p_0$, and each (regressor, parameter) slope is included
-independently with probability $p_1$, where $p_0, p_1 \sim \mathrm{Beta}(2, 2)$
-are resampled per simulation. This exposes the model to a power set of nested
-design configurations while concentrating probability near the centre of the
-design space. Slopes are only permitted for parameters that are present on the
-intercept, and global parameters are forced onto the intercept and excluded from
-all slopes. During validation, $\rmM$ is instead fixed to pre-defined benchmark
-designs (see~\autoref{app:design-config}).
+\autoref{tab:meta-sim-hyper} lists the distributions and constants of the meta-simulator used to train the model-class network. Symbols follow the main text.
 
-\paragraph{Coefficient prior.}
-Slopes are drawn under a \emph{variance budget} rather than from a fixed
-$\mathcal{N}(0,1)$. For intrinsic parameter $j$, a design share
-$w_j \sim \mathrm{Beta}(a_w, b_w)$, capped below $1$, sets the fraction of
-linear-predictor variance that is design-driven, giving a budget
-$\sigma^2_{\beta,j} = \sigma_j^2\,w_j / (1 - w_j)$ with $\sigma_j$ the scale of
-that parameter's intercept prior. A Dirichlet draw splits $\sigma^2_{\beta,j}$
-across the active blocks; each block is rescaled to its share, and a global
-rescale absorbs the between-block covariance induced by correlated regressors, so
-that the realized slope variance equals $\sigma^2_{\beta,j}$ exactly. Predictor
-scale is thereby invariant to the number of active design columns and tied to
-each parameter's own prior scale. Under i.i.d.\ slopes it instead grows as
-$\sqrt{R_j}$ in the number $R_j$ of active columns, independently of that scale
-and of the realized variance of the column each slope multiplies.
-
-Categorical contrasts derive from exchangeable cell means:
-$\mu_k \sim \mathcal{N}(0,1)$ and $\beta_k = \mu_k - \mu_0$, with two-way
-interactions taking $\mu_{kl} - \mu_{k0} - \mu_{0l} + \mu_{00}$. Independent
-contrasts would place the reference level a priori closer to every other level,
-$\mathrm{sd}(\mu_0 - \mu_k) = 1$ against
-$\mathrm{sd}(\mu_k - \mu_{k'}) = \sqrt{2}$, making the prior---and hence the
-posterior---depend on which level is baseline. Cell means equalize all pairwise
-spreads and induce $\rho = +1/2$ among contrasts, the signature of measurement
-against a common, itself-uncertain baseline. Inference targets are unchanged: the
-contrasts themselves, on the same design columns under the same mask.
-
-\paragraph{Realized-support masking.}
-Sampling category counts and interaction cells per simulation leaves some columns
-structurally absent, where a regressor realizes fewer than $C_{\max}$ levels, or
-empirically empty, where an interaction cell receives no observations. Such
-all-zero columns carry no information about their coefficients, so the
-corresponding entries of $\rmM$ are zeroed and excluded from the estimation
-targets, preventing the network from being trained to recover unidentifiable
-coefficients. The marginal floor and bounded resampling of assignments make empty
-main-effect cells rare, and compaction confines unused columns to the end of each
-block.
-
-\paragraph{Padding and batching.}
-Since $N$ and $R$ vary across simulations, $\rmX$ is zero-padded to a maximum
-capacity $R_{\max}$, reflecting the pragmatic limit on regressors in a
-realistic analysis. To avoid static padding, the number of trials $N$ is held
-constant within a batch but varies across batches. Crucially, the parameter mask
-$\rmM$, design matrix $\rmX$, and coefficients $\rmB$ are all resampled for each
-individual simulation within a batch.
-
-\paragraph{Amortization over model families.}
-To achieve amortization across a model class $\mathcal{C} = \{\mathcal{F}\}$, a
-model family index $f \sim p(f \mid \mathcal{C})$ is sampled for each simulation.
-Different families expose overlapping but non-identical intrinsic parameters, so
-we define a global parameter space of dimension $D_{\mathcal{C}}$ as the ordered
-union of all intrinsic parameters across families. Each family's realized
-parameters (and its mask) are lifted from its $D_{\mathcal{F}}$-dimensional local
-space into this global space via a fixed binary model mask
-$\bm{m}_{\mathcal{F}} \in \{0,1\}^{D_{\mathcal{C}}}$ that selects the columns
-$\mathcal{F}$ occupies; parameters absent from the sampled family remain zero and
-masked. A single network therefore performs inference across all families and
-design configurations under a shared parameterization.
+\begin{table}[h]
+\centering
+\caption{Meta-simulator settings used for training.}
+\label{tab:meta-sim-hyper}
+\begin{tabular}{lll}
+  \toprule
+  Quantity & Symbol & Value \\
+  \midrule
+  Model families               & $\mathcal{C}$          & DDM, RDM, CDM (uniform) \\
+  Shared parameter space       & $D_{\mathcal{C}}$      & $9$ ($v, a, z, \tau, s_v, s_\tau, \pi, v_{\mathrm{diff}}, v_\theta$) \\
+  Trials per dataset           & $N$                    & $\mathcal{U}\{200, \dots, 1000\}$ \\
+  Regressors                   & $R$                    & $\mathcal{U}\{0, \dots, 4\}$ \\
+  Levels per categorical regressor & $k_r$              & $\mathcal{U}\{2, 3, 4\}$ \\
+  Design capacity              & $I_{\max}$             & $67$ \\
+  Inclusion rates              & $p_0, p_1$             & $\mathrm{Beta}(2, 2)$ \\
+  Contamination                & $\pi$                  & $\mathrm{Beta}(1, 50)$ \\
+  \midrule
+  Categorical probability      & $q_{\mathrm{cat}}$     & $0.5$ \\
+  Balanced-level probability   & $q_{\mathrm{bal}}$     & $0.3$ \\
+  Level concentration          & $\alpha$               & $\mathrm{LogUniform}(0.5, 50)$ \\
+  Categorical association      & $\lambda$              & $0$ w.p.\ $0.5$, else $\mathcal{U}(0, 1)$ \\
+  Coupling concentration       & $\kappa$               & $\mathrm{LogUniform}(0.3, 10)$ \\
+  Categorical--continuous association & $\eta^2$        & $\min\{\mathrm{Beta}(1.2, 3),\, 0.85\}$ \\
+  LKJ shape                    & $\zeta$                & $\mathcal{U}(0.5, 5)$ \\
+  \bottomrule
+\end{tabular}
+\end{table}
 
 \end{document}
