@@ -997,6 +997,9 @@ FIG_W = TEXT_WIDTH_IN * FIG_SCALE
 # weight. The label drops further than the title, so the panel's name leads and
 # the axis name follows.
 FS_TITLE, FS_LABEL, FS_TICK, FS_LEG = 14, 11, 10, 8           # 7 / 5.5 / 5 / 4 pt
+# The all-family figure's legend sits on its own under the whole figure, where 4 pt
+# reads as an afterthought; it takes the tick size instead.
+FS_LEG_ALL = 10                                                # 5 pt
 FS_MINI_TITLE, FS_MINI_LABEL, FS_MINI_TICK, FS_MINI_LEG = 11, 9.5, 7.5, 8
 
 # Gaps inside the 2x2, as fractions of a mini axes. Module level because the
@@ -1685,7 +1688,7 @@ def plot_combined_all(per_family, outpath, quantiles=DEFAULT_RT_QUANTILES):
          f"PPC median + {PPC_CI:g}% CI"]
     if not any(grids.values()):
         H, L = H[:3], L[:3]
-    _legend_below(fig, H, L, fontsize=FS_LEG)
+    _legend_below(fig, H, L, fontsize=FS_LEG_ALL)
 
     # Dashed: condition-group breaks, and the RT/choice break on the DDM/RDM rows.
     for r, (fam, kind, cols, breaks) in enumerate(plan):
