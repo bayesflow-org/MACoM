@@ -16,6 +16,8 @@ import numpy as np
 import torch
 import torch.utils.data
 
+from cogformer.simulator.design_utils import DESIGN_GENERATORS
+
 
 def seed_case(base_seed: int | None, *keys: object, salt: str = "") -> None:
     """Seed numpy and torch for one validation case, order-independently.
@@ -431,11 +433,12 @@ def add_training_args(parser):
     parser.add_argument("--max_num_categories", type=int, default=5)
     parser.add_argument("--keep_intercept", action="store_true", default=True)
     parser.add_argument("--add_interaction", action="store_true", default=True)
-    parser.add_argument("--design_generator", choices=["mixture", "quantile"], default="mixture",
+    parser.add_argument("--design_generator", choices=DESIGN_GENERATORS, default="mixture",
                         help="Design-matrix construction. 'mixture' (default) draws category "
                              "assignments first, then one Gaussian per category: nominal categories, "
                              "dialable association, balanced factorials. 'quantile' is the "
-                             "pre-2026-07 shared-latent cut, kept for A/B against old runs.")
+                             "pre-2026-07 shared-latent cut; 'gaussian_softmax' uses joint "
+                             "LKJ-correlated Gaussian scores and categorical softmax blocks.")
     parser.add_argument("--coefficient_order_scale", type=float, default=1.0,
                         help="Effect-hierarchy multiplier: a two-way interaction block is "
                              "scaled by this factor. 1.0 (default) imposes no hierarchy, which "

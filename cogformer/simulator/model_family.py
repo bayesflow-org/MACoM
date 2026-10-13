@@ -233,9 +233,11 @@ class ModelFamily:
             real subjects' regressors), which the generators cannot reproduce.
             Requires ``category_counts`` ({regressor: realized dummy columns}, as
             build_design_matrix returns) and ``categorical_regressors``.
-        design_generator : ``"mixture"`` (default, latent-class / nominal categories) or
-            ``"quantile"`` (the pre-2026-07 shared-latent construction). See
-            :func:`design_utils.build_design_matrix`.
+        design_generator : ``"mixture"`` (default, latent-class / nominal categories),
+            ``"quantile"`` (the pre-2026-07 shared-latent construction), or
+            ``"gaussian_softmax"`` (joint Gaussian coordinates with softmax category
+            blocks). Generator-specific controls go in ``design_generator_kwargs``.
+            See :func:`design_utils.build_design_matrix`.
         coefficient_prior : ``"cell_means"`` (default, one latent Gaussian per category,
             contrasts as differences) or ``"iid"`` (the original per-row ``N(0, 1)``,
             which is not exchangeable across categories). Both use the same ``N(0, 1)``

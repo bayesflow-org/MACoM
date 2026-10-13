@@ -7,6 +7,7 @@ import torch
 import matplotlib.pyplot as plt
 
 from cogformer.simulator import ModelFamily, ModelClass
+from cogformer.simulator.design_utils import DESIGN_GENERATORS
 from cogformer.simulator.benchmarks.ssms.ddm import DDM
 from cogformer.simulator.benchmarks.ssms.rdm import RDM
 from cogformer.simulator.benchmarks.ssms.cdm import CDM
@@ -77,6 +78,8 @@ def parse_args():
     p.add_argument("--max_num_categories", type=int, default=5)
     p.add_argument("--keep_intercept", action="store_true", default=True)
     p.add_argument("--add_interaction", action="store_true", default=True)
+    p.add_argument("--design_generator", choices=DESIGN_GENERATORS, default="mixture",
+                   help="Generator for newly simulated evaluation data; saved --data_dir datasets are unchanged.")
 
     # Inference
     p.add_argument("--num_sample_steps", type=int, default=50)
@@ -462,6 +465,7 @@ def main():
                     fixed_config=True,
                     link_fun=link_fun,
                     pad_to_max_num_categories=training_max_cats,
+                    design_generator=args.design_generator,
                     **mix_opts,
                 )
                 samples["model_ids"] = np.full(args.batch_size, model_id, dtype=np.int64)

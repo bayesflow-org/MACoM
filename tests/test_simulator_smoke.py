@@ -13,6 +13,7 @@ dependency and is still collectable by pytest if one is added later:
 
 import sys
 import traceback
+from itertools import product
 
 import numpy as np
 import torch
@@ -22,6 +23,7 @@ from cogformer.simulator.benchmarks.ssms import DDM, RDM
 from cogformer.simulator.benchmarks.ssms.link_funs import ddm_link_fun, rdm_link_fun
 from cogformer.simulator.benchmarks.ssms.priors import ddm_priors, rdm_priors
 from cogformer.simulator.design_utils import (
+    DESIGN_GENERATORS,
     build_design_matrix,
     build_parameter_mask,
     build_random_discrete_mask,
@@ -29,7 +31,7 @@ from cogformer.simulator.design_utils import (
 from cogformer.simulator.model_class import ModelClass
 from cogformer.simulator.model_family import ModelFamily
 
-GENERATORS = ("mixture", "quantile")
+GENERATORS = DESIGN_GENERATORS
 COEF_PRIORS = ("cell_means", "iid")
 
 CONFIG = {"1": ["v", "a"], "u_1": ["v"], "u_2": ["v", "a"], "u_1:u_2": ["v"]}
@@ -106,7 +108,7 @@ def test_batch_sample_shapes_and_adapter():
 
 def test_model_class_batch_sample():
     """The multi-family path lifts params into a global space; shapes must line up."""
-    for coefficient_prior in COEF_PRIORS:
+    for generator, coefficient_prior in product(GENERATORS, COEF_PRIORS):
         np.random.seed(3)
         mc = ModelClass(
             model_families={
@@ -119,6 +121,8 @@ def test_model_class_batch_sample():
         batch = mc.batch_sample(
             batch_size=8, num_obs=80, max_num_regressors=2, max_num_categories=3,
             keep_intercept=True, coefficient_prior=coefficient_prior,
+            design_generator=generator,
+            design_generator_kwargs={"intercept_scale": 0.5} if generator == "gaussian_softmax" else None,
         )
         n_rows = batch["param_masks"].shape[-1] // batch["n_global_params"]
         assert batch["design_matrices"].shape[2] == n_rows, coefficient_prior

@@ -5,6 +5,9 @@ from typing import Callable
 from cogformer.utils.simulator_utils import shifted_softplus, sample_lkj_correlation
 
 
+DESIGN_GENERATORS = ("mixture", "quantile", "gaussian_softmax")
+
+
 def design_config_signature(design_config: dict) -> frozenset:
     """Category-agnostic structural hash of a design config.
 
@@ -925,7 +928,12 @@ def build_design_matrix(
         (group means of any correlated continuous regressor are monotone in category
         index ~92% of the time) and caps the reachable association strength.
 
-    return_diagnostics : also return the sampled/realized design hyperparameters.  Both
+      ``"gaussian_softmax"`` -- one joint LKJ-correlated Gaussian draw per trial,
+        with one coordinate per continuous regressor and one score per category.
+        Categorical blocks are sampled through softmax. See
+        :func:`_build_design_matrix_gaussian_softmax` for its scale/intercept controls.
+
+    return_diagnostics : also return the sampled/realized design hyperparameters. All
         generators report at least ``categorical_keys`` / ``continuous_keys``, which
         downstream coefficient priors need in order to identify categorical blocks.
     """
@@ -943,8 +951,15 @@ def build_design_matrix(
             max_num_categories=max_num_categories, main_discrete_mask=main_discrete_mask,
             eta=eta, category_concentration=category_concentration, **generator_kwargs,
         )
+    elif generator == "gaussian_softmax":
+        design_matrix, counts, diagnostics = _build_design_matrix_gaussian_softmax(
+            design_config=design_config, num_obs=num_obs, context=context,
+            discrete_prob=discrete_prob, min_num_categories=min_num_categories,
+            max_num_categories=max_num_categories, main_discrete_mask=main_discrete_mask,
+            eta=eta, category_concentration=category_concentration, **generator_kwargs,
+        )
     else:
-        raise ValueError(f"generator must be 'mixture' or 'quantile'; got {generator!r}")
+        raise ValueError(f"generator must be one of {DESIGN_GENERATORS}; got {generator!r}")
 
     if not (return_category_counts or return_diagnostics):
         return design_matrix
@@ -1422,6 +1437,193 @@ def sample_continuous_columns(
     return x.astype(np.float32)
 
 
+def _assemble_design_columns(
+    design_config: dict[str, list[str]],
+    num_obs: int,
+    max_num_categories: int,
+    main_columns: dict[str, np.ndarray],
+    context: dict[str, np.ndarray],
+) -> tuple[np.ndarray, dict[str, int]]:
+    """Pack sampled main effects, context overrides and interactions into the shared layout."""
+    main_keys = [k for k in design_config if k != "1" and ":" not in k]
+    inter_keys = [k for k in design_config if ":" in k]
+    block_width = max_num_categories - 1
+    inter_width = block_width ** 2
+    has_intercept = "1" in design_config
+    num_cols = int(has_intercept) + len(main_keys) * block_width + len(inter_keys) * inter_width
+    matrix = np.zeros((num_obs, num_cols))
+    if has_intercept:
+        matrix[:, 0] = 1.0
+
+    starts = {key: int(has_intercept) + j * block_width for j, key in enumerate(main_keys)}
+    counts: dict[str, int] = {}
+
+    def context_column(key: str) -> np.ndarray:
+        col = np.asarray(context[key], dtype=np.float32).reshape(-1)
+        if col.shape[0] != num_obs:
+            raise ValueError(f"context['{key}'] length {col.shape[0]} != num_obs {num_obs}")
+        return col
+
+    for key in main_keys:
+        start = starts[key]
+        if key in context:
+            matrix[:, start] = context_column(key)
+            counts[key] = 1
+        else:
+            columns = main_columns[key]
+            width = min(columns.shape[1], block_width)
+            matrix[:, start:start + width] = columns[:, :width]
+            counts[key] = width
+
+    inter_start = int(has_intercept) + len(main_keys) * block_width
+    for j, key in enumerate(inter_keys):
+        start = inter_start + j * inter_width
+        if key in context:
+            matrix[:, start] = context_column(key)
+            continue
+        parts = key.split(":")
+        if len(parts) != 2 or any(k not in starts for k in parts):
+            continue
+        a, b = (starts[k] for k in parts)
+        left = matrix[:, a:a + block_width]
+        right = matrix[:, b:b + block_width]
+        matrix[:, start:start + inter_width] = (
+            left[:, :, None] * right[:, None, :]
+        ).reshape(num_obs, inter_width)
+    return matrix, counts
+
+
+def _build_design_matrix_gaussian_softmax(
+    design_config: dict[str, list[str]],
+    num_obs: int,
+    context: dict[str, np.ndarray] | None = None,
+    discrete_prob: float = 0.5,
+    min_num_categories: int = 2,
+    max_num_categories: int = 4,
+    main_discrete_mask: np.ndarray | None = None,
+    eta: float | None = None,
+    category_concentration: float | None = None,
+    logit_scale: float = 1.0,
+    intercept_scale: float = 1.0,
+    continuous_scale: float = 1.0,
+    category_intercepts: dict[str, np.ndarray] | None = None,
+) -> tuple[np.ndarray, dict[str, int], dict]:
+    """Joint Gaussian predictors with logistic-normal categorical probability blocks.
+
+    Per dataset, ``Omega ~ LKJ(eta)`` (eta defaults to U(0.5, 5)). Per trial,
+    ``h ~ N(0, D Omega D)``: continuous coordinates come first, then one full
+    K-score block per categorical regressor. Continuous coordinates have scale
+    ``continuous_scale``; all coordinates in a categorical block share ``logit_scale``.
+    No empirical standardization or quantile cutting is applied.
+
+    Category intercepts default to iid N(0, intercept_scale**2), drawn once per
+    dataset. ``category_intercepts`` may override named blocks with finite vectors
+    of their sampled K lengths (use min_num_categories=max_num_categories to fix K).
+    ``softmax(alpha + h)`` gives per-trial probabilities; assignments are conditionally
+    independent given h. Full score blocks and symmetric intercept priors avoid
+    privileging a reference category. The reference is chosen only during dummy coding.
+
+    This generator has no Dirichlet concentration, marginal calibration, count floor,
+    or assignment retries. Empty levels are compacted and randomly relabelled just as
+    in the mixture generator. Diagnostics retain the original intercepts and the
+    original category index for each compacted label in ``category_label_orders``.
+    Equal intercepts do not guarantee uniform marginals for an arbitrary Omega, and
+    latent correlations do not directly specify observed predictor associations.
+    """
+    if num_obs < 1:
+        raise ValueError("gaussian_softmax requires num_obs >= 1")
+    if not 2 <= min_num_categories <= max_num_categories:
+        raise ValueError("require 2 <= min_num_categories <= max_num_categories")
+    if category_concentration is not None:
+        raise ValueError("gaussian_softmax does not use category_concentration; use intercept_scale instead")
+    for name, value in (
+        ("logit_scale", logit_scale), ("intercept_scale", intercept_scale),
+        ("continuous_scale", continuous_scale),
+    ):
+        if not np.isfinite(value) or value < 0:
+            raise ValueError(f"{name} must be finite and nonnegative")
+    eta = float(np.random.uniform(0.5, 5.0)) if eta is None else float(eta)
+    if not np.isfinite(eta) or eta <= 0:
+        raise ValueError("eta must be finite and positive")
+
+    context = context or {}
+    main_keys = [k for k in design_config if k != "1" and ":" not in k]
+    if main_discrete_mask is None:
+        main_discrete_mask = build_random_discrete_mask(len(main_keys), discrete_prob=discrete_prob)
+    mask = np.asarray(main_discrete_mask)
+    if mask.shape != (len(main_keys),) or not np.isin(mask, [0, 1]).all():
+        raise ValueError("main_discrete_mask must contain one 0/1 value per main regressor")
+    cat_keys = [key for j, key in enumerate(main_keys) if key not in context and mask[j] == 1]
+    cont_keys = [key for j, key in enumerate(main_keys) if key not in context and mask[j] == 0]
+    nominal_k = [int(np.random.randint(min_num_categories, max_num_categories + 1)) for _ in cat_keys]
+
+    overrides = {} if category_intercepts is None else category_intercepts
+    if set(overrides) - set(cat_keys):
+        raise ValueError("category_intercepts keys must name sampled categorical regressors")
+    intercepts: dict[str, np.ndarray] = {}
+    for key, k in zip(cat_keys, nominal_k):
+        alpha = (
+            np.asarray(overrides[key], dtype=np.float64) if key in overrides
+            else np.random.normal(0.0, intercept_scale, size=k)
+        )
+        if alpha.shape != (k,) or not np.isfinite(alpha).all():
+            raise ValueError(f"category_intercepts['{key}'] must be a finite vector of length {k}")
+        intercepts[key] = alpha
+
+    n_latent = len(cont_keys) + sum(nominal_k)
+    if n_latent:
+        correlation = sample_lkj_correlation(n_latent, eta)
+        scales = np.concatenate([
+            np.full(len(cont_keys), continuous_scale), np.full(sum(nominal_k), logit_scale),
+        ])
+        latent = draw_correlated_normals(correlation, num_obs) * scales
+    else:
+        correlation = np.empty((0, 0))
+        scales = np.empty(0)
+        latent = np.empty((num_obs, 0))
+
+    main_columns = {key: latent[:, j:j + 1] for j, key in enumerate(cont_keys)}
+    raw_assign = np.empty((num_obs, len(cat_keys)), dtype=np.int64)
+    start = len(cont_keys)
+    for r, (key, k) in enumerate(zip(cat_keys, nominal_k)):
+        logits = latent[:, start:start + k] + intercepts[key]
+        weights = np.exp(logits - logits.max(axis=1, keepdims=True))
+        probabilities = weights / weights.sum(axis=1, keepdims=True)
+        cumulative = probabilities.cumsum(axis=1)
+        cumulative[:, -1] = 1.0
+        raw_assign[:, r] = (np.random.rand(num_obs, 1) >= cumulative).sum(axis=1)
+        start += k
+
+    if cat_keys:
+        assign, realized_k = _compact_labels(raw_assign, tuple(nominal_k))
+    else:
+        assign, realized_k = raw_assign, []
+    label_orders: dict[str, np.ndarray] = {}
+    for r, (key, k) in enumerate(zip(cat_keys, realized_k)):
+        main_columns[key] = (assign[:, r, None] == np.arange(1, k)[None, :]).astype(np.float32)
+        order = np.empty(k, dtype=np.int64)
+        order[assign[:, r]] = raw_assign[:, r]
+        label_orders[key] = order
+
+    matrix, counts = _assemble_design_columns(
+        design_config, num_obs, max_num_categories, main_columns, context,
+    )
+    diagnostics = {
+        "generator": "gaussian_softmax", "eta": eta,
+        "logit_scale": logit_scale, "intercept_scale": intercept_scale,
+        "continuous_scale": continuous_scale,
+        "categorical_keys": cat_keys, "continuous_keys": cont_keys,
+        "nominal_num_categories": nominal_k, "realized_num_categories": realized_k,
+        "latent_correlation": correlation, "latent_scales": scales,
+        "category_intercepts": intercepts, "category_label_orders": label_orders,
+        "min_cell_count": (
+            min(int(np.bincount(assign[:, r]).min()) for r in range(len(cat_keys)))
+            if cat_keys else None
+        ),
+    }
+    return matrix, counts, diagnostics
+
+
 def _build_design_matrix_mixture(
     design_config: dict[str, list[str]],
     num_obs: int,
@@ -1460,20 +1662,7 @@ def _build_design_matrix_mixture(
                         marginal floor plus bounded resampling of the assignments.
     """
     context = context or {}
-    regressor_keys = [k for k in design_config if k != "1"]
-    has_intercept = "1" in design_config
-
-    main_effect_keys = [k for k in regressor_keys if ":" not in k]
-    interaction_keys = [k for k in regressor_keys if ":" in k]
-
-    block_width = max_num_categories - 1
-    inter_block_width = block_width ** 2
-    num_cols = (
-        len(main_effect_keys) * block_width
-        + len(interaction_keys) * inter_block_width
-        + (1 if has_intercept else 0)
-    )
-    design_matrix = np.zeros((num_obs, num_cols))
+    main_effect_keys = [k for k in design_config if k != "1" and ":" not in k]
 
     if main_discrete_mask is None:
         main_discrete_mask = build_random_discrete_mask(
@@ -1533,69 +1722,17 @@ def _build_design_matrix_mixture(
     else:
         cont_cols = np.zeros((num_obs, 0), dtype=np.float32)
 
-    # Cumulative start positions: main effects get block_width cols, interactions block_width**2.
-    start_col: dict[str, int] = {}
-    cur = 1 if has_intercept else 0
-    for key in main_effect_keys:
-        start_col[key] = cur
-        cur += block_width
-    for key in interaction_keys:
-        start_col[key] = cur
-        cur += inter_block_width
-
-    if has_intercept:
-        design_matrix[:, 0] = 1.0
-
-    actual_col_counts: dict[str, int] = {}
-    cat_slot = {j: i for i, j in enumerate(cat_indices)}
-    cont_slot = {j: i for i, j in enumerate(cont_indices)}
-
-    for j, key in enumerate(main_effect_keys):
-        start = start_col[key]
-
-        if key in context:
-            col = np.asarray(context[key], dtype=np.float32).reshape(-1)
-            if col.shape[0] != num_obs:
-                raise ValueError(f"context['{key}'] length {col.shape[0]} != num_obs {num_obs}")
-            design_matrix[:, start] = col
-            actual_col_counts[key] = 1
-            continue
-
-        if j in cat_slot:
-            r = cat_slot[j]
-            k = realized_k[r]
-            # Dummy coding, reference category 0 dropped -- same as the incumbent.
-            dummies = (assign[:, r][:, None] == np.arange(k)[None, :]).astype(np.float32)[:, 1:]
-            width = min(dummies.shape[1], block_width)
-            design_matrix[:, start:start + width] = dummies[:, :width]
-            actual_col_counts[key] = width
-        else:
-            design_matrix[:, start] = cont_cols[:, cont_slot[j]]
-            actual_col_counts[key] = 1
-
-    for key in interaction_keys:
-        start = start_col[key]
-
-        if key in context:
-            col = np.asarray(context[key], dtype=np.float32).reshape(-1)
-            if col.shape[0] != num_obs:
-                raise ValueError(f"context['{key}'] length {col.shape[0]} != num_obs {num_obs}")
-            design_matrix[:, start] = col
-            continue
-
-        try:
-            a, b = key.split(":")
-        except ValueError:
-            continue
-
-        a0, b0 = start_col.get(a), start_col.get(b)
-        if a0 is None or b0 is None:
-            continue
-
-        a_cols = design_matrix[:, a0:a0 + block_width]
-        b_cols = design_matrix[:, b0:b0 + block_width]
-        interaction = (a_cols[:, :, None] * b_cols[:, None, :]).reshape(num_obs, inter_block_width)
-        design_matrix[:, start:start + inter_block_width] = interaction
+    main_columns = {
+        main_effect_keys[j]: cont_cols[:, i:i + 1]
+        for i, j in enumerate(cont_indices)
+    }
+    for r, j in enumerate(cat_indices):
+        main_columns[main_effect_keys[j]] = (
+            assign[:, r, None] == np.arange(1, realized_k[r])[None, :]
+        ).astype(np.float32)
+    design_matrix, actual_col_counts = _assemble_design_columns(
+        design_config, num_obs, max_num_categories, main_columns, context,
+    )
 
     diagnostics = {
         "generator": "mixture",

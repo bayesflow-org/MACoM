@@ -15,7 +15,7 @@ from cogformer.simulator.benchmarks.ssms.rdm import RDM
 from cogformer.simulator.benchmarks.ssms.cdm import CDM
 from cogformer.simulator.benchmarks.ssms.priors import ddm_priors, rdm_priors, cdm_priors
 from cogformer.simulator.benchmarks.ssms.link_funs import ddm_link_fun, rdm_link_fun, cdm_link_fun
-from cogformer.simulator.design_utils import (build_parameter_mask, build_design_matrix,
+from cogformer.simulator.design_utils import (DESIGN_GENERATORS, build_parameter_mask, build_design_matrix,
                                               sample_covering_design_configs)
 from cogformer.adapter import Adapter
 from cogformer.networks.transformers.cogformer import CogFormer
@@ -64,6 +64,8 @@ def parse_args():
     p.add_argument("--max_num_categories", type=int, default=5)
     p.add_argument("--keep_intercept", action="store_true", default=True)
     p.add_argument("--add_interaction", action="store_true", default=True)
+    p.add_argument("--design_generator", choices=DESIGN_GENERATORS, default="mixture",
+                   help="Generator for the sampled evaluation designs.")
     p.add_argument("--num_sample_steps", type=int, default=50)
     p.add_argument("--solver", type=str, default="euler", choices=["euler", "midpoint", "rk4"])
     p.add_argument("--num_samples", type=int, default=200)
@@ -269,6 +271,7 @@ def main():
             fixed_config=True,
             link_fun=link_fun,
             pad_to_max_num_categories=args.max_num_categories,
+            design_generator=args.design_generator,
         )
         samples["model_ids"] = np.full(args.batch_size, model_id, dtype=np.int64)
 
