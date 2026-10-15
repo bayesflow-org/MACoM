@@ -76,5 +76,18 @@ Saved validation datasets are reused as stored; training-time benchmark validati
 continues to use its original generator. Adding this option does not change existing
 checkpoints or results.
 
+To rerun the whole finals pipeline under `gaussian_softmax`, run it in its own study
+directory, which keeps every output separate from the main study:
+
+```bash
+bash experiments/setup_study.sh outputs/gaussian-softmax gaussian_softmax
+STUDY_ROOT=outputs/gaussian-softmax bash run_experiments.sh --list
+```
+
+The study regenerates its own shared test set and retrains the BayesFlow baselines
+under its generator; the main study's files are never modified. See
+`.claude/skills/experiment-orchestration/SKILL.md` (section 5a) for details and the
+`--reuse-main-bench-bf` alternative.
+
 # Citation
 [TBD]

@@ -34,6 +34,7 @@ import numpy as np
 
 from ..experiment_1a.model_family_bf_validate import ModelFamilyBF
 from ..utils import seed_case
+from cogformer.simulator.design_utils import DESIGN_GENERATORS
 
 # LBA uses fixed_A=0.5 via its model_kwargs, like every other LBA arm.
 FAMILIES = ["ddm", "rdm", "cdm", "lba"]
@@ -47,12 +48,14 @@ def main():
     p.add_argument("--batch_size", type=int, default=200)
     p.add_argument("--num_obs", type=int, default=500)
     p.add_argument("--seed", type=int, default=0)
+    p.add_argument("--design_generator", choices=DESIGN_GENERATORS, default="mixture",
+                   help="Design generator of the test designs; the BF baselines must train on the same.")
     a = p.parse_args()
     out = Path(a.outdir); out.mkdir(parents=True, exist_ok=True)
     for fam in FAMILIES:
         for case in BENCH5:
             path = out / f"{fam}_{case}_data.npz"
-            sim = ModelFamilyBF(model_key=fam, case=case)
+            sim = ModelFamilyBF(model_key=fam, case=case, design_generator=a.design_generator)
             seed_case(a.seed, fam, case)
             d = sim.sample(a.batch_size, num_obs=a.num_obs)
             extra = {}

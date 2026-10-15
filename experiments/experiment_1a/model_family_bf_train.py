@@ -22,6 +22,7 @@ import bayesflow as bf
 from pathlib import Path
 
 from cogformer.simulator.model_family import ModelFamily
+from cogformer.simulator.design_utils import DESIGN_GENERATORS
 
 from ..configs import MODELS as _BASE_MODELS
 from ..utils import (recommend_sim_workers, stimulus_channels, benchmark_mix_opts,
@@ -51,7 +52,11 @@ for _key, _base in _BASE_MODELS.items():
 class ModelFamilyBF(bf.simulators.Simulator):
     """Generic BayesFlow simulator wrapping ModelFamily for any benchmark model."""
 
-    def __init__(self, model_key: str, case: str):
+    def __init__(self, model_key: str, case: str, design_generator: str = "mixture"):
+        # design_generator: the study's design generator (run_experiments.sh passes
+        # DESIGN_GENERATOR). The test set (benchmark_data) is drawn by this class, so the
+        # baselines train on the distribution they are tested on only if both match.
+        self.design_generator = design_generator
         model_cfg = MODELS[model_key]
         case_configs = model_cfg["case_configs"]
         if case not in case_configs:
@@ -163,6 +168,7 @@ class ModelFamilyBF(bf.simulators.Simulator):
             sample_kwargs["design_config"] = self.config["design_config"]
         # Same design generator as CogFormer's benchmark validation of this case.
         sample_kwargs.update(benchmark_mix_opts(self.model_key, self.case))
+        sample_kwargs["design_generator"] = self.design_generator
 
         samples = self.model_family.batch_sample(
             batch_size=batch_size,
@@ -263,9 +269,9 @@ def main(model_key: str, case: str, epochs: int = 1000, steps_per_epoch: int = 1
          standardize_summaries: bool = False, tag: str = "",
          time_power_law_alpha: float | None = None,
          slice_active_target: bool = True,
-         rt_transform: str = "none"):
+         rt_transform: str = "none", design_generator: str = "mixture"):
     model_cfg = MODELS[model_key]
-    simulator = ModelFamilyBF(model_key=model_key, case=case)
+    simulator = ModelFamilyBF(model_key=model_key, case=case, design_generator=design_generator)
     simulator.slice_active_target = slice_active_target
 
     # The summary network sees rts, choices and design columns concatenated RAW --
@@ -459,6 +465,8 @@ if __name__ == "__main__":
     parser.add_argument("--dry_run_epochs", type=int, default=None,
                         help="If set, train for this many epochs only and record extrapolated time.")
     parser.add_argument("--use_wandb", action="store_true")
+    parser.add_argument("--design_generator", choices=DESIGN_GENERATORS, default="mixture",
+                        help="Design generator of the case simulator (training data and, without --data_dir, the test data). Must match the test set's generator.")
     parser.add_argument("--test", action="store_true")
     add_sim_backend_arg(parser)
     args = parser.parse_args()
@@ -495,6 +503,7 @@ if __name__ == "__main__":
                 time_power_law_alpha=args.time_power_law_alpha,
                 slice_active_target=args.slice_active_target,
                 rt_transform=args.rt_transform,
+                design_generator=args.design_generator,
             )
         if args.use_wandb:
             wandb.finish()

@@ -164,6 +164,16 @@ def test_invalid_controls_fail_clearly():
             raise AssertionError(f"accepted invalid controls: {overrides}")
 
 
+def test_category_bounds_ignored_without_categoricals():
+    """The BayesFlow intercept-only / fixed cases pass max_num_categories=0: no categorical
+    regressor is drawn, so the bounds must not be validated (the mixture generator never
+    did). Still enforced whenever a categorical regressor exists (test above)."""
+    for gen in ("mixture", "gaussian_softmax"):
+        m = designs.build_design_matrix({"1": ["v", "a"]}, 50, min_num_categories=2,
+                                        max_num_categories=0, generator=gen)
+        assert m.shape == (50, 1) and np.all(m == 1.0)
+
+
 if __name__ == "__main__":
     failures = 0
     for name, fn in sorted(globals().items()):

@@ -25,6 +25,7 @@ import matplotlib.pyplot as plt
 np.set_printoptions(suppress=True)
 
 from cogformer.simulator import ModelFamily, ModelClass
+from cogformer.simulator.design_utils import DESIGN_GENERATORS
 from cogformer.simulator.benchmarks.ssms.ddm import DDM
 from cogformer.simulator.benchmarks.ssms.rdm import RDM
 from cogformer.simulator.benchmarks.ssms.cdm import CDM
@@ -444,6 +445,10 @@ def parse_args():
     parser.add_argument("--max_num_categories", type=int, default=5)
     parser.add_argument("--keep_intercept", action="store_true", default=True)
     parser.add_argument("--add_interaction", action="store_true", default=True)
+    # Must match the generator the pretrained checkpoint was trained on, or the finetune
+    # trains DDM/RDM/CDM (scheme 2) on a design distribution the base model never saw.
+    parser.add_argument("--design_generator", choices=DESIGN_GENERATORS, default="mixture",
+                        help="Design-matrix generator for the finetuning data.")
 
     return parser.parse_args()
 
@@ -475,6 +480,7 @@ if __name__ == "__main__":
         "max_num_categories": max_num_categories,
         "keep_intercept":     keep_intercept,
         "add_interaction":    args.add_interaction,
+        "design_generator":   args.design_generator,
     }
 
     train_sample_config = {

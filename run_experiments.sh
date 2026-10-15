@@ -52,9 +52,32 @@
 set -uo pipefail
 
 PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-cd "$PROJECT_ROOT"
+# STUDY_ROOT is the directory every stage runs IN. All pipeline paths (./outputs, ./logs,
+# ./data, wandb's run dir) are cwd-relative, so a study other than the main one -- e.g.
+# outputs/gaussian-softmax, set up by experiments/setup_study.sh -- gets its own
+# outputs/, finals/ and logs/ without touching the main tree. Its ./study.env sets the
+# design generator (read by shared_config.sh). Default: the repo root, the main study.
+STUDY_ROOT="$(cd "${STUDY_ROOT:-$PROJECT_ROOT}" && pwd)" || { echo "STUDY_ROOT does not exist" >&2; exit 2; }
+cd "$STUDY_ROOT"
 export PYTHONPATH="${PROJECT_ROOT}${PYTHONPATH:+:$PYTHONPATH}"
-source experiments/shared_config.sh
+source "${PROJECT_ROOT}/experiments/shared_config.sh"
+# A non-default generator writing into the main tree would mix two training
+# distributions under one outputs/; a study root without study.env would silently run
+# the mixture generator. Refuse both.
+if [[ "$STUDY_ROOT" == "$PROJECT_ROOT" && "$DESIGN_GENERATOR" != mixture ]]; then
+    echo "DESIGN_GENERATOR=$DESIGN_GENERATOR in the main study root; use a STUDY_ROOT (experiments/setup_study.sh)" >&2
+    exit 2
+fi
+if [[ "$STUDY_ROOT" != "$PROJECT_ROOT" && ! -f ./study.env ]]; then
+    echo "STUDY_ROOT=$STUDY_ROOT has no study.env; set it up with experiments/setup_study.sh" >&2
+    exit 2
+fi
+# Exported for the record (stage logs, child shells); shared_config.py re-derives it
+# from ./study.env itself.
+export DESIGN_GENERATOR
+GEN=(--design_generator "$DESIGN_GENERATOR")
+# Names and tags the e1_train wandb run (wandb-only; checkpoint names carry MC_TAG).
+RUN_TAG=(); [[ "$DESIGN_GENERATOR" == mixture ]] || RUN_TAG=(--run_tag "$DESIGN_GENERATOR")
 
 # MPLBACKEND=Agg is REQUIRED, not tidiness. On this Wayland/Xwayland session the
 # inherited DISPLAY=:0 no longer accepts connections, so matplotlib's backend
@@ -213,7 +236,7 @@ stage_e1_data() {
     # every arm scored on the previous set. The sentinel is what prevents that.
     run "shared benchmark datasets (bench5 x ddm/rdm/cdm/lba, 200 x ${OBS} trials)" -- \
         "$PY" -m experiments.experiment_1.benchmark_data \
-            --outdir "$BENCH_DATA" --batch_size 200 --num_obs "$OBS" --seed "$VAL_SEED" || return 1
+            --outdir "$BENCH_DATA" --batch_size 200 --num_obs "$OBS" --seed "$VAL_SEED" "${GEN[@]}" || return 1
     [[ -n "${DRY_RUN:-}" ]] || touch "${BENCH_DATA}/.done"
 }
 
@@ -226,7 +249,7 @@ stage_e1_train() {
     run "ModelClass CF train (r${MC_MAX_REG}c${MC_MAX_CAT}, b${MC_TRAIN_BATCH}, e${MC_EPOCHS}, ${NPROC:-1} GPU)" -- \
         "${MC_LAUNCH[@]}" experiments.experiment_1.model_class_cf_train \
             --time_power_law_alpha "$FM_TIME_ALPHA" \
-            "${MC_ARCH[@]}" "${MC_GEOM[@]}" \
+            "${MC_ARCH[@]}" "${MC_GEOM[@]}" "${GEN[@]}" \
             --checkpoint_dir "$MC_CKPT_DIR" \
             --min_num_obs "$MIN_OBS" --max_num_obs "$MAX_OBS" \
             --train_batch_size "$MC_TRAIN_BATCH" \
@@ -236,7 +259,7 @@ stage_e1_train() {
             --fm_sample_steps 50 --fm_num_samples 100 \
             --val_epoch_interval 2500 --early_val_epoch 1000 --resume \
             --fig_dir "${FIG_MC}/${MC_TAG}_train" \
-            "${DRY[@]}" "${WANDB[@]}" "${SIMW[@]}" || return 1
+            "${DRY[@]}" "${WANDB[@]}" "${RUN_TAG[@]}" "${SIMW[@]}" || return 1
     # A DRY_EPOCHS smoke test writes under the real filename; never mark it complete.
     [[ -n "${DRY_RUN:-}${DRY_EPOCHS:-}" ]] || touch "${MC_CKPT}.done"
 }
@@ -252,7 +275,7 @@ stage_e1_validate() {
     run "ModelClass CF validate — 6 scenarios x 3 families" -- \
         "$PY" -m experiments.experiment_1.model_class_cf_validate \
             "${MC_SAMPLER[@]}" \
-            "${MC_ARCH[@]}" "${MC_GEOM[@]}" \
+            "${MC_ARCH[@]}" "${MC_GEOM[@]}" "${GEN[@]}" \
             --checkpoint "$MC_CKPT" \
             --outdir "${FIG_MC}/${MC_TAG}_validate" \
             --pred_dir "${DATA_MC}/${MC_TAG}_validate" \
@@ -271,7 +294,7 @@ stage_e1_ensemble() {
     run "ModelClass random-design ensemble" -- \
         "$PY" -m experiments.experiment_1.model_class_cf_ensemble \
             "${MC_SAMPLER[@]}" \
-            "${MC_ARCH[@]}" "${MC_GEOM[@]}" \
+            "${MC_ARCH[@]}" "${MC_GEOM[@]}" "${GEN[@]}" \
             --checkpoint "$MC_CKPT" \
             --outdir "${FIG_MC}/${MC_TAG}_ensemble" \
             --batch_size 200 --num_obs "$OBS" --num_samples 200 \
@@ -299,7 +322,7 @@ stage_e1_design_eig() {
     need "${MC_CKPT}.done" "stage e1_train" || return 1
     run "information gain vs trial count (static design optimisation)" -- \
         "$PY" -m experiments.experiment_1.ddm_design_eig \
-            "${MC_ENC[@]}" "${MC_SAMPLER[@]}" \
+            "${MC_ENC[@]}" "${MC_SAMPLER[@]}" "${GEN[@]}" \
             --checkpoint "$MC_CKPT" \
             --outdir "$DESIGN_OPT_DIR" \
             --max_num_regressors "$MC_MAX_REG" --max_num_categories "$MC_MAX_CAT" \
@@ -343,7 +366,7 @@ stage_e1a_bf() {
             run "BF baseline train ${fam}/${case}" -- \
                 "$PY" -m experiments.experiment_1a.model_family_bf_train \
                     --model "$fam" --case "$case" \
-                    --epochs "$MF_BF_EPOCHS" --steps_per_epoch "$STEPS" --batch_size "$MF_BF_BATCH" \
+                    --epochs "$MF_BF_EPOCHS" --steps_per_epoch "$STEPS" --batch_size "$MF_BF_BATCH" "${GEN[@]}" \
                     "${DRY[@]}" || return 1
             # XLA_PYTHON_CLIENT_PREALLOCATE=false: jax otherwise grabs 75% of the
             # card on a shared box.
@@ -352,7 +375,7 @@ stage_e1a_bf() {
                 env XLA_PYTHON_CLIENT_PREALLOCATE=false \
                 "$PY" -m experiments.experiment_1a.model_family_bf_validate \
                     --model "$fam" --case "$case" \
-                    --num_samples 200 --data_dir "$BENCH_DATA" \
+                    --num_samples 200 --data_dir "$BENCH_DATA" "${GEN[@]}" \
                     --skip_posteriors || return 1
         done
     done
@@ -554,7 +577,7 @@ stage_e3_zeroshot() {
     run "LBA zero-shot validate (A=${LBA_FIXED_A})" -- \
         "$PY" -m experiments.experiment_3.model_class_lba_cf_validate \
             "${MC_SAMPLER[@]}" \
-            --lba_fixed_A "$LBA_FIXED_A" "${MC_ARCH[@]}" "${MC_GEOM[@]}" \
+            --lba_fixed_A "$LBA_FIXED_A" "${MC_ARCH[@]}" "${MC_GEOM[@]}" "${GEN[@]}" \
             --checkpoint "$MC_CKPT" \
             --outdir "${LBA_PAIRED}/zeroshot" \
             --batch_size 200 --num_samples 200 --num_obs "$OBS" \
@@ -574,7 +597,7 @@ stage_e3_finetune() {
     run "LBA finetune (scheme ${FINETUNE_SCHEME:-2}, A=${LBA_FIXED_A})" -- \
         "$PY" -m experiments.experiment_3.model_class_cf_finetune_lba \
             --time_power_law_alpha "$FM_TIME_ALPHA" --checkpoint_dir "$(dirname "$LBA_FT_CKPT")" \
-            --lba_fixed_A "$LBA_FIXED_A" "${MC_ARCH[@]}" "${MC_GEOM[@]}" \
+            --lba_fixed_A "$LBA_FIXED_A" "${MC_ARCH[@]}" "${MC_GEOM[@]}" "${GEN[@]}" \
             --pretrained_checkpoint "$MC_CKPT" \
             --epochs "$LBA_FT_EPOCHS" --steps_per_epoch "$STEPS" \
             --lr 1e-5 --dropout 0.05 --layer_dropout 0.05 \
@@ -592,7 +615,7 @@ stage_e3_ft_validate() {
     run "LBA finetuned validate — 4 families" -- \
         "$PY" -m experiments.experiment_3.model_class_lba_finetune_validate \
             "${MC_SAMPLER[@]}" \
-            --lba_fixed_A "$LBA_FIXED_A" "${MC_ARCH[@]}" "${MC_GEOM[@]}" \
+            --lba_fixed_A "$LBA_FIXED_A" "${MC_ARCH[@]}" "${MC_GEOM[@]}" "${GEN[@]}" \
             --checkpoint "$LBA_FT_CKPT" \
             --outdir "${LBA_PAIRED}/finetuned" \
             --pred_dir "${LBA_PAIRED}/finetuned/predictions" \
@@ -667,13 +690,13 @@ stage_e3_bf() {
         run "BF baseline train lba/${case}" -- \
             "$PY" -m experiments.experiment_1a.model_family_bf_train \
                 --model lba --case "$case" \
-                --epochs "$MF_BF_EPOCHS" --steps_per_epoch "$STEPS" --batch_size "$MF_BF_BATCH" \
+                --epochs "$MF_BF_EPOCHS" --steps_per_epoch "$STEPS" --batch_size "$MF_BF_BATCH" "${GEN[@]}" \
                 "${DRY[@]}" || return 1
         run "BF baseline validate lba/${case}" -- \
             env XLA_PYTHON_CLIENT_PREALLOCATE=false \
             "$PY" -m experiments.experiment_1a.model_family_bf_validate \
                 --model lba --case "$case" \
-                --num_samples 200 --data_dir "$BENCH_DATA" \
+                --num_samples 200 --data_dir "$BENCH_DATA" "${GEN[@]}" \
                 --skip_posteriors || return 1
     done
 }
@@ -1004,6 +1027,7 @@ SELECTED=("${ORDERED[@]}")
 
 echo "════════════════════════════════════════════════════════════════"
 echo " CogFormer-2 — finals pipeline   run ${RUN_ID}"
+echo " study  : ${STUDY_ROOT}   (generator ${DESIGN_GENERATOR}, MC_TAG ${MC_TAG})"
 echo " stages : ${SELECTED[*]}"
 echo " logs   : ${LOG_DIR}/"
 [[ -n "${DRY_RUN:-}" ]] && echo " DRY RUN — no commands will execute"

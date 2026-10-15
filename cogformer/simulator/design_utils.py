@@ -1532,8 +1532,6 @@ def _build_design_matrix_gaussian_softmax(
     """
     if num_obs < 1:
         raise ValueError("gaussian_softmax requires num_obs >= 1")
-    if not 2 <= min_num_categories <= max_num_categories:
-        raise ValueError("require 2 <= min_num_categories <= max_num_categories")
     if category_concentration is not None:
         raise ValueError("gaussian_softmax does not use category_concentration; use intercept_scale instead")
     for name, value in (
@@ -1555,6 +1553,12 @@ def _build_design_matrix_gaussian_softmax(
         raise ValueError("main_discrete_mask must contain one 0/1 value per main regressor")
     cat_keys = [key for j, key in enumerate(main_keys) if key not in context and mask[j] == 1]
     cont_keys = [key for j, key in enumerate(main_keys) if key not in context and mask[j] == 0]
+    # Category bounds only constrain a design that has a categorical regressor. Designs
+    # without one (the BayesFlow intercept-only / fixed cases pass max_num_categories=0)
+    # are valid, as they are for the mixture generator. The check draws nothing, so valid
+    # inputs consume the same random stream as before it moved here.
+    if cat_keys and not 2 <= min_num_categories <= max_num_categories:
+        raise ValueError("require 2 <= min_num_categories <= max_num_categories")
     nominal_k = [int(np.random.randint(min_num_categories, max_num_categories + 1)) for _ in cat_keys]
 
     overrides = {} if category_intercepts is None else category_intercepts

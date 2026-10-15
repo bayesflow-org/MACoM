@@ -65,6 +65,18 @@ LBA_FT_EPOCHS=1000
 # do not switch it mid-study; "numba" is the CPU reference implementation.
 SIM_BACKEND=gpu
 
+# ── Design generator (study identity) ──────────────────────────────────────────
+# Which design-matrix generator CogFormer trains and is evaluated on (see
+# design_utils.build_design_matrix). A study is a directory the pipeline runs IN
+# (run_experiments.sh's STUDY_ROOT); a study other than the main one carries a
+# ./study.env that sets DESIGN_GENERATOR, so every process whose cwd is that study --
+# the orchestrator and the finalize scripts' shared_config.py alike -- resolves the
+# same generator and MC_TAG without anything being exported by hand. The repo root has
+# no study.env, so the main study is the mixture generator and its tags are unchanged.
+if [[ -f ./study.env ]]; then source ./study.env; fi
+DESIGN_GENERATOR="${DESIGN_GENERATOR:-mixture}"
+GEN_SUFFIX=""; [[ "$DESIGN_GENERATOR" == mixture ]] || GEN_SUFFIX="_${DESIGN_GENERATOR}"
+
 # ── Encoder design geometry ────────────────────────────────────────────────────
 # A checkpoint's encoder input_embedding is sized by (max_num_regressors,
 # max_num_categories) via build_encoder_input_dim: r2c2→9, r2c3→14, r4c4→72,
@@ -80,7 +92,8 @@ MC_MAX_REG=4; MC_MAX_CAT=4
 # .done would otherwise satisfy e1_train) from being picked up under the same name.
 # _ptc: trained after ModelClass.collate kept per_trial_context (2026-10-05); every
 # earlier checkpoint saw favored_idx = 0 for all RDM/LBA training data.
-MC_TAG="r${MC_MAX_REG}c${MC_MAX_CAT}_enc${ENC_EMBED}h${ENC_HEADS}l${ENC_LAYERS}_a${FM_TIME_ALPHA}_b${MC_TRAIN_BATCH}_e${MC_EPOCHS}_ptc"
+# GEN_SUFFIX is empty for the mixture generator, so the main study's tag is unchanged.
+MC_TAG="r${MC_MAX_REG}c${MC_MAX_CAT}_enc${ENC_EMBED}h${ENC_HEADS}l${ENC_LAYERS}_a${FM_TIME_ALPHA}_b${MC_TRAIN_BATCH}_e${MC_EPOCHS}_ptc${GEN_SUFFIX}"
 MC_CKPT_DIR="./outputs/checkpoints/model_class/cf/${MC_TAG}"
 MC_CKPT="${MC_CKPT_DIR}/cogformer_model_class_fm_l${DEC_LAYERS}_h${HEADS}_p${PROJ}_s${SEEDS}_d${MC_DIM}_b${MC_TRAIN_BATCH}_e${MC_EPOCHS}_t${STEPS}.pt"
 

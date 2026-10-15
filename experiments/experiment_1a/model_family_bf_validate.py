@@ -12,6 +12,7 @@ import matplotlib.pyplot as plt
 from pathlib import Path
 
 from cogformer.simulator.model_family import ModelFamily
+from cogformer.simulator.design_utils import DESIGN_GENERATORS
 from cogformer.diagnostics.plot.adaptive_recovery import adaptive_recovery, global_recovery
 from cogformer.diagnostics.plot.adaptive_coverage import adaptive_coverage, global_coverage
 from cogformer.diagnostics.plot.adaptive_ecdf import adaptive_ecdf, global_ecdf
@@ -64,7 +65,11 @@ for _key, _raw in {k: v for k, v in _BASE_MODELS.items() if k in _BF_DIRS}.items
 
 
 class ModelFamilyBF(bf.simulators.Simulator):
-    def __init__(self, model_key: str, case: str):
+    def __init__(self, model_key: str, case: str, design_generator: str = "mixture"):
+        # design_generator: the study's design generator (run_experiments.sh passes
+        # DESIGN_GENERATOR). The test set (benchmark_data) is drawn by this class, so the
+        # baselines train on the distribution they are tested on only if both match.
+        self.design_generator = design_generator
         model_cfg = MODELS[model_key]
         case_configs = model_cfg["case_configs"]
         if case not in case_configs:
@@ -111,6 +116,7 @@ class ModelFamilyBF(bf.simulators.Simulator):
             sample_kwargs["design_config"] = self.config["design_config"]
         # Same design generator as CogFormer's benchmark validation of this case.
         sample_kwargs.update(benchmark_mix_opts(self.model_key, self.case))
+        sample_kwargs["design_generator"] = self.design_generator
         samples = self.model_family.batch_sample(
             batch_size=batch_size,
             num_obs=num_obs,
@@ -177,7 +183,7 @@ def test(model_key: str, case: str):
 
 def main(model_key: str, case: str, batch_size: int = 200, num_samples: int = 200,
          skip_posteriors: bool = True, skip_log_gamma: bool = True, seed: int = 0,
-         tag: str = "", bench_dir: str | None = None):
+         tag: str = "", bench_dir: str | None = None, design_generator: str = "mixture"):
     model_cfg = MODELS[model_key]
     model_name = model_key
     case_config = model_cfg["case_configs"][case]
@@ -201,7 +207,7 @@ def main(model_key: str, case: str, batch_size: int = 200, num_samples: int = 20
     stem = f"{case}__{tag}" if tag else case
     ckpt_dir = f"{model_cfg['ckpt_prefix']}_{case}" + (f"__{tag}" if tag else "")
 
-    simulator = ModelFamilyBF(model_key=model_key, case=case)
+    simulator = ModelFamilyBF(model_key=model_key, case=case, design_generator=design_generator)
     ckpt_path = f"./outputs/checkpoints/model_family/bf/{model_key}/{ckpt_dir}/model.keras"
     approximator = keras.saving.load_model(ckpt_path)
 
@@ -459,6 +465,8 @@ if __name__ == "__main__":
     parser.add_argument("--data_dir", type=str, default=None,
                         help="Score the shared benchmark datasets in this directory "
                              "(<model>_<case>_data.npz) instead of simulating.")
+    parser.add_argument("--design_generator", choices=DESIGN_GENERATORS, default="mixture",
+                        help="Design generator of the case simulator (training data and, without --data_dir, the test data). Must match the test set's generator.")
     parser.add_argument("--skip_log_gamma", action="store_true", default=True)
     parser.add_argument("--include_log_gamma", dest="skip_log_gamma", action="store_false")
     args = parser.parse_args()
@@ -478,4 +486,5 @@ if __name__ == "__main__":
             seed=args.seed,
             tag=args.tag,
             bench_dir=args.data_dir,
+            design_generator=args.design_generator,
         )

@@ -181,6 +181,45 @@ training in total:
    input as "would need: ...").
 5. Gather all source trees on ONE host and run `bash run_experiments.sh finalize` there.
 
+## 5a. Studies: rerunning everything under another design generator
+
+The main study runs in the repo root with the `mixture` generator. A **study** is a
+directory the pipeline runs IN (`STUDY_ROOT`): every pipeline path is cwd-relative, so it
+gets its own `outputs/`, `outputs/finals/`, `logs/` and `wandb/`. The first one is
+`outputs/gaussian-softmax` (`DESIGN_GENERATOR=gaussian_softmax`, set up 2026-10-15).
+
+```bash
+bash experiments/setup_study.sh outputs/gaussian-softmax gaussian_softmax   # once; idempotent
+STUDY_ROOT=outputs/gaussian-softmax bash run_experiments.sh --list
+STUDY_ROOT=outputs/gaussian-softmax DRY_RUN=1 bash run_experiments.sh all
+CUDA_VISIBLE_DEVICES=0 STUDY_ROOT=outputs/gaussian-softmax setsid nohup bash run_experiments.sh main \
+    > outputs/gaussian-softmax/main.out 2>&1 < /dev/null &
+```
+
+- `study.env` in the study pins `DESIGN_GENERATOR`; `shared_config.sh` sources it from the
+  cwd, so MC_TAG gains `_<generator>` and finalize (via `shared_config.py`) resolves the
+  same tag. The orchestrator refuses a non-mixture generator in the repo root and a
+  `STUDY_ROOT` without `study.env`.
+- `--design_generator` reaches every stage that simulates designs: e1_data (the test set
+  is drawn by the BF simulator, `ModelFamilyBF`), e1a_bf / e3_bf (train + validate),
+  e1_train, e1_validate, e1_ensemble, e1_design_eig, e3_zeroshot, e3_finetune,
+  e3_ft_validate. The rest use real designs or are intercept-only (Exp 4).
+- By default a study regenerates its own test set and retrains all 20 BF baselines under
+  its generator (decided 2026-10-15 for the gaussian_softmax study): run `e1_data` first,
+  then `main` on one GPU and `gap_train` on the other, as in section 2. The main study's
+  test set and BF checkpoints are never touched. `--reuse-main-bench-bf` instead copies
+  both (together: each BF npz was scored on that test set) -- valid because bench5 is
+  intercept-only / all-continuous, and it keeps the study paired with the main study.
+- `setup_study.sh` always COPIES (never links) the Exp-4 aDDM baseline checkpoint
+  (intercept-only: no generator ever draws a regressor for it).
+- `outputs/gaussian-softmax/superseded_copies_of_main/` holds the copies of the main
+  test set + BF baselines from the first setup (before the regenerate decision). They are
+  byte-identical copies; the originals stay in the main tree. Safe to delete.
+- The in-training benchmark validation of `model_class_cf_train` still uses `mixture`
+  (monitoring only; checkpoints are saved on a schedule, not by validation score).
+- `PY` must be absolute when the env is not activated (`PY=$PWD/.venv/bin/python`): the
+  orchestrator `cd`s into the study.
+
 ## 6. Before the final launch
 
 - `git status` clean and committed on both hosts; `uv sync --locked` done; versions verified.

@@ -107,6 +107,7 @@ from cogformer.adapter import Adapter
 from cogformer.networks.transformers.cogformer import CogFormer
 from cogformer.simulator import ModelFamily
 from cogformer.simulator.model_class import ModelClass
+from cogformer.simulator.design_utils import DESIGN_GENERATORS
 from cogformer.simulator.benchmarks.ssms.ddm import DDM
 from cogformer.simulator.benchmarks.ssms.rdm import RDM
 from cogformer.simulator.benchmarks.ssms.cdm import CDM
@@ -269,6 +270,7 @@ def simulate_cell(args, model_class, ddm_cfg, categorical_regressors, num_obs,
         flatten_param_outputs=True, fixed_config=True,
         link_fun=model_class.link_funs["DDM"],
         pad_to_max_num_categories=args.max_num_categories,
+        design_generator=args.design_generator,
     )
     samples["model_ids"] = np.full(batch_size, model_class.model_index["DDM"],
                                    dtype=np.int64)
@@ -611,6 +613,8 @@ def parse_args():
     # Geometry -- must match the checkpoint (the MC checkpoints are r4c4)
     p.add_argument("--max_num_regressors", type=int, default=4)
     p.add_argument("--max_num_categories", type=int, default=4)
+    p.add_argument("--design_generator", choices=DESIGN_GENERATORS, default="mixture",
+                   help="Generator for the evaluated designs; match the checkpoint's training generator.")
     p.add_argument("--num_models", type=int, default=3)
     p.add_argument("--encoder_num_layers", type=int, default=8)
     p.add_argument("--decoder_num_layers", type=int, default=8)
