@@ -1,0 +1,85 @@
+════════════════════════════════════════════════════════════════
+ CogFormer-2 — finals pipeline   run 20261015_163121
+ study  : /home/jerry/Documents/research/projects/CogFormer-2/outputs/gaussian-softmax   (generator gaussian_softmax, MC_TAG r4c4_enc128h4l4_a0.5_b128_e15000_ptc_gaussian_softmax)
+ stages : e1_data e1_train e1_validate e1_ensemble e1_benchmark e1_design_eig e1_finalize e2_apply e2_refit_svfix e2_ppc e2_validate e2_finalize e3_zeroshot e3_finetune e3_ft_validate e3_original e3_paired_c2st e3_compare e3_ppc_apply e3_ppc e3_realdata_validate e3_finalize e4_probe e4_compare e4_representation e4_finalize
+ logs   : logs/finals/20261015_163121/
+════════════════════════════════════════════════════════════════
+
+── e1_data — skipped (marker exists: ./outputs/data/benchmark/seed0/.done)
+
+── e1_train
+    · ModelClass CF train (r4c4, b128, e15000, 1 GPU)
+      ok (1729m)
+
+── e1_validate
+    · ModelClass CF validate — 6 scenarios x 3 families
+      ok (58m)
+
+── e1_ensemble
+    · ModelClass random-design ensemble
+      ok (38m)
+
+── e1_benchmark
+    · benchmark ensembles (bench5 / bench6 x 3 families)
+      ok (1m)
+
+── e1_design_eig
+    · information gain vs trial count (static design optimisation)
+      ok (63m)
+
+── e1_finalize
+    · assemble outputs/finals/experiment-1
+      ok (0m)
+
+── e2_apply
+    · real-data model-class apply — ddm
+      ok (68m)
+    · real-data model-class apply — rdm
+      ok (141m)
+    · real-data model-class apply — cdm
+      ok (11m)
+
+── e2_refit_svfix
+    · DDM refit with s_v fixed at 0 (original specification)
+      ok (68m)
+
+── e2_ppc
+    · posterior predictive checks — ddm (mc)
+      ok (0m)
+    · posterior predictive checks — rdm (mc)
+      ok (3m)
+    · posterior predictive checks — cdm (mc)
+      ok (0m)
+    · PPC — cdm, s_v pinned to 0
+      ok (0m)
+    · PPC — ddm, s_v pinned at simulation only
+      ok (0m)
+    · PPC — ddm refit, s_v fixed at fitting (original specification)
+      ok (0m)
+    · PPC — combined figure, all families
+      ok (0m)
+
+── e2_validate
+    · real-data-design validation — ddm 
+      ok (73m)
+    · real-data-design validation — ddm --fix_s_v
+      ok (73m)
+    · real-data-design validation — rdm 
+      ok (74m)
+    · real-data-design validation — cdm 
+      ok (72m)
+
+── e2_finalize
+    · assemble outputs/finals/experiment-2
+      ok (0m)
+
+── e3_zeroshot
+    · LBA zero-shot validate (A=0.5)
+      ok (19m)
+
+── e3_finetune
+    · LBA finetune (scheme 2, A=0.5)
+      ok (105m)
+
+── e3_ft_validate
+    · LBA finetuned validate — 4 families

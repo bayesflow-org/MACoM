@@ -272,3 +272,25 @@ cogformer/utils/fonts/*.otf
 
 # macOS Finder metadata
 .DS_Store
+
+# Study roots (experiments/setup_study.sh) mirror the whole tree one level down, at
+# outputs/<study>/outputs/..., where the anchored rules above do not reach -- that is
+# how the gaussian-softmax study's checkpoints and PPC caches (1.1 GB) got staged.
+# A study's results live in its finals/, figures/ and evaluations/; its checkpoints
+# and data stay local.
+outputs/*/outputs/checkpoints/
+outputs/*/outputs/data/
+outputs/*/outputs/timing/
+outputs/*/outputs/logs/
+outputs/*/superseded_copies_of_main/
+
+# Safety net for any other path: model weights and pickled caches never go to git.
+# The one deliberate exception (the LBA-finetuned checkpoint, see "Results") is
+# re-stated after it, since the last matching pattern wins.
+*.pt
+*.pth
+*.ckpt
+*.keras
+*.h5
+*.pkl
+!outputs/checkpoints/model_class/cf/lba_finetune/*.pt
