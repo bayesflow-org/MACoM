@@ -1,0 +1,35 @@
+════════════════════════════════════════════════════════════════
+ CogFormer-2 — finals pipeline   run 20261018_014555
+ study  : /home/jerry/Documents/research/projects/CogFormer-2/outputs/gaussian-softmax   (generator gaussian_softmax, MC_TAG r4c4_enc128h4l4_a0.5_b128_e15000_ptc_gaussian_softmax)
+ stages : e1a_c2st e3_gap_c2st e1a_finalize e3_gap_finalize
+ logs   : logs/finals/20261018_014555/
+════════════════════════════════════════════════════════════════
+
+── e1a_c2st
+    · C2ST BF_vs_Original — ddm
+      ok (182m)
+    · C2ST BF_vs_Original — rdm
+      ok (159m)
+    · C2ST BF_vs_Original — cdm
+      ok (154m)
+
+── e3_gap_c2st
+    · C2ST BF_vs_Finetuned — lba
+      ok (147m)
+
+── e1a_finalize
+    · assemble outputs/finals/experiment-1a
+      ok (0m)
+
+── e3_gap_finalize
+    · re-assemble outputs/finals/experiment-3 with gap/
+      ok (0m)
+
+════════════════════════════════════════════════════════════════
+ ok    e1a_c2st
+ ok    e3_gap_c2st
+ ok    e1a_finalize
+ ok    e3_gap_finalize
+ elapsed: 644m   logs: logs/finals/20261018_014555/
+ COMPLETE
+════════════════════════════════════════════════════════════════

@@ -142,6 +142,58 @@ def fit_text(fig, artists, target_in, axis="x", margin=0.90, min_size=3.0,
         art.set_fontsize(max(min_size, size))
 
 
+def _mask_thumbnail_rgba(mask, color, num_rows, num_cols, pixel_alpha=None):
+    """RGBA image of one parameter mask: active cells in the config's color (faded
+    toward dark gray by ``pixel_alpha``, scalar or per cell), inactive light gray.
+    Shorter masks are padded to ``num_rows``."""
+    mask_k = np.array(mask)
+    if mask_k.shape[0] < num_rows:
+        mask_k = np.vstack([mask_k, np.zeros((num_rows - mask_k.shape[0], num_cols))])
+
+    img = np.ones((num_rows, num_cols, 4))
+    img[..., :3] = 0.92   # inactive gray
+    dark_gray = np.array([0.25, 0.25, 0.25])
+    config_rgb = np.array(mcolors.to_rgb(color))
+    if pixel_alpha is not None:
+        if np.ndim(pixel_alpha) == 0:
+            # Scalar: uniform fade for all active pixels
+            t = float(np.clip(pixel_alpha, 0.0, 1.0))
+            img[mask_k == 1.0, :3] = t * config_rgb + (1 - t) * dark_gray
+            img[mask_k == 1.0,  3] = 1.0
+        else:
+            # 2D array: per-cell fade
+            alpha_arr = np.clip(np.array(pixel_alpha), 0.0, 1.0)
+            for ar, ac in zip(*np.where(mask_k == 1.0)):
+                t = float(alpha_arr[ar, ac])
+                img[ar, ac, :3] = t * config_rgb + (1 - t) * dark_gray
+                img[ar, ac,  3] = 1.0
+    else:
+        img[mask_k == 1.0, :3] = config_rgb
+        img[mask_k == 1.0,  3] = 1.0
+    return img
+
+
+def _draw_mask_thumbnail(fig, rect, img, label, label_fontsize, labelpad=3):
+    """One mask thumbnail at ``rect`` (figure coords): pixel gridlines, no spines,
+    the config label as its x label. Returns the thumbnail axes."""
+    num_rows, num_cols = img.shape[:2]
+    ax_t = fig.add_axes(rect)
+    ax_t.imshow(img, aspect="equal", interpolation="nearest")
+
+    # Major ticks off, minor ticks at pixel boundaries for gridlines
+    ax_t.set_xticks([])
+    ax_t.set_yticks([])
+    ax_t.set_xticks(np.arange(-0.5, num_cols, 1), minor=True)
+    ax_t.set_yticks(np.arange(-0.5, num_rows, 1), minor=True)
+    ax_t.grid(which="minor", color="white", linewidth=0.4, alpha=0.8)
+    ax_t.tick_params(which="minor", length=0)
+
+    for sp in ax_t.spines.values():
+        sp.set_visible(False)
+    ax_t.set_xlabel(label, fontsize=label_fontsize, labelpad=labelpad)
+    return ax_t
+
+
 def _add_mask_legend(
     fig: plt.Figure,
     parameter_masks: list,
@@ -304,38 +356,8 @@ def _add_mask_legend(
             cell_h_fig = span / max(n_per_col - 1, 1)
 
     for k in range(n):
-        mask_k = np.array(parameter_masks[k])
-        # Pad to global num_rows
-        if mask_k.shape[0] < num_rows:
-            mask_k = np.vstack([
-                mask_k,
-                np.zeros((num_rows - mask_k.shape[0], num_cols))
-            ])
-
-        # Build RGBA image: active = config color, inactive = light gray
-        img = np.ones((num_rows, num_cols, 4))
-        img[..., :3] = 0.92   # inactive gray
-        dark_gray = np.array([0.25, 0.25, 0.25])
-        config_rgb = np.array(mcolors.to_rgb(colors[k]))
-        if pixel_alphas is not None:
-            alpha_k = pixel_alphas[k]
-            if np.ndim(alpha_k) == 0:
-                # Scalar: uniform fade for all active pixels
-                t = float(np.clip(alpha_k, 0.0, 1.0))
-                cell_rgb = t * config_rgb + (1 - t) * dark_gray
-                img[mask_k == 1.0, :3] = cell_rgb
-                img[mask_k == 1.0,  3] = 1.0
-            else:
-                # 2D array: per-cell fade
-                alpha_arr = np.clip(np.array(alpha_k), 0.0, 1.0)
-                active_rows, active_cols = np.where(mask_k == 1.0)
-                for ar, ac in zip(active_rows, active_cols):
-                    t = float(alpha_arr[ar, ac])
-                    img[ar, ac, :3] = t * config_rgb + (1 - t) * dark_gray
-                    img[ar, ac,  3] = 1.0
-        else:
-            img[mask_k == 1.0, :3] = config_rgb
-            img[mask_k == 1.0,  3] = 1.0
+        img = _mask_thumbnail_rgba(parameter_masks[k], colors[k], num_rows, num_cols,
+                                   None if pixel_alphas is None else pixel_alphas[k])
 
         if bottom_band:
             x0 = x_left + k * (thumb_w_fig + gap)
@@ -348,20 +370,8 @@ def _add_mask_legend(
             x0 = pad + leg_col * (thumb_w_fig + gap)
             y0 = y_top - leg_row * cell_h_fig - thumb_h_fig
 
-        ax_t = fig.add_axes([x0, y0, thumb_w_fig, thumb_h_fig])
-        ax_t.imshow(img, aspect="equal", interpolation="nearest")
-
-        # Major ticks off, minor ticks at pixel boundaries for gridlines
-        ax_t.set_xticks([])
-        ax_t.set_yticks([])
-        ax_t.set_xticks(np.arange(-0.5, num_cols, 1), minor=True)
-        ax_t.set_yticks(np.arange(-0.5, num_rows, 1), minor=True)
-        ax_t.grid(which="minor", color="white", linewidth=0.4, alpha=0.8)
-        ax_t.tick_params(which="minor", length=0)
-
-        for sp in ax_t.spines.values():
-            sp.set_visible(False)
-        ax_t.set_xlabel(labels[k], fontsize=label_fontsize, labelpad=3)
+        ax_t = _draw_mask_thumbnail(fig, [x0, y0, thumb_w_fig, thumb_h_fig], img,
+                                    labels[k], label_fontsize)
         thumb_label_artists.append(ax_t.xaxis.label)
 
     # Thumbnail captions sized to their own thumbnail, for the same reason the grid's

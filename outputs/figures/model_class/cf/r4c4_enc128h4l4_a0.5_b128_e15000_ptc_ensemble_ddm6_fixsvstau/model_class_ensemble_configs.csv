@@ -1,0 +1,7 @@
+index,family,label,categorical_regressors,cells[1],cells[u_1],cells[u_2]
+0,DDM,DDM | 1,,"v,a,z,tau,pi",z,"v,a,tau"
+1,DDM,DDM | 2,u_1,"v,a,z,tau,pi","a,tau",z
+2,DDM,DDM | 3,,"v,a,z,tau,pi","a,z,tau",tau
+3,DDM,DDM | 4,,"v,a,z,tau,pi",v,"v,a"
+4,DDM,DDM | 5,u_1,"v,a,z,tau,pi","v,z",a
+5,DDM,DDM | 6,,"v,a,z,tau,pi","v,a,z",a

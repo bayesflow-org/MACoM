@@ -9,8 +9,11 @@ from cogformer.simulator.design_utils import (
     build_parameter_mask, build_design_matrix, build_random_design_config,
     build_ensemble_row_labels,
 )
+from matplotlib.lines import Line2D
+
 from cogformer.utils.plot_utils import (credible_interval, _add_mask_legend,
-                                        _add_config_legend, fit_text, share_grid_ticks)
+                                        _add_config_legend, fit_text, share_grid_ticks,
+                                        _mask_thumbnail_rgba, _draw_mask_thumbnail)
 
 
 def ensemble_recovery(
@@ -51,6 +54,9 @@ def ensemble_recovery(
     hspace: float = None,
     thumb_scale: float = 1.0,
     thumb_per_row: int | None = None,
+    thumb_below: bool = False,
+    thumb_gap_in: float = 0.08,
+    thumb_sep_in: float = 0.15,
     alpha: float = 0.5,
     figsize: tuple = None,
     global_params: list[str] = None,
@@ -96,6 +102,13 @@ def ensemble_recovery(
     alpha : float
         Scatter/errorbar transparency for overlaid configs.
     figsize : tuple, optional
+    thumb_below : bool
+        Put the mask thumbnails in ONE row under the grid, spanning exactly the
+        grid's columns: the first thumbnail's left edge on the first column's axes,
+        the last one's right edge on the last column's. ``thumb_gap_in`` is the gap
+        between thumbnails and ``thumb_sep_in`` the band between the grid's lowest
+        ink and the thumbnails' top, both in inches. Overrides the strip options
+        (thumb_per_row, thumb_scale, thumb_height_in, align_bottom_frac, ...).
     """
     n_configs = len(design_configs)
     if n_configs > 12:
@@ -315,6 +328,27 @@ def ensemble_recovery(
         # simply overprint each other.
         fig.supxlabel("Ground Truth", fontsize=label_fontsize)
 
+    if thumb_below and not global_only:
+        # The grid is laid out to completion FIRST and the strip is sized off it, so
+        # nothing may move a column afterwards -- the width match is to the columns'
+        # final drawn edges.
+        if not fit_labels:
+            _tighten_grid(fig, wspace, hspace)
+        if pack_rows:
+            _pack_rows(fig, axarr, n_kept, num_cols, row_gap_px)
+        if pack_cols:
+            _pack_cols(fig, axarr, n_kept, num_cols, col_gap_px)
+        if fit_labels:
+            fitted_label_size = _fit_grid_labels(fig, axarr, n_kept, num_cols,
+                                                 wspace, hspace, fit_delta)
+        _add_mask_strip_below(
+            fig, axarr, [m[row_idx] for m in parameter_masks], colors, labels,
+            n_kept, num_cols,
+            pixel_alphas=[np.clip(np.abs(r_maps[k]), 0.2, 1.0) for k in range(n_configs)],
+            label_fontsize=fitted_label_size or legend_fontsize,
+            gap_in=thumb_gap_in, sep_in=thumb_sep_in)
+        return fig
+
     if global_only:
         # No coefficient-matrix structure to show — plain color legend instead.
         _add_config_legend(fig, colors, labels, fontsize=legend_fontsize)
@@ -355,6 +389,64 @@ def ensemble_recovery(
             # only final now.
             _align_grid_bottom(fig, axarr, align_bottom_frac)
     return fig
+
+
+def _add_mask_strip_below(fig, axarr, masks, colors, labels, n_rows, n_cols,
+                          pixel_alphas=None, label_fontsize=11.0, gap_in=0.08,
+                          sep_in=0.15, pad_in=0.02):
+    """One row of mask thumbnails under a finished grid, exactly as wide as its columns.
+
+    The span is the first column's axes left edge to the last column's right edge --
+    the PLOT AREAS, not the tick or row labels beside them -- read after a draw, so it
+    is the aspect-constrained box that is matched, not the gridspec cell around it.
+    The thumbnails split that span evenly with ``gap_in`` between them, pixels square.
+
+    The figure GROWS downward to make room rather than squeezing the grid: every grid
+    axes keeps its size in inches and is translated up by however much the strip
+    needs, so the column edges the strip was measured against do not move.
+    """
+    fig.canvas.draw()
+    rend = fig.canvas.get_renderer()
+    W, H = fig.get_size_inches()
+    grid = [ax for ax in np.ravel(axarr) if ax.get_visible()]
+    left_in = min(axarr[r, 0].get_position().x0 for r in range(n_rows)) * W
+    right_in = max(axarr[r, -1].get_position().x1 for r in range(n_rows)) * W
+    ink_bottom_in = min(ax.get_tightbbox(rend).y0 for ax in grid) / fig.dpi
+
+    n = len(masks)
+    thumb_w_in = (right_in - left_in - (n - 1) * gap_in) / n
+    if thumb_w_in <= 0:
+        raise ValueError(f"{n} thumbnails with {gap_in} in gaps do not fit the grid's "
+                         f"{right_in - left_in:.2f} in")
+    thumb_h_in = thumb_w_in * n_rows / n_cols
+    labelpad_pt = 3.0
+    caption_in = (labelpad_pt + 1.4 * label_fontsize) / 72
+    thumb_y0_in = pad_in + caption_in
+    strip_in = thumb_y0_in + thumb_h_in + sep_in
+
+    # Translate the grid so its lowest ink lands on top of the strip.
+    dy_in = strip_in - ink_bottom_in
+    new_H = H + dy_in
+    boxes = [(ax, ax.get_position()) for ax in grid]
+    fig.set_size_inches(W, new_H)
+    for ax, p in boxes:
+        ax.set_position([p.x0, (p.y0 * H + dy_in) / new_H, p.width, p.height * H / new_H])
+
+    div_y = (thumb_y0_in + thumb_h_in + sep_in / 2) / new_H
+    fig.add_artist(Line2D([left_in / W, right_in / W], [div_y, div_y],
+                          transform=fig.transFigure, color="lightgray",
+                          linewidth=0.7, zorder=10))
+    captions = []
+    for k in range(n):
+        img = _mask_thumbnail_rgba(masks[k], colors[k], n_rows, n_cols,
+                                   None if pixel_alphas is None else pixel_alphas[k])
+        x0_in = left_in + k * (thumb_w_in + gap_in)
+        ax_t = _draw_mask_thumbnail(
+            fig, [x0_in / W, thumb_y0_in / new_H, thumb_w_in / W, thumb_h_in / new_H],
+            img, labels[k], label_fontsize, labelpad=labelpad_pt)
+        captions.append(ax_t.xaxis.label)
+    # Shrink-only: a caption wider than its thumbnail would run into the next one.
+    fit_text(fig, captions, thumb_w_in, axis="x", max_size=label_fontsize)
 
 
 def _pack_rows(fig, axarr, n_rows, n_cols, gap_px=6.0):

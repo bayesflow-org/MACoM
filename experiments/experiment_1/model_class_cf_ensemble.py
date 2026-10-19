@@ -63,7 +63,11 @@ def parse_args():
     p.add_argument("--max_num_regressors", type=int, default=5)
     p.add_argument("--max_num_categories", type=int, default=5)
     p.add_argument("--keep_intercept", action="store_true", default=True)
-    p.add_argument("--add_interaction", action="store_true", default=True)
+    p.add_argument("--add_interaction", action=argparse.BooleanOptionalAction, default=True)
+    p.add_argument("--fix_params", type=str, default="",
+                   help="Comma-separated intrinsics held at their default fixed value in "
+                        "EVERY config (e.g. s_v,s_tau): left out of the sampled designs, "
+                        "and their columns dropped from the plots.")
     p.add_argument("--design_generator", choices=DESIGN_GENERATORS, default="mixture",
                    help="Generator for the sampled evaluation designs.")
     p.add_argument("--num_sample_steps", type=int, default=50)
@@ -211,16 +215,25 @@ def main():
     # constructed designs. Raising free_prob instead does not work: coverage caps near
     # 71% however high it goes, because slopes are drawn from the intercept set, so
     # intercept_prob becomes the binding constraint.
+    # --fix_params: a parameter the designs never mention is held at its default
+    # fixed value by infer_free_fixed_intrinsics below, so pinning it is just leaving
+    # it out of the parameter list the configs are drawn over.
+    fix_params = {p.strip() for p in args.fix_params.split(",") if p.strip()}
     covering_configs = {}
     for name in model_names_ordered:
-        local = model_class.model_families[name].intrinsic_params
         default_fixed = DEFAULT_FIXED_VALUES[name]
+        not_fixable = fix_params - set(default_fixed)
+        if not_fixable:
+            raise ValueError(f"--fix_params {sorted(not_fixable)} have no default fixed "
+                             f"value in {name} ({sorted(default_fixed)})")
+        local = [p for p in model_class.model_families[name].intrinsic_params
+                 if p not in fix_params]
         covering_configs[name] = sample_covering_design_configs(
             n_configs=per_family[name],
             intrinsic_params=local,
             num_regressors=args.num_regressors,
             free_intrinsics=[p for p in local if p not in default_fixed],
-            fixed_intrinsics=list(default_fixed.keys()),
+            fixed_intrinsics=[p for p in default_fixed if p not in fix_params],
             keep_intercept=args.keep_intercept,
             add_interaction=args.add_interaction,
             free_prob=args.free_prob,
@@ -340,6 +353,8 @@ def main():
         families=np.array(sampled_model_names, dtype=object),
         design_configs=json.dumps(design_configs_out),
         categorical_regressors=json.dumps(categorical_regressors_list),
+        # Columns are saved unsliced (global space); a replot drops these itself.
+        fix_params=json.dumps(sorted(fix_params)),
         **arrays,
     )
     manifest = pd.DataFrame([
@@ -365,17 +380,18 @@ def main():
     _label_map.update(dict(zip(GLOBAL_PARAMS, GLOBAL_VARIABLE_NAMES)))
 
     # Single-family runs drop the columns that family does not have (e.g. v_diff and
-    # v_theta for DDM), which would otherwise be all-N/A. Everything downstream lives in
+    # v_theta for DDM), and --fix_params the columns it pins; both would otherwise be
+    # all-N/A. Everything downstream lives in
     # the global parameter space, so slice the data and the names together.
-    if len(model_names_ordered) == 1:
-        only = model_names_ordered[0]
-        fam_params = set(model_families[only].intrinsic_params)
+    if len(model_names_ordered) == 1 or fix_params:
+        fam_params = set().union(*(model_families[f].intrinsic_params
+                                   for f in model_names_ordered)) - fix_params
         keep_cols = [i for i, p in enumerate(global_param_names) if p in fam_params]
         global_param_names = [global_param_names[i] for i in keep_cols]
         true_list = [t[..., keep_cols] for t in true_list]
         pred_list = [q[..., keep_cols] for q in pred_list]
         masks = [m[:, keep_cols] for m in masks]
-        logging.info(f"Single family {only}: keeping {len(keep_cols)} parameter columns "
+        logging.info(f"{','.join(model_names_ordered)}: keeping {len(keep_cols)} parameter columns "
                      f"{global_param_names}")
 
     variable_names = [_label_map[p] for p in global_param_names]

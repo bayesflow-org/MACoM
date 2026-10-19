@@ -83,3 +83,99 @@
 
 ── e3_ft_validate
     · LBA finetuned validate — 4 families
+      ok (77m)
+
+── e3_original
+    · original/ linked to e1_validate (3 families + predictions)
+
+── e3_paired_c2st
+    · forgetting study — paired C2ST original vs finetuned
+      ok (53m)
+
+── e3_compare
+    · zero-shot / original vs finetuned — paired deltas
+      ok (0m)
+    · LBA calibration plane (zero-shot -> finetuned)
+      ok (0m)
+    · LBA recovery overlay (zero-shot + finetuned, interaction)
+      ok (0m)
+
+── e3_ppc_apply
+    · LBA real-data apply (stimulus-coded, condition_only)
+      ok (15m)
+
+── e3_ppc
+    · LBA PPC — free (s_v, s_tau as estimated)
+      ok (6m)
+    · LBA PPC — conventional (s_v=1.0, s_tau=0.0)
+      ok (6m)
+
+── e3_realdata_validate
+    · real-data-design validation — lba (condition_only)
+      ok (74m)
+
+── e3_finalize
+    · assemble outputs/finals/experiment-3
+      ok (0m)
+
+── e4_probe
+    · aDDM frozen-encoder arm — train
+      ok (120m)
+    · aDDM frozen-encoder arm — validate
+      ok (0m)
+    · aDDM frozen-encoder diagnostics
+      ok (0m)
+    · baseline checkpoint present, reused: ./outputs/checkpoints/encoder_rep/bf_baseline/addm_vsvfixed/intercept_only/item0_vsvfixed_e500/addm_baseline_fm/model.keras
+    · aDDM baseline arm — validate
+      ok (0m)
+    · aDDM baseline-arm diagnostics
+      ok (0m)
+
+── e4_compare
+    · aDDM arm comparison (shared validation C2ST)
+      ok (1m)
+    · aDDM combined recovery (frozen vs baseline)
+      ok (0m)
+
+── e4_representation
+    · cross-family pooled geometry (5 families, before/after LBA finetune)
+      ok (0m)
+    · aDDM representation — frozen vs baseline (vsvfixed)
+      ok (0m)
+    · combined panel (probe + C2ST + representation)
+      ok (1m)
+
+── e4_finalize
+    · assemble outputs/finals/experiment-4
+      ok (0m)
+
+════════════════════════════════════════════════════════════════
+ skip  e1_data
+ ok    e1_train
+ ok    e1_validate
+ ok    e1_ensemble
+ ok    e1_benchmark
+ ok    e1_design_eig
+ ok    e1_finalize
+ ok    e2_apply
+ ok    e2_refit_svfix
+ ok    e2_ppc
+ ok    e2_validate
+ ok    e2_finalize
+ ok    e3_zeroshot
+ ok    e3_finetune
+ ok    e3_ft_validate
+ ok    e3_original
+ ok    e3_paired_c2st
+ ok    e3_compare
+ ok    e3_ppc_apply
+ ok    e3_ppc
+ ok    e3_realdata_validate
+ ok    e3_finalize
+ ok    e4_probe
+ ok    e4_compare
+ ok    e4_representation
+ ok    e4_finalize
+ elapsed: 2970m   logs: logs/finals/20261015_163121/
+ COMPLETE
+════════════════════════════════════════════════════════════════

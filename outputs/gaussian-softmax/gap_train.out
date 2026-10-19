@@ -63,3 +63,32 @@
     · BF baseline validate cdm/fixed_regressed
       ok (0m)
     · BF baseline train cdm/interaction
+      ok (223m)
+    · BF baseline validate cdm/interaction
+      ok (0m)
+
+── e3_bf
+    · BF baseline train lba/intercept_only
+      ok (129m)
+    · BF baseline validate lba/intercept_only
+      ok (0m)
+    · BF baseline train lba/fixed
+      ok (122m)
+    · BF baseline validate lba/fixed
+      ok (0m)
+    · BF baseline train lba/regressed
+      ok (193m)
+    · BF baseline validate lba/regressed
+      ok (0m)
+    · BF baseline train lba/fixed_regressed
+      ok (183m)
+    · BF baseline validate lba/fixed_regressed
+      ok (0m)
+    · lba/interaction: validated npz exists, skipped
+
+════════════════════════════════════════════════════════════════
+ ok    e1a_bf
+ ok    e3_bf
+ elapsed: 3433m   logs: logs/finals/20261015_163121/
+ COMPLETE
+════════════════════════════════════════════════════════════════
