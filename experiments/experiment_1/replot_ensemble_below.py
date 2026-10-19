@@ -40,6 +40,16 @@ def parse_args():
     p.add_argument("--max_num_regressors", type=int, default=4)
     p.add_argument("--max_num_categories", type=int, default=4)
     p.add_argument("--thumb_gap_in", type=float, default=0.12)
+    p.add_argument("--col_gap_px", type=float, default=6.0,
+                   help="Blank gap between a panel's right edge and the next column's "
+                        "tick labels, in pixels at 100 dpi (ensemble_recovery pack_cols). "
+                        "The panels widen into whatever the gutters give up.")
+    p.add_argument("--row_gap_px", type=float, default=10.0,
+                   help="Blank gap between a row's x tick labels and the next row's "
+                        "panels, in pixels at 100 dpi.")
+    p.add_argument("--height", type=float, default=SPEC["height"],
+                   help="Figure height in inches. Panels are square and height-limited, "
+                        "so this sets their size; packing the columns then sets the width.")
     p.add_argument("--caption", choices=["design", "label"], default="design",
                    help="'design': Design 1..n (one family, so the family name is "
                         "redundant); 'label': the run's own labels (DDM | 1, ...).")
@@ -93,7 +103,9 @@ def main():
             title_fontsize=SPEC["title"], label_fontsize=SPEC["label"],
             legend_fontsize=SPEC["legend"], annot_fontsize=SPEC["annot"],
             marker_size=14, err_linewidth=0.8, wspace=0.25, hspace=0.12,
-            figsize=(SPEC["width"], SPEC["height"]),
+            pack_cols=True, col_gap_px=a.col_gap_px,
+            pack_rows=True, row_gap_px=a.row_gap_px, tick_pad=2.0,
+            figsize=(SPEC["width"], a.height),
             thumb_below=True, thumb_gap_in=a.thumb_gap_in,
         )
 

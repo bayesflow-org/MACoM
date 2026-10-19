@@ -334,10 +334,12 @@ def ensemble_recovery(
         # final drawn edges.
         if not fit_labels:
             _tighten_grid(fig, wspace, hspace)
-        if pack_rows:
-            _pack_rows(fig, axarr, n_kept, num_cols, row_gap_px)
+        # Columns BEFORE rows here: with the span kept, packing the columns resizes
+        # the panels, and the rows can only be stacked once their height is final.
         if pack_cols:
-            _pack_cols(fig, axarr, n_kept, num_cols, col_gap_px)
+            _pack_cols(fig, axarr, n_kept, num_cols, col_gap_px, keep_span=True)
+        if pack_rows or pack_cols:
+            _pack_rows(fig, axarr, n_kept, num_cols, row_gap_px)
         if fit_labels:
             fitted_label_size = _fit_grid_labels(fig, axarr, n_kept, num_cols,
                                                  wspace, hspace, fit_delta)
@@ -505,13 +507,19 @@ def _align_grid_bottom(fig, axarr, target_frac):
             ax.set_position([pos.x0, pos.y0 + dy, pos.width, pos.height])
 
 
-def _pack_cols(fig, axarr, n_rows, n_cols, gap_px=10.0):
+def _pack_cols(fig, axarr, n_rows, n_cols, gap_px=10.0, keep_span=False):
     """Stack the columns at a fixed blank gap, the mirror of _pack_rows.
 
     wspace cannot express this: it is a fraction of the cell width, and the cell
     also holds the y tick labels, so the BLANK part of the gutter is whatever is
     left over after they are drawn. Measuring how far column 0's decorations reach
     to its left gives the pitch directly -- axes width + that reach + `gap_px`.
+
+    ``keep_span`` holds the first column's left edge and the last column's right edge
+    where they are and WIDENS the panels into the space the gutters give up, instead
+    of leaving it as a blank margin on the right. The panels are square, so they grow
+    taller too: each keeps its top edge and the rows overlap until ``_pack_rows``
+    restacks them, which therefore has to run AFTER this.
     """
     if n_cols < 2:
         return
@@ -536,6 +544,26 @@ def _pack_cols(fig, axarr, n_rows, n_cols, gap_px=10.0):
             tb = ax.get_tightbbox(rend).transformed(inv)
             out = max(out, max(0.0, ax.get_position().x0 - tb.x0))
         return out
+
+    if keep_span:
+        W, H = fig.get_size_inches()
+        span = axarr[0, n_cols - 1].get_position().x1 - p0.x0
+        # Twice: the tick labels are re-laid out at the new size, so the reach is
+        # re-measured once against the panels it will actually sit beside.
+        for _ in range(2):
+            reach = [left_reach(c) for c in range(n_cols)]
+            width = (span - sum(reach[1:]) - (n_cols - 1) * gap) / n_cols
+            x = p0.x0
+            for c in range(n_cols):
+                if c:
+                    x += width + reach[c] + gap
+                for r in range(n_rows):
+                    pos = axarr[r, c].get_position()
+                    h = width * W / H
+                    axarr[r, c].set_position([x, pos.y1 - h, width, h])
+            fig.canvas.draw()
+            rend = fig.canvas.get_renderer()
+        return
 
     x = p0.x0
     for c in range(n_cols):
