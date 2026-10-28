@@ -52,6 +52,7 @@ class CogFormer(nn.Module):
             pre_pool_ffn: bool = True,
             weight_init: str = "orthogonal",
             time_power_law_alpha: float = 0.0,
+            encoder_structure_conditioning: bool = False,
     ):
         super().__init__()
         # gated_residual / pre_pool_ffn / weight_init="orthogonal" port BayesFlow's
@@ -114,6 +115,14 @@ class CogFormer(nn.Module):
             time_power_law_alpha=time_power_law_alpha,
         )
 
+        # Mix parameter and term identities BEFORE pooling; separate sums would
+        # lose which regressor pair belongs to which parameter.
+        self.structure_embedding = (
+            nn.Sequential(nn.Linear(2 * pos_embedding_dim, encoder_embed_dim),
+                          nn.SiLU(), nn.Linear(encoder_embed_dim, encoder_embed_dim))
+            if encoder_structure_conditioning else None
+        )
+
         if weight_init == "orthogonal":
             self._orthogonal_init()
 
@@ -142,6 +151,25 @@ class CogFormer(nn.Module):
             elif isinstance(m, PoolingByMultiheadAttention):
                 nn.init.orthogonal_(m.seed.data[0])
 
+    def encode_conditions(self, input_data, param_indices, regressor_indices, params_mask=None):
+        """Encode data with known parameter-specific structure, without truths.
+
+        Uses decoder identities and masks. Padded tokens contribute nothing, even
+        after row compaction. Disabled by default for legacy checkpoint compatibility.
+        """
+        if self.structure_embedding is None:
+            return self.encoder(input_data)
+        if params_mask is None:
+            raise ValueError("Encoder structure conditioning requires params_mask")
+        identities = torch.cat([param_indices, regressor_indices], dim=-1)
+        parameter, regressor = self.decoder.embed_positions(identities)
+        tokens = self.structure_embedding(torch.cat([parameter, regressor], dim=-1))
+        mask = params_mask.to(torch.float32).unsqueeze(-1)
+        # Sum retains structure size; sqrt scaling controls magnitude growth.
+        context = (tokens.float() * mask).sum(dim=1) / mask.sum(dim=1).clamp_min(1).sqrt()
+        context = context.to(tokens.dtype)
+        return self.encoder(input_data, context=context)
+
     def forward(self, params, input_data, param_indices, regressor_indices, params_mask=None, model_ids=None,
                 token_groups=None):
         """
@@ -154,7 +182,7 @@ class CogFormer(nn.Module):
             decoder no longer pays for every dataset at the batch's largest width.
         """
 
-        encoder_tokens = self.encoder(input_data)
+        encoder_tokens = self.encode_conditions(input_data, param_indices, regressor_indices, params_mask)
 
         pos_embeddings = torch.cat([param_indices, regressor_indices], dim=-1)
 
@@ -213,7 +241,7 @@ class CogFormer(nn.Module):
         amp_dtype = (torch.bfloat16 if torch.cuda.is_bf16_supported() else torch.float16) if use_amp else torch.float32
 
         with torch.autocast(device_type=device.type, dtype=amp_dtype, enabled=use_amp):
-            encoder_tokens = self.encoder(input_data)                               # (B, num_seeds, seed_dim)
+            encoder_tokens = self.encode_conditions(input_data, param_indices, regressor_indices, params_mask)
             pos_embeddings = torch.cat([param_indices, regressor_indices], dim=-1)  # (B, num_tokens, 6)
 
             model_emb = None

@@ -41,7 +41,8 @@ from ..configs import MODELS as _BASE_MODELS
 from ..utils import (add_global_params, build_encoder_input_dim, chunked_sample,
                      resolve_val_scenario, ModelClassDataset, make_sim_loader,
                      add_sim_backend_arg, apply_sim_backend, recommend_sim_workers,
-                     add_decoder_groups_arg, compile_cogformer, init_wandb)
+                     add_decoder_groups_arg, compile_cogformer, init_wandb,
+                     add_structure_conditioning_arg, add_interaction_prior_args, structure_training_schema)
 from ..timing import RunTimer
 
 
@@ -139,10 +140,17 @@ class LBAFinetuner:
         checkpoint_dir = Path(checkpoint_dir)
         checkpoint_dir.mkdir(parents=True, exist_ok=True)
 
+        actual_schema = structure_training_schema(train_config["model_family_config"],
+            getattr(self.net, "structure_embedding", None) is not None)
+        structure_schema = train_config.get("structure_schema", actual_schema)
+        if structure_schema != actual_schema:
+            raise ValueError("structure_schema disagrees with the model or sampling settings")
+
         traj = int(train_config.get("trajectory_interval", 0) or 0)
 
         def _save(epoch_done: int) -> None:
             payload = {"state_dict": self.net.state_dict(), "epoch": epoch_done,
+                       "structure_schema": structure_schema,
                        "wandb_run_id": wandb.run.id if (self.use_wandb and wandb.run) else None}
             torch.save(payload, checkpoint_dir / checkpoint_path)
             logging.info(f"[saved] {checkpoint_dir / checkpoint_path} (epoch {epoch_done})")
@@ -355,6 +363,8 @@ class LBAFinetuner:
 
 def parse_args():
     parser = argparse.ArgumentParser()
+    add_structure_conditioning_arg(parser)
+    add_interaction_prior_args(parser)
     parser.add_argument("--pretrained_checkpoint", type=str, required=True,
                         help="Path to the pretrained DDM/RDM/CDM ModelClass checkpoint.")
     parser.add_argument("--use_wandb", action="store_true")
@@ -480,6 +490,8 @@ if __name__ == "__main__":
         "max_num_categories": max_num_categories,
         "keep_intercept":     keep_intercept,
         "add_interaction":    args.add_interaction,
+        "interaction_policy": args.interaction_policy,
+        "interaction_prob": args.interaction_prob,
         "design_generator":   args.design_generator,
     }
 
@@ -493,6 +505,7 @@ if __name__ == "__main__":
     encoder_input_dim = build_encoder_input_dim(max_num_regressors, max_num_categories, keep_intercept)
 
     train_config = {
+        "structure_schema": structure_training_schema(model_family_config, args.encoder_structure_conditioning),
         "epochs":            args.epochs,
         "batch_size":        args.train_batch_size,
         "steps_per_epoch":   args.steps_per_epoch,
@@ -534,6 +547,7 @@ if __name__ == "__main__":
         "decoder_layer_design": "mixed_attention",
         "decoder_layer_kwargs": {"mab_first": True},
         "self_attn_padding_mask": args.self_attn_padding_mask,
+        "encoder_structure_conditioning": args.encoder_structure_conditioning,
         "time_power_law_alpha": args.time_power_law_alpha,
     }
 
@@ -636,6 +650,13 @@ if __name__ == "__main__":
         f"_e{train_config['epochs']}"
         f"_t{train_config['steps_per_epoch']}.pt"
     )
+    structure_suffix = ""
+    if args.interaction_policy == "optional":
+        probability_tag = "beta22" if args.interaction_prob is None else f"{args.interaction_prob:g}"
+        structure_suffix += f"_intoptional_{probability_tag}"
+    if args.encoder_structure_conditioning:
+        structure_suffix += "_encstruct"
+    checkpoint_path = checkpoint_path.removesuffix(".pt") + structure_suffix + ".pt"
 
     fig_path = (
         f"lba_finetune"
@@ -643,6 +664,7 @@ if __name__ == "__main__":
         f"_h{cogformer_config['decoder_num_heads']}"
         f"_p{cogformer_config['proj_dim']}"
     )
+    fig_path += structure_suffix
 
     if args.use_wandb:
         init_wandb(

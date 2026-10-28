@@ -34,6 +34,7 @@ import torch
 
 from cogformer.adapter import Adapter
 from cogformer.networks.transformers.cogformer import CogFormer
+from ..utils import add_structure_conditioning_arg
 from cogformer.simulator import ModelFamily, ModelClass
 from cogformer.simulator.benchmarks.ssms.ddm import DDM
 from cogformer.simulator.benchmarks.ssms.rdm import RDM
@@ -102,6 +103,7 @@ LBA_DESIGNS = {"full": LBA_DESIGN_CONFIG,
 
 def parse_args():
     p = argparse.ArgumentParser()
+    add_structure_conditioning_arg(p)
     p.add_argument("--data", type=str, default="./data/data_application_lba.csv")
     p.add_argument("--checkpoint", type=str, required=True)
     p.add_argument("--outdir", type=str, default="./outputs/data/real_data/lba/mc/")
@@ -208,6 +210,7 @@ def main():
         args.max_num_regressors, args.max_num_categories, args.keep_intercept
     )
     cogformer = CogFormer(
+        encoder_structure_conditioning=args.encoder_structure_conditioning,
         encoder_input_dim=encoder_input_dim,
         encoder_num_layers=args.encoder_num_layers,
         decoder_num_layers=args.decoder_num_layers,

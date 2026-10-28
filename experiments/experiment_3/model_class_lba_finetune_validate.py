@@ -32,6 +32,7 @@ from cogformer.simulator.benchmarks.ssms.link_funs import ddm_link_fun, rdm_link
 from ..utils import load_bf_validation_data, bench_to_training_layout
 from cogformer.adapter import Adapter
 from cogformer.networks.transformers.cogformer import CogFormer
+from ..utils import add_structure_conditioning_arg
 from cogformer.diagnostics.plot.adaptive_recovery import adaptive_recovery, global_recovery
 from cogformer.diagnostics.plot.adaptive_coverage import adaptive_coverage, global_coverage
 from cogformer.diagnostics.plot.adaptive_ecdf import adaptive_ecdf, global_ecdf
@@ -66,6 +67,7 @@ LBA_LOCAL_PARAMS = _LBA_WITH_PI["intrinsic_params"]
 
 def parse_args():
     p = argparse.ArgumentParser()
+    add_structure_conditioning_arg(p)
     p.add_argument("--lba_fixed_A", type=float, default=0.5,
                    help="MUST match the value the checkpoint was finetuned with. Pin LBA's start-point range A so the intrinsic `a` is the real response "
                              "threshold (A + b == a), matching what `a` means for DDM/RDM/CDM. "
@@ -183,6 +185,7 @@ def main():
     adapter = Adapter()
 
     cogformer = CogFormer(
+        encoder_structure_conditioning=args.encoder_structure_conditioning,
         encoder_input_dim=build_encoder_input_dim(
             args.max_num_regressors, args.max_num_categories, args.keep_intercept
         ),

@@ -111,6 +111,8 @@ class ModelFamily:
         add_interaction: bool,
         allowed_slope_patterns: list[frozenset[str]] | None,
         kwargs: dict,
+        interaction_policy: str = "all",
+        interaction_prob: float | None = None,
     ) -> tuple[dict, np.ndarray, dict]:
         """
         Resolve design_config, parameter_mask, and intrinsic prior from the
@@ -150,6 +152,8 @@ class ModelFamily:
                         keep_intercept=keep_intercept,
                         add_interaction=add_interaction,
                         global_params=kwargs.get("global_params"),
+                        interaction_policy=interaction_policy,
+                        interaction_prob=interaction_prob,
                     )
                     if not self._holdout_signatures or design_config_signature(design_config) not in self._holdout_signatures:
                         break
@@ -174,6 +178,8 @@ class ModelFamily:
                     add_interaction=add_interaction,
                     allowed_slope_patterns=allowed_slope_patterns,
                     global_params=kwargs.get("global_params"),
+                    interaction_policy=interaction_policy,
+                    interaction_prob=interaction_prob,
                 )
                 if not self._holdout_signatures or design_config_signature(design_config) not in self._holdout_signatures:
                     break
@@ -219,8 +225,14 @@ class ModelFamily:
         design_matrix: np.ndarray | None = None,
         category_counts: dict[str, int] | None = None,
         defer_simulation: bool = False,
+        interaction_policy: str = "all",
+        interaction_prob: float | None = None,
     ):
         """
+        interaction_policy, interaction_prob : structural prior for random configs.
+            "all" preserves forced interactions; "optional" retains each eligible
+            (parent pair, parameter) with interaction_prob, or a shared Beta(2,2)
+            probability per design when None. Explicit configs are honored.
         defer_simulation : return the prepared per-trial parameters under
             ``_sim_request`` instead of simulating (``obs`` is None). The caller batches
             the requests of many datasets into one ``model.simulate_many`` call and fills
@@ -261,6 +273,8 @@ class ModelFamily:
             add_interaction=add_interaction,
             allowed_slope_patterns=allowed_slope_patterns,
             kwargs=kwargs,
+            interaction_policy=interaction_policy,
+            interaction_prob=interaction_prob,
         )
 
         # Optional deterministic continuous(0)/categorical(1) assignment of the main
@@ -311,6 +325,20 @@ class ModelFamily:
                 generator=design_generator,
                 **(design_generator_kwargs or {}),
             )
+
+        # The matrix generator can sample its own continuous/categorical assignment
+        # when no explicit assignment was supplied. Report that realized assignment,
+        # rather than the independent preliminary draw above. Keep the preliminary
+        # draw so existing seeded designs, coefficients, and RNG advancement are
+        # unchanged; this call uses an explicit mask and consumes no random numbers.
+        main_keys = [k for k in design_config if k != "1" and ":" not in k]
+        categorical_keys = set(design_diagnostics["categorical_keys"])
+        actual_main_mask = np.asarray(
+            [k in categorical_keys for k in main_keys], dtype=np.float32
+        )
+        _, discrete_mask = build_discrete_mask(
+            design_config=design_config, main_discrete_mask=actual_main_mask
+        )
 
         # Rebuild the mask with actual category counts so that rows corresponding to
         # unused category levels (zero-padded design matrix columns) are excluded.
@@ -470,6 +498,8 @@ class ModelFamily:
         coefficient_prior: str = "cell_means",
         design_generator_kwargs: dict | None = None,
         coefficient_prior_kwargs: dict | None = None,
+        interaction_policy: str = "all",
+        interaction_prob: float | None = None,
     ) -> list[dict] | dict:
         if prior is None:
             prior = self.prior
@@ -524,6 +554,8 @@ class ModelFamily:
                 flatten_param_outputs=flatten_param_outputs,
                 fixed_config=fixed_config,
                 add_interaction=add_interaction,
+                interaction_policy=interaction_policy,
+                interaction_prob=interaction_prob,
                 link_fun=link_fun,
                 eta=eta,
                 category_concentration=category_concentration,

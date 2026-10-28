@@ -375,7 +375,11 @@ def main():
         f"% carrying the label, e.g. \\subsection{{Encoder probe: details}}\\label{{{DETAILS_LABEL}}}",
         "% TODO(verify): Kornblith et al. (2019) CKA; Song et al. (2012) unbiased HSIC;"
         " Krajbich et al. (2010) aDDM.",
-        DETAILS.format(**v), ""]))
+        DETAILS.format(**v),
+        ("For the structure-conditioned checkpoint, this experiment probes the "
+         "data-only encoder with structural context omitted. It does not evaluate "
+         "the full structure-conditioned posterior encoding path."
+         if shared_config.get("ENCODER_STRUCTURE_CONDITIONING") == "true" else ""), ""]))
 
     blocks = [header + "% Appendix figures for Experiment 4. Needs \\usepackage{graphicx,subcaption};"
               " paths are relative to outputs/finals/experiment-4/.", ""]

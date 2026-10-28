@@ -181,6 +181,10 @@ The **5-parameter aDDM** (v and s_v pinned at 1.0375 and 0.3133, their
 prior medians; free: v_diff, omega, a, tau, s_tau) and the **5-family pooled geometry**
 (DDM, RDM, CDM trained; aDDM, LBA held out), before and after LBA finetuning.
 
+The frozen probe calls `encoder(x)` without family or coefficient-structure
+context. For a structure-conditioned checkpoint, this is a data-only representation
+probe, not the full `encode_conditions` path used for posterior inference.
+
 ## Layout
 
 | folder | level | what |

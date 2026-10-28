@@ -127,7 +127,8 @@ def apply_sim_backend(args) -> str:
 def set_numba_threads(n: int) -> None:
     try:
         import numba
-        numba.set_num_threads(max(1, n))
+        # NUMBA_NUM_THREADS can cap the pool below the machine's CPU count.
+        numba.set_num_threads(min(max(1, n), numba.config.NUMBA_NUM_THREADS))
     except ImportError:
         pass
 
@@ -393,6 +394,45 @@ def train_step(net, adapted, config, optimizer, scheduler):
         torch.nn.utils.clip_grad_norm_(net.parameters(), config["gradient_clip_norm"])
     optimizer.step()
     return L.detach().item(), scheduler.get_last_lr()[0]
+
+
+def add_interaction_prior_args(parser):
+    """Explicit random-design structural prior; legacy defaults remain unchanged."""
+    parser.add_argument("--interaction_policy", choices=["all", "optional"], default="all",
+                        help="Random configs: 'all' forces every eligible parameter interaction; "
+                             "'optional' samples each eligible (regressor pair, parameter). "
+                             "Explicit design configs are unchanged.")
+    parser.add_argument("--interaction_prob", type=float, default=None,
+                        help="Inclusion probability with --interaction_policy optional. "
+                             "Default: one Beta(2,2) draw per design, shared across eligible interactions.")
+
+
+def add_structure_conditioning_arg(parser):
+    parser.add_argument("--encoder_structure_conditioning", action="store_true",
+                        help="Condition the encoder on joint active parameter/term identities. "
+                             "Experimental architecture; must also be enabled when loading its checkpoint.")
+
+
+def structure_training_schema(model_family_config, encoder_structure_conditioning=False):
+    """Serializable structural prior and encoder contract for resumable training."""
+    enabled = bool(model_family_config.get("add_interaction", False))
+    policy = model_family_config.get("interaction_policy", "all") if enabled else "all"
+    probability = model_family_config.get("interaction_prob") if enabled else None
+    if policy not in ("all", "optional"):
+        raise ValueError("interaction_policy must be 'all' or 'optional'")
+    if probability is not None and (policy != "optional" or not math.isfinite(probability) or not 0 <= probability <= 1):
+        raise ValueError("interaction_prob requires optional policy and a finite probability in [0, 1]")
+    return dict(version=1, add_interaction=enabled, interaction_policy=policy,
+                interaction_prob=probability, encoder_structure_conditioning=bool(encoder_structure_conditioning))
+
+
+def validate_structure_resume(checkpoint, requested):
+    """Old main-trainer checkpoints used forced interactions and no encoder context."""
+    legacy = structure_training_schema({"add_interaction": True})
+    saved = checkpoint.get("structure_schema", legacy) if isinstance(checkpoint, dict) else legacy
+    if saved != requested:
+        raise ValueError("Checkpoint structural prior/encoder conditioning differs from this run. "
+                         "Resume with matching settings or start a separate training run.")
 
 
 def add_architecture_args(parser):

@@ -205,7 +205,12 @@ FIGURES_DIR = Path("./outputs/figures/encoder_rep/addm")
 
 
 class CogFormerEncoderSummary:
-    """Wraps a frozen CogFormer encoder to produce mean-pooled seed summaries."""
+    """Data-only encoder probe, with no family or coefficient-structure context.
+
+    For structure-conditioned checkpoints this deliberately evaluates encoder(x)
+    with context=None, rather than the posterior's encode_conditions path. This
+    keeps the held-out-family probe independent of any assumed parameter mapping.
+    """
 
     def __init__(self, cogformer: CogFormer, device: torch.device):
         self.encoder = cogformer.encoder
@@ -458,6 +463,7 @@ def _load_cogformer(args, device):
         model_embed_dim=args.model_embed_dim,
         decoder_layer_design="mixed_attention",
         decoder_layer_kwargs={"mab_first": True},
+        encoder_structure_conditioning=getattr(args, "encoder_structure_conditioning", False),
     ).to(device)
     raw = torch.load(Path(args.cogformer_checkpoint), map_location=device, weights_only=False)
     # model-class checkpoints wrap the weights and carry a torch.compile prefix
@@ -514,6 +520,8 @@ def parse_args():
     p.add_argument("--num_samples", type=int, default=500)
 
     # CogFormer architecture (must match checkpoint)
+    p.add_argument("--encoder_structure_conditioning", action="store_true",
+                   help="Load conditioned weights strictly; the representation probe uses data only (context=None).")
     p.add_argument("--encoder_num_layers", type=int, default=8)
     p.add_argument("--decoder_num_layers", type=int, default=8)
     p.add_argument("--encoder_num_heads", type=int, default=8)

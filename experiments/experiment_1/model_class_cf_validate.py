@@ -32,7 +32,7 @@ from cogformer.utils.plot_utils import cogformer_mc_colors
 from ..configs import MODELS as _BASE_MODELS
 from ..utils import (load_bf_validation_data, add_global_params, infer_free_fixed_intrinsics, build_encoder_input_dim,
                      chunked_sample, resolve_val_scenario, seed_case, add_seed_arg,
-                     bench_to_training_layout)
+                     bench_to_training_layout, add_structure_conditioning_arg)
 
 GLOBAL_PARAMS = ["pi"]
 GLOBAL_VARIABLE_NAMES = [r"$\pi$"]
@@ -95,6 +95,7 @@ def parse_args():
     p.add_argument("--include_log_gamma", dest="skip_log_gamma", action="store_false", help="Include log gamma metric")
 
     # Architecture (must match training)
+    add_structure_conditioning_arg(p)
     p.add_argument("--encoder_num_layers", type=int, default=8)
     p.add_argument("--decoder_num_layers", type=int, default=8)
     p.add_argument("--encoder_num_heads", type=int, default=8)
@@ -362,6 +363,7 @@ def main():
 
     cogformer = CogFormer(
         encoder_input_dim=encoder_input_dim,
+        encoder_structure_conditioning=args.encoder_structure_conditioning,
         encoder_num_layers=args.encoder_num_layers,
         decoder_num_layers=args.decoder_num_layers,
         encoder_num_heads=args.encoder_num_heads,

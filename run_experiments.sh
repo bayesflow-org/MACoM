@@ -60,7 +60,7 @@ PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 STUDY_ROOT="$(cd "${STUDY_ROOT:-$PROJECT_ROOT}" && pwd)" || { echo "STUDY_ROOT does not exist" >&2; exit 2; }
 cd "$STUDY_ROOT"
 export PYTHONPATH="${PROJECT_ROOT}${PYTHONPATH:+:$PYTHONPATH}"
-source "${PROJECT_ROOT}/experiments/shared_config.sh"
+source "${PROJECT_ROOT}/experiments/shared_config.sh" || exit 2
 # A non-default generator writing into the main tree would mix two training
 # distributions under one outputs/; a study root without study.env would silently run
 # the mixture generator. Refuse both.
@@ -78,6 +78,7 @@ export DESIGN_GENERATOR
 GEN=(--design_generator "$DESIGN_GENERATOR")
 # Names and tags the e1_train wandb run (wandb-only; checkpoint names carry MC_TAG).
 RUN_TAG=(); [[ "$DESIGN_GENERATOR" == mixture ]] || RUN_TAG=(--run_tag "$DESIGN_GENERATOR")
+[[ -z "$STRUCTURE_SUFFIX" ]] || RUN_TAG=(--run_tag "${DESIGN_GENERATOR}${STRUCTURE_SUFFIX}")
 
 # MPLBACKEND=Agg is REQUIRED, not tidiness. On this Wayland/Xwayland session the
 # inherited DISPLAY=:0 no longer accepts connections, so matplotlib's backend
@@ -130,7 +131,7 @@ BENCH_MAX_CAT=2
 # trained on "mixed_predictor", so both are absent by construction, not omission.
 GAP_CASES=(intercept_only fixed regressed fixed_regressed interaction)
 
-RUN_ID="$(date +%Y%m%d_%H%M%S)"
+RUN_ID="$(date +%Y%m%d_%H%M%S)${PIPELINE_LABEL:+_${PIPELINE_LABEL}}"
 LOG_DIR="logs/finals/${RUN_ID}"
 mkdir -p "$LOG_DIR"
 
@@ -159,12 +160,17 @@ export XLA_PYTHON_CLIENT_PREALLOCATE=false
 
 MASK_ARGS=(--self_attn_padding_mask)
 [[ "${SELF_ATTN_PADDING_MASK:-true}" == "true" ]] || MASK_ARGS=(--no-self_attn_padding_mask)
+STRUCTURE_ARGS=()
+[[ "$ENCODER_STRUCTURE_CONDITIONING" == false ]] || STRUCTURE_ARGS=(--encoder_structure_conditioning)
+INTERACTION_ARGS=(--interaction_policy "$INTERACTION_POLICY")
+[[ -z "$INTERACTION_PROB" ]] || INTERACTION_ARGS+=(--interaction_prob "$INTERACTION_PROB")
 
 # Architecture block shared by train / validate / ensemble / apply. These MUST
 # agree: the padding-mask flag changes the forward pass WITHOUT changing
 # state_dict keys, so a mismatch is silent and produces wrong numbers, not an error.
 MC_ARCH=(
     "${MASK_ARGS[@]}"
+    "${STRUCTURE_ARGS[@]}"
     --encoder_num_layers "$ENC_LAYERS" --decoder_num_layers "$DEC_LAYERS"
     --encoder_num_heads  "$ENC_HEADS"  --decoder_num_heads  "$HEADS"
     --encoder_embed_dim "$ENC_EMBED"
@@ -174,9 +180,11 @@ MC_ARCH=(
 # The encoder half alone, for scripts whose other architecture defaults already match
 # (realdata_validate, ddm_design_eig, experiment 4). Their encoder defaults are the
 # pre-2026-10-03 64/8/8, and ENC_HEADS is invisible to a strict load.
-MC_ENC=(--encoder_num_layers "$ENC_LAYERS" --encoder_num_heads "$ENC_HEADS" --encoder_embed_dim "$ENC_EMBED")
+MC_ENC=(--encoder_num_layers "$ENC_LAYERS" --encoder_num_heads "$ENC_HEADS" --encoder_embed_dim "$ENC_EMBED" "${STRUCTURE_ARGS[@]}")
 # Posterior sampler for every CogFormer scoring stage (see FM_SOLVER in shared_config.sh).
 MC_SAMPLER=(--solver "$FM_SOLVER" --num_sample_steps "$FM_SAMPLE_STEPS" --samples_chunk_size "$FM_SAMPLE_CHUNK")
+C2ST_ARGS=()
+[[ -z "${C2ST_WORKERS:-}" ]] || C2ST_ARGS=(--workers "$C2ST_WORKERS")
 # A checkpoint's encoder input_embedding is sized by (max_num_regressors,
 # max_num_categories) via build_encoder_input_dim (r4c4 -> 72, r5c5 -> 186), and
 # the filename does NOT encode r/c. experiments/utils.py defaults both to 5, so an
@@ -250,6 +258,7 @@ stage_e1_train() {
         "${MC_LAUNCH[@]}" experiments.experiment_1.model_class_cf_train \
             --time_power_law_alpha "$FM_TIME_ALPHA" \
             "${MC_ARCH[@]}" "${MC_GEOM[@]}" "${GEN[@]}" \
+            "${INTERACTION_ARGS[@]}" \
             --checkpoint_dir "$MC_CKPT_DIR" \
             --min_num_obs "$MIN_OBS" --max_num_obs "$MAX_OBS" \
             --train_batch_size "$MC_TRAIN_BATCH" \
@@ -295,6 +304,7 @@ stage_e1_ensemble() {
         "$PY" -m experiments.experiment_1.model_class_cf_ensemble \
             "${MC_SAMPLER[@]}" \
             "${MC_ARCH[@]}" "${MC_GEOM[@]}" "${GEN[@]}" \
+            "${INTERACTION_ARGS[@]}" \
             --checkpoint "$MC_CKPT" \
             --outdir "${FIG_MC}/${MC_TAG}_ensemble" \
             --batch_size 200 --num_obs "$OBS" --num_samples 200 \
@@ -363,11 +373,16 @@ stage_e1a_bf() {
             if [[ -e "${BF_DATA_DIR}/${fam}_${case}_data.npz" && -z "${FORCE:-}" ]]; then
                 echo "    · ${fam}/${case}: validated npz exists, skipped"; continue
             fi
-            run "BF baseline train ${fam}/${case}" -- \
+            if [[ "${BF_REUSE_CHECKPOINTS:-0}" == 1 ]]; then
+                need "./outputs/checkpoints/model_family/bf/${fam}/${fam}_families_bf_${case}/model.keras" "copied compatible Gaussian-softmax BF checkpoint" || return 1
+                echo "    · ${fam}/${case}: reusing BF weights; evaluating this study's datasets"
+            else
+                run "BF baseline train ${fam}/${case}" -- \
                 "$PY" -m experiments.experiment_1a.model_family_bf_train \
                     --model "$fam" --case "$case" \
                     --epochs "$MF_BF_EPOCHS" --steps_per_epoch "$STEPS" --batch_size "$MF_BF_BATCH" "${GEN[@]}" \
                     "${DRY[@]}" || return 1
+            fi
             # XLA_PYTHON_CLIENT_PREALLOCATE=false: jax otherwise grabs 75% of the
             # card on a shared box.
             need "${BENCH_DATA}/.done" "stage e1_data" || return 1
@@ -396,6 +411,7 @@ stage_e1a_c2st() {
                 --bf_data_dir "$BF_DATA_DIR" \
                 --mc_pred_dir "${DATA_MC}/${MC_TAG}_validate" \
                 --scenarios BF_vs_Original \
+                "${C2ST_ARGS[@]}" \
                 --max_num_categories "$BENCH_MAX_CAT" || return 1
     done
 }
@@ -434,6 +450,7 @@ stage_e2_apply() {
                 --encoder_num_layers "$ENC_LAYERS" --decoder_num_layers "$DEC_LAYERS" \
                 --encoder_num_heads "$ENC_HEADS" --decoder_num_heads "$HEADS" \
                 --encoder_embed_dim "$ENC_EMBED" \
+                "${STRUCTURE_ARGS[@]}" \
                 --proj_dim "$PROJ" --num_seeds "$SEEDS" --seed_dim "$MC_DIM" \
                 --model_embed_dim 8 \
                 --max_num_regressors "$MC_MAX_REG" --max_num_categories "$MC_MAX_CAT" \
@@ -462,6 +479,7 @@ stage_e2_refit_svfix() {
             --encoder_num_layers "$ENC_LAYERS" --decoder_num_layers "$DEC_LAYERS" \
             --encoder_num_heads "$ENC_HEADS" --decoder_num_heads "$HEADS" \
             --encoder_embed_dim "$ENC_EMBED" \
+            "${STRUCTURE_ARGS[@]}" \
             --proj_dim "$PROJ" --num_seeds "$SEEDS" --seed_dim "$MC_DIM" \
             --model_embed_dim 8 \
             --max_num_regressors "$MC_MAX_REG" --max_num_categories "$MC_MAX_CAT"
@@ -598,6 +616,7 @@ stage_e3_finetune() {
         "$PY" -m experiments.experiment_3.model_class_cf_finetune_lba \
             --time_power_law_alpha "$FM_TIME_ALPHA" --checkpoint_dir "$(dirname "$LBA_FT_CKPT")" \
             --lba_fixed_A "$LBA_FIXED_A" "${MC_ARCH[@]}" "${MC_GEOM[@]}" "${GEN[@]}" \
+            "${INTERACTION_ARGS[@]}" \
             --pretrained_checkpoint "$MC_CKPT" \
             --epochs "$LBA_FT_EPOCHS" --steps_per_epoch "$STEPS" \
             --lr 1e-5 --dropout 0.05 --layer_dropout 0.05 \
@@ -687,11 +706,16 @@ stage_e3_bf() {
         if [[ -e "${BF_DATA_DIR}/lba_${case}_data.npz" && -z "${FORCE:-}" ]]; then
             echo "    · lba/${case}: validated npz exists, skipped"; continue
         fi
-        run "BF baseline train lba/${case}" -- \
+        if [[ "${BF_REUSE_CHECKPOINTS:-0}" == 1 ]]; then
+            need "./outputs/checkpoints/model_family/bf/lba/lba_families_bf_${case}/model.keras" "copied compatible Gaussian-softmax BF checkpoint" || return 1
+            echo "    · lba/${case}: reusing BF weights; evaluating this study's datasets"
+        else
+            run "BF baseline train lba/${case}" -- \
             "$PY" -m experiments.experiment_1a.model_family_bf_train \
                 --model lba --case "$case" \
                 --epochs "$MF_BF_EPOCHS" --steps_per_epoch "$STEPS" --batch_size "$MF_BF_BATCH" "${GEN[@]}" \
                 "${DRY[@]}" || return 1
+        fi
         run "BF baseline validate lba/${case}" -- \
             env XLA_PYTHON_CLIENT_PREALLOCATE=false \
             "$PY" -m experiments.experiment_1a.model_family_bf_validate \
@@ -711,6 +735,7 @@ stage_e3_gap_c2st() {
             --bf_data_dir "$BF_DATA_DIR" \
             --ft_pred_dir "${LBA_PAIRED}/finetuned/predictions" \
             --scenarios BF_vs_Finetuned \
+            "${C2ST_ARGS[@]}" \
             --max_num_categories "$BENCH_MAX_CAT"
 }
 
@@ -729,6 +754,7 @@ stage_e3_paired_c2st() {
             --ft_dir "${LBA_PAIRED}/finetuned/predictions" \
             --outdir "${LBA_PAIRED}/c2st" \
             --scenarios "${GAP_CASES[@]}" \
+            "${C2ST_ARGS[@]}" \
             --max_num_categories "$BENCH_MAX_CAT" --strict
 }
 
@@ -994,6 +1020,10 @@ print_table() {
 }
 
 # ── selection ─────────────────────────────────────────────────────────────────
+if [[ "${1:-}" == remaining_two_gpu && $# -eq 1 ]]; then
+    exec "$PY" -m experiments.continue_study --launcher "$PROJECT_ROOT/run_experiments.sh" \
+        --gpu0 "$GPU0" --gpu1 "$GPU1"
+fi
 if [[ "${1:-}" == "--list" || "${1:-}" == "-l" ]]; then print_table; exit 0; fi
 
 SELECTED=()

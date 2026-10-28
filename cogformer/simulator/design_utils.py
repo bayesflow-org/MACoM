@@ -122,6 +122,8 @@ def build_random_design_config(
     add_interaction: bool = False,
     allowed_slope_patterns: list[frozenset[str]] | None = None,
     global_params: list[str] | set[str] | None = None,
+    interaction_policy: str = "all",
+    interaction_prob: float | None = None,
 ) -> dict[str, list[str]]:
     """
     Randomly build a design_config mapping regressors and optional intercept
@@ -139,7 +141,19 @@ def build_random_design_config(
     - When `free_prob` or `intercept_prob` is None, each is sampled independently
       from Beta(2, 2), covering the full [0, 1] range while concentrating probability
       near the centre to expose the model to the full design space during training.
+    - With `add_interaction=True`, `interaction_policy="all"` preserves the legacy
+      rule: every parameter shared by two parents also has their interaction.
+      `"optional"` retains each eligible (parent pair, parameter) independently,
+      using `interaction_prob`, or one shared Beta(2,2) probability per design
+      when it is None. Both parents are still required (strong heredity).
     """
+    if interaction_policy not in ("all", "optional"):
+        raise ValueError("interaction_policy must be 'all' or 'optional'")
+    if interaction_prob is not None:
+        if not np.isfinite(interaction_prob) or not 0 <= interaction_prob <= 1:
+            raise ValueError("interaction_prob must be finite and in [0, 1]")
+        if interaction_policy != "optional":
+            raise ValueError("interaction_prob requires interaction_policy='optional'")
     if free_prob is None:
         free_prob = float(np.random.beta(2, 2))
     if intercept_prob is None:
@@ -189,12 +203,17 @@ def build_random_design_config(
         main_keys.append(key)
 
     if add_interaction:
+        probability = interaction_prob
+        if interaction_policy == "optional" and probability is None and len(main_keys) >= 2:
+            probability = float(np.random.beta(2, 2))
         for i in range(len(main_keys)):
             for j in range(i + 1, len(main_keys)):
                 a, b = main_keys[i], main_keys[j]
                 shared_set = set(config[a]) & set(config[b])
                 if shared_set:
                     shared = [p for p in intrinsic_params if p in shared_set]
+                    if interaction_policy == "optional":
+                        shared = [p for p in shared if np.random.rand() < probability]
                     config[f"{a}:{b}"] = shared
 
     return config
@@ -335,6 +354,8 @@ def sample_covering_design_configs(
     global_params: list[str] | set[str] | None = None,
     max_attempts: int = 20000,
     rng_seed: int | None = None,
+    interaction_policy: str = "all",
+    interaction_prob: float | None = None,
 ) -> list[dict[str, list[str]]]:
     """``n_configs`` random design configs whose UNION covers every estimable cell.
 
@@ -345,8 +366,8 @@ def sample_covering_design_configs(
     not a random sample of anything.
 
     This draws the whole SET and rejects it unless the union covers, so every config
-    stays a genuine random draw and the set is exactly "a uniform sample from the
-    covering sets". Rejection is nearly free: config construction is pure
+    stays a draw from the declared structural prior, conditioned on the set covering
+    the required cells. Rejection is nearly free: config construction is pure
     combinatorics (~0.1 ms) and only the accepted set is ever simulated.
 
     Measured at the ensemble's settings (4 configs/family, 2 regressors, interactions
@@ -359,11 +380,9 @@ def sample_covering_design_configs(
 
     ESTIMABLE CELLS
     ---------------
-    The intercept row can carry any parameter. Slope rows can carry only free,
-    non-global parameters: ``build_random_design_config`` never places a fixed
-    intrinsic or a global (e.g. ``pi``) in a slope term, so those slope cells are
-    structurally unreachable and are excluded from the coverage requirement.
-    Demanding them would make coverage impossible at any setting.
+    The intercept row can carry any parameter. Slope rows can carry non-global
+    parameters, including fixed intrinsics when their intercept was selected.
+    Globals (e.g. ``pi``) are excluded from slope coverage requirements.
 
     Coverage is evaluated per ``(design-config key, parameter)`` rather than per mask
     row. A config's parameter set is identical across every contrast slot of a block,
@@ -377,13 +396,7 @@ def sample_covering_design_configs(
     """
     global_set = set(global_params or ())
 
-    # Slope-legal is every NON-GLOBAL parameter, fixed intrinsics included. The
-    # docstring of build_random_design_config claims fixed intrinsics never take
-    # slopes, but the code computes
-    #     allowed_slope_params = set(intercept_names) - global_set
-    # so a fixed intrinsic that lands in the intercept (probability intercept_prob)
-    # IS slope-eligible. Excluding them here would under-demand coverage and leave
-    # exactly the N/A cells this function exists to prevent.
+    # Every non-global parameter is slope-eligible when its intercept is selected.
     slope_legal = [p for p in intrinsic_params if p not in global_set]
     intercept_legal = list(intrinsic_params)
 
@@ -415,6 +428,8 @@ def sample_covering_design_configs(
                 free_prob=free_prob,
                 intercept_prob=intercept_prob,
                 global_params=global_params,
+                interaction_policy=interaction_policy,
+                interaction_prob=interaction_prob,
             )
             for _ in range(n_configs)
         ]
@@ -712,6 +727,8 @@ def build_random_parameter_mask(
     add_interaction: bool = False,
     allowed_slope_patterns: list[frozenset[str]] | None = None,
     global_params: list[str] | set[str] | None = None,
+    interaction_policy: str = "all",
+    interaction_prob: float | None = None,
 ) -> tuple[np.ndarray, dict[str, list[str]]]:
     design_config = build_random_design_config(
         intrinsic_params=intrinsic_params,
@@ -724,6 +741,8 @@ def build_random_parameter_mask(
         add_interaction=add_interaction,
         allowed_slope_patterns=allowed_slope_patterns,
         global_params=global_params,
+        interaction_policy=interaction_policy,
+        interaction_prob=interaction_prob,
     )
 
     parameter_mask = build_parameter_mask(

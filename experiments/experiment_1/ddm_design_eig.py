@@ -105,6 +105,7 @@ import matplotlib.pyplot as plt
 
 from cogformer.adapter import Adapter
 from cogformer.networks.transformers.cogformer import CogFormer
+from ..utils import add_structure_conditioning_arg
 from cogformer.simulator import ModelFamily
 from cogformer.simulator.model_class import ModelClass
 from cogformer.simulator.design_utils import DESIGN_GENERATORS
@@ -175,6 +176,7 @@ def build_model_class(seed):
 
 def load_cogformer(args, device):
     cogformer = CogFormer(
+        encoder_structure_conditioning=args.encoder_structure_conditioning,
         encoder_input_dim=build_encoder_input_dim(
             args.max_num_regressors, args.max_num_categories, keep_intercept=True),
         encoder_num_layers=args.encoder_num_layers,
@@ -593,6 +595,7 @@ def _plot(df, outdir, figsize=(9.0, 5.0), label_fs=14, legend_fs=12, tick_fs=Non
 
 def parse_args():
     p = argparse.ArgumentParser(description=__doc__.split("\n")[0])
+    add_structure_conditioning_arg(p)
     p.add_argument("--checkpoint", type=str, required=True)
     p.add_argument("--outdir", type=str, default="./outputs/data/design_opt/ddm")
     p.add_argument("--num_obs_grid", type=str, default="200,400,600,800,1000")

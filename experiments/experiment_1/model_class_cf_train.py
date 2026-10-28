@@ -36,7 +36,8 @@ from ..utils import (add_global_params, build_encoder_input_dim, chunked_sample,
                      add_architecture_args, add_training_args, recommend_sim_workers,
                      add_sim_backend_arg, apply_sim_backend, add_decoder_groups_arg,
                      compile_cogformer, init_wandb, wandb_run_id_from,
-                     resolve_val_scenario)
+                     resolve_val_scenario, add_interaction_prior_args, add_structure_conditioning_arg,
+                     structure_training_schema, validate_structure_resume)
 from ..timing import RunTimer
 
 
@@ -188,8 +189,15 @@ class CogFormerTrainer:
         start_epoch = 0
         saved_optimizer_state = None
         saved_scheduler_state = None
+        module = getattr(self.net, "module", self.net)
+        actual_schema = structure_training_schema(train_config["model_family_config"],
+            getattr(module, "structure_embedding", None) is not None)
+        structure_schema = train_config.get("structure_schema", actual_schema)
+        if structure_schema != actual_schema:
+            raise ValueError("structure_schema disagrees with the model or sampling settings")
         if resume and full_ckpt_path.exists():
             ckpt = torch.load(full_ckpt_path, map_location=device)
+            validate_structure_resume(ckpt, structure_schema)
             # Checkpoints hold the UNWRAPPED state dict (saved via .module), so load into
             # the unwrapped model: under DDP the wrapper expects "module."-prefixed keys.
             target = getattr(self.net, "module", self.net)
@@ -271,6 +279,7 @@ class CogFormerTrainer:
                         "epoch": epoch + 1,
                         "optimizer_state": optimizer.state_dict(),
                         "scheduler_state": scheduler.state_dict(),
+                        "structure_schema": structure_schema,
                         "wandb_run_id": wandb.run.id if (self.use_wandb and wandb.run) else None,
                     }, full_ckpt_path)
                     self.val_step(val_config, global_step, fig_path)
@@ -290,6 +299,7 @@ class CogFormerTrainer:
                 "epoch": train_config["epochs"],
                 "optimizer_state": optimizer.state_dict(),
                 "scheduler_state": scheduler.state_dict(),
+                "structure_schema": structure_schema,
                 "wandb_run_id": wandb.run.id if (self.use_wandb and wandb.run) else None,
             }, full_ckpt_path)
             logging.info(f"[saved] {full_ckpt_path}")
@@ -452,6 +462,8 @@ def parse_args():
                         help="Suffix for the wandb run name and an extra wandb tag.")
 
     add_architecture_args(parser)
+    add_structure_conditioning_arg(parser)
+    add_interaction_prior_args(parser)
     parser.add_argument("--self_attn_padding_mask", action=argparse.BooleanOptionalAction,
                         default=True,
                         help="Mask padded parameter tokens in decoder self-attention (default). "
@@ -561,6 +573,8 @@ if __name__ == "__main__":
         "max_num_categories": max_num_categories,
         "keep_intercept": keep_intercept,
         "add_interaction": args.add_interaction,
+        "interaction_policy": args.interaction_policy,
+        "interaction_prob": args.interaction_prob,
         "design_generator": args.design_generator,
         "coefficient_prior": args.coefficient_prior,
         "coefficient_prior_kwargs": {"order_scale": args.coefficient_order_scale},
@@ -580,6 +594,7 @@ if __name__ == "__main__":
     local_batch = max(1, args.train_batch_size // world_size)
 
     train_config = {
+        "structure_schema": structure_training_schema(model_family_config, args.encoder_structure_conditioning),
         "epochs": args.epochs,
         "batch_size": local_batch,
         "steps_per_epoch": args.steps_per_epoch,
@@ -628,6 +643,7 @@ if __name__ == "__main__":
         "pre_pool_ffn": args.pre_pool_ffn,
         "weight_init": args.weight_init,
         "time_power_law_alpha": args.time_power_law_alpha,
+        "encoder_structure_conditioning": args.encoder_structure_conditioning,
     }
 
     logging.info(
@@ -730,6 +746,13 @@ if __name__ == "__main__":
         f"_e{train_config['epochs']}"
         f"_t{train_config['steps_per_epoch']}.pt"
     )
+    structure_suffix = ""
+    if args.interaction_policy == "optional":
+        probability_tag = "beta22" if args.interaction_prob is None else f"{args.interaction_prob:g}"
+        structure_suffix += f"_intoptional_{probability_tag}"
+    if args.encoder_structure_conditioning:
+        structure_suffix += "_encstruct"
+    checkpoint_path = checkpoint_path.removesuffix(".pt") + structure_suffix + ".pt"
 
     fig_path = (
         f"model_class_fm"
@@ -737,6 +760,7 @@ if __name__ == "__main__":
         f"_h{cogformer_config['decoder_num_heads']}"
         f"_p{cogformer_config['proj_dim']}"
     )
+    fig_path += structure_suffix
 
     if use_wandb:
         init_wandb(

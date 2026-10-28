@@ -116,6 +116,8 @@ class ModelClass:
         coefficient_prior: str = "cell_means",
         design_generator_kwargs: dict | None = None,
         coefficient_prior_kwargs: dict | None = None,
+        interaction_policy: str = "all",
+        interaction_prob: float | None = None,
     ) -> dict:
         if num_obs is None:
             num_obs = np.random.randint(min_num_obs, max_num_obs + 1)
@@ -171,6 +173,8 @@ class ModelClass:
                 flatten_param_outputs=False,
                 fixed_config=fixed_config,
                 add_interaction=add_interaction,
+                interaction_policy=interaction_policy,
+                interaction_prob=interaction_prob,
                 link_fun=self.link_funs[model_name],
                 design_generator=design_generator,
                 coefficient_prior=coefficient_prior,

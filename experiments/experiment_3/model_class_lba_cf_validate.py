@@ -31,6 +31,7 @@ from cogformer.simulator.benchmarks.ssms.priors import ddm_priors, rdm_priors, c
 from cogformer.simulator.benchmarks.ssms.link_funs import ddm_link_fun, rdm_link_fun, cdm_link_fun, lba_link_fun
 from cogformer.adapter import Adapter
 from cogformer.networks.transformers.cogformer import CogFormer
+from ..utils import add_structure_conditioning_arg
 from cogformer.diagnostics.plot.adaptive_recovery import adaptive_recovery, global_recovery
 from cogformer.diagnostics.plot.adaptive_coverage import adaptive_coverage, global_coverage
 from cogformer.diagnostics.plot.adaptive_ecdf import adaptive_ecdf, global_ecdf
@@ -95,6 +96,7 @@ def lift_lba_to_global(
 
 def parse_args():
     p = argparse.ArgumentParser()
+    add_structure_conditioning_arg(p)
     p.add_argument("--checkpoint", type=str, required=True)
     p.add_argument("--outdir", type=str, default="./outputs/figures/generalization/model_class_lba/cf/")
     p.add_argument("--pred_dir", type=str, default=None,
@@ -229,6 +231,7 @@ def main():
     )
 
     cogformer = CogFormer(
+        encoder_structure_conditioning=args.encoder_structure_conditioning,
         encoder_input_dim=encoder_input_dim,
         encoder_num_layers=args.encoder_num_layers,
         decoder_num_layers=args.decoder_num_layers,

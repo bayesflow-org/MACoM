@@ -31,6 +31,53 @@ simulated datasets, so results from different stacks are not directly comparable
 pip install -e .
 ```
 
+# Parameter-specific interaction structure
+
+The decoder identifies each active coefficient by its parameter, regressor pair,
+category slots and mask. Random training designs can now sample optional interactions
+separately for each parameter:
+
+```python
+samples = model_class.batch_sample(
+    batch_size=8,
+    num_obs=200,
+    max_num_regressors=4,
+    max_num_categories=4,
+    add_interaction=True,
+    interaction_policy="optional",
+)
+```
+
+Both parents must affect a parameter for their interaction to be eligible. Each
+eligible `(regressor pair, parameter)` is retained independently given an inclusion
+probability. By default, that probability is drawn once per design from `Beta(2,2)`;
+set `interaction_prob=0.5` for a fixed probability. This allows two regressors to
+interact for `v` while having only main effects for `tau`. Explicit design configs
+continue to specify the exact parameter assignments.
+
+An experimental encoder mode also conditions observation encoding on the same
+joint parameter/term identities and active coefficient masks. Enable both features
+for a new training run with:
+
+```bash
+python -m experiments.experiment_1.model_class_cf_train \
+    --interaction_policy optional \
+    --encoder_structure_conditioning
+```
+
+The encoder mode uses no coefficient values. Training and posterior sampling share
+the conditioning path, including compacted coefficient layouts. Pass
+`--encoder_structure_conditioning` when loading that checkpoint in validation,
+ensemble, fine-tuning or real-data application tools. Direct construction uses
+`CogFormer(..., encoder_structure_conditioning=True)`.
+
+Both features are opt-in: the defaults remain `interaction_policy="all"` (legacy
+forced eligible interactions) and an unconditioned encoder, preserving existing
+checkpoint behavior. New training checkpoints record the structural settings and
+use distinct filenames for the enabled options. Encoder conditioning adds weights
+and requires training; its calibration benefit has not been established. See the
+[implementation and checks](experiments/diagnostics/PARAMETER_STRUCTURE_IMPLEMENTATION.md).
+
 # Alternative design generator
 
 The default `mixture` generator remains unchanged. Select `gaussian_softmax` for a

@@ -605,6 +605,7 @@ def main():
 
 def parse_args():
     p = argparse.ArgumentParser(description=__doc__.split("\n")[0])
+    p.add_argument("--encoder_structure_conditioning", action="store_true")
     p.add_argument("--n_conditions", type=int, default=200)
     p.add_argument("--n_repeats", type=int, default=4)
     p.add_argument("--num_obs", type=int, default=500)

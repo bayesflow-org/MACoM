@@ -284,6 +284,17 @@ outputs/*/outputs/timing/
 outputs/*/outputs/logs/
 outputs/*/superseded_copies_of_main/
 
+# Experiment diagnostics, including scripts, reports, and generated artifacts, stay local.
+/experiments/diagnostics/
+/outputs/diagnostics/
+/outputs/*/outputs/diagnostics/
+
+# Local run checks, frozen source copies, and continuation scheduler state.
+/outputs/*/checks/
+/outputs/*/source_snapshot/
+/outputs/*/source_changes.patch
+/outputs/*/continuation/
+
 # Safety net for any other path: model weights and pickled caches never go to git.
 # The one deliberate exception (the LBA-finetuned checkpoint, see "Results") is
 # re-stated after it, since the last matching pattern wins.

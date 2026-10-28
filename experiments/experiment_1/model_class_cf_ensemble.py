@@ -27,7 +27,8 @@ from cogformer.diagnostics.plot.ensemble_metrics import ensemble_metrics, global
 from ..configs import (MODELS as _BASE_MODELS, ALL_PARAMS,
                        ALL_VARIABLE_NAMES as ALL_PARAMS_VARIABLE_NAMES)
 from ..utils import (add_global_params, infer_free_fixed_intrinsics,
-                     build_encoder_input_dim, chunked_sample)
+                     build_encoder_input_dim, chunked_sample,
+                     add_interaction_prior_args, add_structure_conditioning_arg)
 
 GLOBAL_PARAMS = ["pi"]
 GLOBAL_VARIABLE_NAMES = [r"$\pi$"]
@@ -90,6 +91,8 @@ def parse_args():
                         "the accepted set is ever simulated. Measured ~7 draws per family.")
     p.add_argument("--metrics", action="store_true", default=False)
     # Architecture (must match checkpoint)
+    add_interaction_prior_args(p)
+    add_structure_conditioning_arg(p)
     p.add_argument("--encoder_num_layers", type=int, default=8)
     p.add_argument("--decoder_num_layers", type=int, default=8)
     p.add_argument("--encoder_num_heads", type=int, default=8)
@@ -166,6 +169,7 @@ def main():
     )
     cogformer = CogFormer(
         encoder_input_dim=encoder_input_dim,
+        encoder_structure_conditioning=args.encoder_structure_conditioning,
         encoder_num_layers=args.encoder_num_layers,
         decoder_num_layers=args.decoder_num_layers,
         encoder_num_heads=args.encoder_num_heads,
@@ -236,6 +240,8 @@ def main():
             fixed_intrinsics=[p for p in default_fixed if p not in fix_params],
             keep_intercept=args.keep_intercept,
             add_interaction=args.add_interaction,
+            interaction_policy=args.interaction_policy,
+            interaction_prob=args.interaction_prob,
             free_prob=args.free_prob,
             global_params=GLOBAL_PARAMS,
             max_attempts=args.max_coverage_attempts,

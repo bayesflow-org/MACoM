@@ -40,6 +40,7 @@ import torch
 
 from cogformer.adapter import Adapter
 from cogformer.networks.transformers.cogformer import CogFormer
+from ..utils import add_structure_conditioning_arg
 from cogformer.simulator import ModelFamily, ModelClass
 from cogformer.simulator.benchmarks.ssms.ddm import DDM
 from cogformer.simulator.benchmarks.ssms.rdm import RDM
@@ -143,6 +144,7 @@ def main():
     mask_kwargs = infer_mask_randomizer_kwargs(design_config, intrinsic, mcfg["default_fixed_values"])
 
     cogformer = CogFormer(
+        encoder_structure_conditioning=a.encoder_structure_conditioning,
         encoder_input_dim=build_encoder_input_dim(a.max_num_regressors, a.max_num_categories, True),
         encoder_num_layers=a.encoder_num_layers, decoder_num_layers=a.decoder_num_layers,
         encoder_num_heads=a.encoder_num_heads, decoder_num_heads=a.decoder_num_heads,
@@ -250,6 +252,7 @@ def main():
 
 def parse_args():
     p = argparse.ArgumentParser(description=__doc__.split("\n")[0])
+    add_structure_conditioning_arg(p)
     p.add_argument("--model", required=True, choices=["ddm", "rdm", "cdm", "lba"])
     p.add_argument("--design", default="condition_only", choices=sorted(LBA_DESIGNS),
                    help="LBA only: which lba_mc_cf_apply design the real-data fit used.")

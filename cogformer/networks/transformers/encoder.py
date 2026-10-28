@@ -97,14 +97,18 @@ class Encoder(nn.Module):
             gated_residual=gated_residual,
         )
 
-    def forward(self, x, attn_mask=None):
+    def forward(self, x, attn_mask=None, context=None):
         """
         X: (B, T, C)
         attn_mask: optional (T, T) or (B*num_heads, T, T)
         key_padding_mask: optional (B, T) with True for PAD tokens
+        context: optional (B, embed_dim) known structure embedding, broadcast over
+            observations to preserve trial permutation invariance.
         """
 
         out = self.input_embedding(x)
+        if context is not None:
+            out = out + context[:, None, :]
 
         for sab in self.layers:
             out = sab(out, attn_mask=attn_mask)

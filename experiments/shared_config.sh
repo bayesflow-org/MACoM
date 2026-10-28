@@ -77,6 +77,26 @@ if [[ -f ./study.env ]]; then source ./study.env; fi
 DESIGN_GENERATOR="${DESIGN_GENERATOR:-mixture}"
 GEN_SUFFIX=""; [[ "$DESIGN_GENERATOR" == mixture ]] || GEN_SUFFIX="_${DESIGN_GENERATOR}"
 
+# Study-local structural prior and encoder mode. Defaults retain legacy studies.
+INTERACTION_POLICY="${INTERACTION_POLICY:-all}"
+INTERACTION_PROB="${INTERACTION_PROB:-}"
+ENCODER_STRUCTURE_CONDITIONING="${ENCODER_STRUCTURE_CONDITIONING:-false}"
+case "$INTERACTION_POLICY" in all|optional) ;; *) echo "invalid INTERACTION_POLICY" >&2; return 2 ;; esac
+case "$ENCODER_STRUCTURE_CONDITIONING" in true|false) ;; *) echo "invalid ENCODER_STRUCTURE_CONDITIONING" >&2; return 2 ;; esac
+STRUCTURE_SUFFIX=""
+if [[ "$INTERACTION_POLICY" == optional ]]; then
+    PROB_TAG=beta22
+    if [[ -n "$INTERACTION_PROB" ]]; then
+        PROB_TAG="$("${PY:-python}" -c 'import math,sys; p=float(sys.argv[1]); assert math.isfinite(p) and 0 <= p <= 1, "INTERACTION_PROB must be in [0,1]"; print(format(p, "g"))' "$INTERACTION_PROB")" || return 2
+    fi
+    STRUCTURE_SUFFIX="_intoptional_${PROB_TAG}"
+elif [[ -n "$INTERACTION_PROB" ]]; then
+    echo "INTERACTION_PROB requires INTERACTION_POLICY=optional" >&2; return 2
+fi
+[[ "$ENCODER_STRUCTURE_CONDITIONING" == false ]] || STRUCTURE_SUFFIX+="_encstruct"
+# Explicit entity selection wins over the W&B login's default team.
+export WANDB_ENTITY="${WANDB_ENTITY:-jerrymhuang-rensselaer-polytechnic-institute}"
+
 # ── Encoder design geometry ────────────────────────────────────────────────────
 # A checkpoint's encoder input_embedding is sized by (max_num_regressors,
 # max_num_categories) via build_encoder_input_dim: r2c2→9, r2c3→14, r4c4→72,
@@ -93,9 +113,9 @@ MC_MAX_REG=4; MC_MAX_CAT=4
 # _ptc: trained after ModelClass.collate kept per_trial_context (2026-10-05); every
 # earlier checkpoint saw favored_idx = 0 for all RDM/LBA training data.
 # GEN_SUFFIX is empty for the mixture generator, so the main study's tag is unchanged.
-MC_TAG="r${MC_MAX_REG}c${MC_MAX_CAT}_enc${ENC_EMBED}h${ENC_HEADS}l${ENC_LAYERS}_a${FM_TIME_ALPHA}_b${MC_TRAIN_BATCH}_e${MC_EPOCHS}_ptc${GEN_SUFFIX}"
+MC_TAG="r${MC_MAX_REG}c${MC_MAX_CAT}_enc${ENC_EMBED}h${ENC_HEADS}l${ENC_LAYERS}_a${FM_TIME_ALPHA}_b${MC_TRAIN_BATCH}_e${MC_EPOCHS}_ptc${GEN_SUFFIX}${STRUCTURE_SUFFIX}"
 MC_CKPT_DIR="./outputs/checkpoints/model_class/cf/${MC_TAG}"
-MC_CKPT="${MC_CKPT_DIR}/cogformer_model_class_fm_l${DEC_LAYERS}_h${HEADS}_p${PROJ}_s${SEEDS}_d${MC_DIM}_b${MC_TRAIN_BATCH}_e${MC_EPOCHS}_t${STEPS}.pt"
+MC_CKPT="${MC_CKPT_DIR}/cogformer_model_class_fm_l${DEC_LAYERS}_h${HEADS}_p${PROJ}_s${SEEDS}_d${MC_DIM}_b${MC_TRAIN_BATCH}_e${MC_EPOCHS}_t${STEPS}${STRUCTURE_SUFFIX}.pt"
 
 # LBA_FIXED_A is the value every LBA arm must use -- finetune, zero-shot and
 # validation alike. It is in the checkpoint filename because fixed_A changes what
@@ -105,7 +125,7 @@ LBA_FIXED_A=0.5
 # 128, matching the model-class and BayesFlow batch (decided 2026-09-28; was 256).
 LBA_FT_BATCH=128
 # Under MC_TAG: the finetune's filename does not encode its base checkpoint.
-LBA_FT_CKPT="./outputs/checkpoints/model_class/cf/lba_finetune/${MC_TAG}/cogformer_lba_finetune_s2_A${LBA_FIXED_A}_l${DEC_LAYERS}_h${HEADS}_p${PROJ}_s${SEEDS}_d${MC_DIM}_b${LBA_FT_BATCH}_e${LBA_FT_EPOCHS}_t${STEPS}.pt"
+LBA_FT_CKPT="./outputs/checkpoints/model_class/cf/lba_finetune/${MC_TAG}/cogformer_lba_finetune_s2_A${LBA_FIXED_A}_l${DEC_LAYERS}_h${HEADS}_p${PROJ}_s${SEEDS}_d${MC_DIM}_b${LBA_FT_BATCH}_e${LBA_FT_EPOCHS}_t${STEPS}${STRUCTURE_SUFFIX}.pt"
 
 # Track every CogFormer training (e1_train, e3_finetune) in wandb project
 # "cogformer-model-class". The orchestrator refuses to start without credentials

@@ -248,6 +248,7 @@ def _plot(rows, outdir, figdir, lp_f, lp_b, tag):
 
 def parse_args():
     p = argparse.ArgumentParser(description=__doc__.split("\n")[0])
+    p.add_argument("--encoder_structure_conditioning", action="store_true")
     p.add_argument("--case", type=str, default="intercept_only")
     p.add_argument("--first_fixation", type=str, default="item0")
     p.add_argument("--fix_v", action="store_true")
