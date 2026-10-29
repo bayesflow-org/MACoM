@@ -61,6 +61,19 @@ class StructureOrchestrationTests(unittest.TestCase):
             if '--cogformer_checkpoint' in command:
                 self.assertEqual(command.count('--encoder_structure_conditioning'), 1)
 
+    def test_lba_realdata_apply_preserves_checkpoint_conditioning(self):
+        for enabled in (True, False):
+            with self.subTest(conditioned=enabled):
+                result = self.dry_run(
+                    f'ENCODER_STRUCTURE_CONDITIONING={str(enabled).lower()}\n',
+                    'e3_ppc_apply')
+                self.assertEqual(result.returncode, 0, result.stderr + result.stdout)
+                command, = self.commands(result.stdout)
+                self.assertIn('experiments.experiment_2.lba_mc_cf_apply', command)
+                self.assertEqual(command.count('--encoder_structure_conditioning'), int(enabled))
+                checkpoint = command[command.index('--checkpoint') + 1]
+                self.assertEqual('_encstruct' in checkpoint, enabled)
+
     def test_probability_format_and_invalid_settings(self):
         result = self.dry_run('INTERACTION_POLICY=optional\nINTERACTION_PROB=0.50\n', 'e1_train')
         self.assertEqual(result.returncode, 0, result.stderr)

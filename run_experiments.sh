@@ -776,7 +776,7 @@ stage_e3_ppc_apply() {
     # checkpoint, since only it has an LBA decoder worth applying.
     run "LBA real-data apply (stimulus-coded, ${LBA_RD_DESIGN})" -- \
         "$PY" -m experiments.experiment_2.lba_mc_cf_apply \
-            "${MC_SAMPLER[@]}" \
+            "${MC_SAMPLER[@]}" "${STRUCTURE_ARGS[@]}" \
             --checkpoint "$LBA_FT_CKPT" \
             --lba_fixed_A "$LBA_FIXED_A" --design "$LBA_RD_DESIGN" \
             --outdir "$(dirname "$LBA_RD_POST")/" \
