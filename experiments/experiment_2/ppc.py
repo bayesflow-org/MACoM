@@ -1510,21 +1510,35 @@ def plot_combined(obs_pooled, ppc_pooled, obs_ch, ppc_ch, conditions, model_name
     logging.info(f"[saved] {savepath}")
 
 
-def _legend_below(fig, handles, labels, fontsize):
+def _legend_below(fig, handles, labels, fontsize, align_to_axes=False):
     """One figure legend in a single row, hung a fixed distance below the lowest x
     label -- MEASURED, rather than at a fixed figure fraction: a fraction is a
     different distance at every figure height, and at one of them it put the entries
     on the bottom row's x labels. Call after the layout is final."""
     fig.canvas.draw()
     rend = fig.canvas.get_renderer()
-    ink_bottom = min(ax.get_tightbbox(rend).y0 for ax in fig.axes if ax.get_visible())
+    bounds = Bbox.union([ax.get_tightbbox(rend) for ax in fig.axes if ax.get_visible()])
+    ink_bottom = bounds.y0
     gap_px = LEGEND_GAP_PT / 72 * fig.dpi
     y = fig.transFigure.inverted().transform((0, ink_bottom - gap_px))[1]
+    if align_to_axes:
+        bounds = bounds.transformed(fig.transFigure.inverted())
+        return fig.legend(handles, labels, loc="upper left",
+                          bbox_to_anchor=(bounds.x0, y, bounds.width, 0),
+                          mode="expand", borderaxespad=0,
+                          ncol=len(handles), frameon=False, fontsize=fontsize)
     return fig.legend(handles, labels, loc="upper center", bbox_to_anchor=(0.5, y),
                       ncol=len(handles), frameon=False, fontsize=fontsize)
 
 
-def plot_combined_all(per_family, outpath, quantiles=DEFAULT_RT_QUANTILES):
+# Larger quantile-panel text for both all-family layouts. The stacked figure uses
+# a smaller legend so the three family keys and four mark keys fit on one row.
+ALL_FS_TITLE, ALL_FS_LABEL, ALL_FS_TICK, ALL_FS_LEG = 18, 16, 14, 11
+
+
+def plot_combined_all(per_family, outpath, quantiles=DEFAULT_RT_QUANTILES,
+                      fs_title=ALL_FS_TITLE, fs_label=ALL_FS_LABEL,
+                      fs_tick=ALL_FS_TICK, fs_leg=ALL_FS_LEG):
     """All three families' PPCs in ONE figure, five slots per row.
 
     The three per-family figures happen to share a column count, which is what makes
@@ -1581,7 +1595,7 @@ def plot_combined_all(per_family, outpath, quantiles=DEFAULT_RT_QUANTILES):
     n_grid = n_cols
 
     fig, axes = plt.subplots(n_rows, n_grid, squeeze=False,
-                             figsize=(FIG_W, FIG_W * 0.22 * n_rows))
+                             figsize=(FIG_W, FIG_W * 0.27 * n_rows))
     holders, grids = {}, {}
 
     for r, (fam, kind, cols, breaks) in enumerate(plan):
@@ -1601,12 +1615,13 @@ def plot_combined_all(per_family, outpath, quantiles=DEFAULT_RT_QUANTILES):
                 continue
             _draw_quantile_panel(ax, o, draws, quantiles, xs, ppc_color, ppc_fill,
                                  xlabel, ylabel if j == 0 else "",
-                                 zero_guide=(kind == "theta"))
+                                 zero_guide=(kind == "theta"),
+                                 label_fs=fs_label, tick_fs=fs_tick)
             # The level name only on the FIRST row that shows it: rows 3 and 4 are
             # the same five CDM conditions twice, and repeating the names implies
             # they are different ones.
             if kind == "rt":
-                ax.set_title(lbl, fontsize=FS_TITLE)
+                ax.set_title(lbl, fontsize=fs_title)
         for j in range(len(cols), n_cols):
             axes[r, j].set_visible(False)
 
@@ -1635,10 +1650,23 @@ def plot_combined_all(per_family, outpath, quantiles=DEFAULT_RT_QUANTILES):
                 a.tick_params(labelleft=False)
 
     fig.tight_layout()
-    # More row spacing than the single-family figures use. Four rows of five panels
-    # leave each row's x labels close to the next row's titles, and the family rule
-    # has to sit BETWEEN them -- with the default gap it lands on the labels.
-    fig.subplots_adjust(wspace=WSPACE, hspace=HSPACE * 2.0)
+    # Leave room for the larger x labels, the next row's titles and the family rule.
+    fig.subplots_adjust(wspace=0.18, hspace=HSPACE * 2.5)
+    fig.canvas.draw()
+
+    # The response-angle row has no repeated titles. Tighten that unused band,
+    # keeping clear space for the dashed separator below the RT row's labels.
+    renderer = fig.canvas.get_renderer()
+    for r, (fam, kind, _, _) in enumerate(plan):
+        if kind != "theta" or not r or plan[r - 1][0] != fam:
+            continue
+        upper = [ax for ax in axes[r - 1] if ax.get_visible()]
+        lower = [ax for ax in axes[r] if ax.get_visible()]
+        gap = (min(ax.get_tightbbox(renderer).y0 for ax in upper)
+               - max(ax.get_tightbbox(renderer).y1 for ax in lower))
+        shift = max(0, gap - 12 * fig.dpi / 72) / (2 * fig.bbox.height)
+        for ax in lower:
+            ax.set_position(ax.get_position().translated(0, shift))
     fig.canvas.draw()
 
     for r, spare in holders.items():
@@ -1680,15 +1708,21 @@ def plot_combined_all(per_family, outpath, quantiles=DEFAULT_RT_QUANTILES):
     # as a key to the DDM row alone. Built from scratch in neutral grey so it says
     # what the SHAPES mean and leaves colour to mean family.
     grey, dark = "#8a8a94", OBS_COLOR
+    ms = 4 * fs_leg / FS_LEG_ALL
     H = [Patch(facecolor=grey, alpha=0.40, lw=0),
-         Line2D([], [], color=grey, marker="o", ms=4, lw=1.4),
-         Line2D([], [], color=dark, marker="s", ms=4, lw=1.6, ls="--"),
-         Line2D([], [], color=grey, marker="o", ms=4, lw=1.2)]
+         Line2D([], [], color=grey, marker="o", ms=ms, lw=1.4),
+         Line2D([], [], color=dark, marker="s", ms=ms, lw=1.6, ls="--"),
+         Line2D([], [], color=grey, marker="o", ms=ms, lw=1.2)]
     L = [f"PPC {PPC_CI:g}% CI", "PPC median", "Observed",
          f"PPC median + {PPC_CI:g}% CI"]
     if not any(grids.values()):
         H, L = H[:3], L[:3]
-    _legend_below(fig, H, L, fontsize=FS_LEG_ALL)
+    family_handles = [
+        (Patch(facecolor=_ppc_colors(fam)[1], alpha=0.40, lw=0),
+         Line2D([], [], color=_ppc_colors(fam)[0], marker="o", ms=ms, lw=1.4))
+        for fam in fams]
+    H, L = family_handles + H, [fam.upper() for fam in fams] + L
+    _legend_below(fig, H, L, fontsize=fs_leg, align_to_axes=True)
 
     # Dashed: condition-group breaks, and the RT/choice break on the DDM/RDM rows.
     for r, (fam, kind, cols, breaks) in enumerate(plan):
@@ -1711,6 +1745,189 @@ def plot_combined_all(per_family, outpath, quantiles=DEFAULT_RT_QUANTILES):
         top, bot = row_axes(r), row_axes(r + 1)
         if top and bot:
             _axes_divider_h(fig, top, bot, heavy=not same_family)
+
+    outpath.parent.mkdir(parents=True, exist_ok=True)
+    fig.savefig(outpath, bbox_inches="tight")
+    plt.close(fig)
+    logging.info(f"[saved] {outpath}")
+
+
+# Wide all-family figure (plot_combined_all_wide), for slides: drawn at twice FIG_W
+# and shown at roughly slide width, so these land near 60% of nominal on screen.
+WIDE_FS_TITLE, WIDE_FS_LABEL, WIDE_FS_TICK, WIDE_FS_LEG = (
+    ALL_FS_TITLE, 17, ALL_FS_TICK, 18)
+# Spacer column between the DDM/RDM half and the CDM half, as a fraction of a panel:
+# room for the CDM rows' y label and ticks, and for the solid family rule.
+WIDE_SPACER = 0.45
+
+
+def _family_columns(per_family, fam):
+    """(cols, breaks) for one family's quantile row: [(cond, level), ...] in figure
+    order, and the indices where a new condition group starts."""
+    obs_pooled, ppc_pooled, conditions, obs_ch, ppc_ch = per_family[fam]
+    cols, breaks = [], []
+    for cond_name, _, label_map in _ordered_conditions(conditions, fam):
+        here = _levels_with_data(obs_pooled, ppc_pooled, cond_name, label_map)
+        if not here:
+            continue
+        if cols:
+            breaks.append(len(cols))
+        cols += [(cond_name, l) for l in here]
+    return cols, breaks
+
+
+def plot_combined_all_wide(per_family, outpath, quantiles=DEFAULT_RT_QUANTILES,
+                           fs_title=WIDE_FS_TITLE, fs_label=WIDE_FS_LABEL,
+                           fs_tick=WIDE_FS_TICK, fs_leg=WIDE_FS_LEG):
+    """All three families' PPCs as two rows of ten slots, for presentations.
+
+    The same panels as plot_combined_all, rearranged so DDM and RDM sit to the LEFT
+    of CDM instead of above it:
+
+        DDM | 4 RT-quantile panels | 2x2 choice ||  CDM | 5 RT-quantile panels
+        RDM | 4 RT-quantile panels | 2x2 choice ||  CDM | 5 response-angle panels
+
+    Rules as in plot_combined_all: dashed within a family (condition groups, the RT /
+    response break, CDM's two rows), solid between families (DDM above RDM, and the
+    vertical rule down the middle). Each half-row shares its own y scale. Quantile
+    panel text and the legend are set by the fs_* arguments; the 2x2 choice blocks
+    keep their own sizes.
+    """
+    left = [f for f in ("ddm", "rdm") if f in per_family]
+    if "cdm" not in per_family or not left:
+        raise ValueError("the wide layout needs CDM and at least one of DDM / RDM")
+    quantiles = np.asarray(quantiles, dtype=float)
+    xs = np.arange(len(quantiles))
+
+    plan_left = {fam: _family_columns(per_family, fam) for fam in left}
+    cdm_cols, cdm_breaks = _family_columns(per_family, "cdm")
+    n_left = max(len(c) for c, _ in plan_left.values()) + 1      # + the choice block
+    n_right = len(cdm_cols)
+    spacer = n_left
+    right0 = n_left + 1
+    # Segments: (row, family, kind, first grid column, cols, breaks).
+    segments = [(r, fam, "rt", 0, *plan_left[fam]) for r, fam in enumerate(left)]
+    segments += [(0, "cdm", "rt", right0, cdm_cols, cdm_breaks),
+                 (1, "cdm", "theta", right0, cdm_cols, cdm_breaks)]
+
+    n_grid = n_left + 1 + n_right
+    fig, axes = plt.subplots(
+        2, n_grid, squeeze=False, figsize=(2 * FIG_W, FIG_W * 0.26 * 2),
+        gridspec_kw={"width_ratios": [1] * n_left + [WIDE_SPACER] + [1] * n_right})
+    for r in range(2):
+        axes[r, spacer].set_visible(False)
+    holders, grids = {}, {}
+
+    for r, fam, kind, c0, cols, breaks in segments:
+        obs_pooled, ppc_pooled, conditions, obs_ch, ppc_ch = per_family[fam]
+        ppc_color, ppc_fill = _ppc_colors(fam)
+        src_obs, src_ppc = (obs_pooled, ppc_pooled) if kind == "rt" else (obs_ch, ppc_ch)
+        xlabel = "RT quantile" if kind == "rt" else "Choice quantile"
+        ylabel = "RT (s)" if kind == "rt" else r"$\theta$ (rad)"
+        live = []
+        for j, (cond_name, lbl) in enumerate(cols):
+            ax = axes[r, c0 + j]
+            o = np.asarray(src_obs.get(cond_name, {}).get(lbl, []), dtype=float)
+            draws = [np.asarray(d, dtype=float)
+                     for d in src_ppc.get(cond_name, {}).get(lbl, [])]
+            if not len(o) or not draws:
+                ax.set_visible(False)
+                continue
+            _draw_quantile_panel(ax, o, draws, quantiles, xs, ppc_color, ppc_fill,
+                                 xlabel, ylabel if j == 0 else "",
+                                 zero_guide=(kind == "theta"),
+                                 label_fs=fs_label, tick_fs=fs_tick)
+            # Level names on the RT rows only: CDM's second row repeats its first
+            # row's conditions.
+            if kind == "rt":
+                ax.set_title(lbl, fontsize=fs_title)
+            live.append(ax)
+        # Slots this segment does not spend on quantile panels: the choice block on
+        # the left half, nothing on the right.
+        width = n_left if c0 == 0 else n_right
+        spare = list(range(c0 + len(cols), c0 + width))
+        for j in spare:
+            axes[r, j].set_visible(False)
+        if fam != "cdm" and spare:
+            holders[r] = (fam, cols, spare)
+        # One y scale per half-row, ticks on its first panel only.
+        if live:
+            lo = min(a.get_ylim()[0] for a in live)
+            hi = max(a.get_ylim()[1] for a in live)
+            for j, a in enumerate(live):
+                a.set_ylim(lo, hi)
+                if j:
+                    a.tick_params(labelleft=False)
+
+    fig.tight_layout()
+    fig.subplots_adjust(wspace=WSPACE, hspace=HSPACE * 2.0)
+    fig.canvas.draw()
+
+    for r, (fam, cols, spare) in holders.items():
+        obs_pooled, ppc_pooled, conditions, obs_ch, ppc_ch = per_family[fam]
+        p_first, p_last = axes[r, spare[0]].get_position(), axes[r, spare[-1]].get_position()
+        # Vertical bounds from a drawn quantile panel, as in plot_combined_all.
+        ref = next((axes[r, j].get_position() for j in range(len(cols))
+                    if axes[r, j].get_visible()), p_first)
+        pos = Bbox.from_extents(p_first.x0, ref.y0, p_last.x1, ref.y1)
+        for j in spare:
+            axes[r, j].set_visible(False)
+            axes[r, j].remove()
+        grids[r] = _draw_choice_grid(fig, pos, obs_ch, ppc_ch,
+                                     _ordered_conditions(conditions, fam),
+                                     *_ppc_colors(fam), legend=False,
+                                     square_panels=True)
+    fig.canvas.draw()
+
+    # One neutral-grey legend below the figure, as in plot_combined_all.
+    grey, dark = "#8a8a94", OBS_COLOR
+    ms = 4 * fs_leg / FS_LEG_ALL
+    H = [Patch(facecolor=grey, alpha=0.40, lw=0),
+         Line2D([], [], color=grey, marker="o", ms=ms, lw=1.4),
+         Line2D([], [], color=dark, marker="s", ms=ms, lw=1.6, ls="--"),
+         Line2D([], [], color=grey, marker="o", ms=ms, lw=1.2)]
+    L = [f"PPC {PPC_CI:g}% CI", "PPC median", "Observed",
+         f"PPC median + {PPC_CI:g}% CI"]
+    if not any(grids.values()):
+        H, L = H[:3], L[:3]
+    fams = left + ["cdm"]
+    family_handles = [
+        (Patch(facecolor=_ppc_colors(fam)[1], alpha=0.40, lw=0),
+         Line2D([], [], color=_ppc_colors(fam)[0], marker="o", ms=ms, lw=1.4))
+        for fam in fams]
+    H, L = family_handles + H, [fam.upper() for fam in fams] + L
+    _legend_below(fig, H, L, fontsize=fs_leg)
+
+    def half_row(r, c0, width):
+        """Every visible axes in one half of a row, including a hand-placed block."""
+        out = [axes[r, j] for j in range(c0, c0 + width)
+               if axes[r, j].axes is not None and axes[r, j].get_visible()]
+        if c0 == 0 and grids.get(r):
+            out += [ax for row in grids[r] for ax in row if ax.get_visible()]
+        return out
+
+    # Dashed: condition-group breaks, and the RT / choice break on the left half.
+    for r, fam, kind, c0, cols, breaks in segments:
+        for b in breaks:
+            _axes_divider(fig, axes[r, c0 + b - 1], axes[r, c0 + b], heavy=False)
+        if c0 == 0 and grids.get(r):
+            _axes_divider(fig, axes[r, len(cols) - 1], grids[r][0][0], heavy=False)
+
+    # Solid between DDM and RDM; dashed between CDM's two rows.
+    if len(left) == 2:
+        _axes_divider_h(fig, half_row(0, 0, n_left), half_row(1, 0, n_left), heavy=True)
+    _axes_divider_h(fig, half_row(0, right0, n_right), half_row(1, right0, n_right),
+                    heavy=False)
+
+    # Solid down the middle of the spacer column, spanning both rows.
+    x = (axes[0, spacer].get_position().x0 + axes[0, spacer].get_position().x1) / 2
+    every = half_row(0, 0, n_left) + half_row(1, 0, n_left) \
+        + half_row(0, right0, n_right) + half_row(1, right0, n_right)
+    y0 = min(ax.get_position().y0 for ax in every)
+    y1 = max(ax.get_position().y1 for ax in every)
+    pad = 0.04 * (y1 - y0)
+    fig.add_artist(Line2D([x, x], [y0 - pad, y1 + pad], transform=fig.transFigure,
+                          zorder=5, **_DIV_HEAVY))
 
     outpath.parent.mkdir(parents=True, exist_ok=True)
     fig.savefig(outpath, bbox_inches="tight")

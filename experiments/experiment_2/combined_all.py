@@ -9,7 +9,9 @@ independent samples of the same posterior.
     python -m experiments.experiment_2.combined_all \\
         --variant mc --max_num_regressors 4 --max_num_categories 4
 
-Writes ``<outdir>/combined_ppc.pdf``.
+Writes ``<outdir>/combined_ppc.pdf``; ``--layout wide`` writes
+``<outdir>/combined_ppc_wide.pdf`` instead (two rows of ten, DDM and RDM left of CDM,
+larger quantile-panel text, for slides).
 """
 import argparse
 import logging
@@ -18,8 +20,8 @@ from pathlib import Path
 import matplotlib
 matplotlib.use("Agg")
 
-from .ppc import (collect_ppc_cached, plot_combined_all, DEFAULT_RT_QUANTILES,
-                  CACHE_DIR, FIG_DIR)
+from .ppc import (collect_ppc_cached, plot_combined_all, plot_combined_all_wide,
+                  DEFAULT_RT_QUANTILES, CACHE_DIR, FIG_DIR)
 
 FAMILIES = ("ddm", "rdm", "cdm")
 
@@ -36,6 +38,9 @@ def parse_args():
     p.add_argument("--max_num_categories", type=int, default=4)
     p.add_argument("--rt_quantiles", type=float, nargs="+",
                    default=list(DEFAULT_RT_QUANTILES))
+    p.add_argument("--layout", choices=["stacked", "wide"], default="stacked",
+                   help="stacked: the paper figure (four rows); wide: two rows of ten "
+                        "with DDM and RDM left of CDM, sized for slides.")
     return p.parse_args()
 
 
@@ -56,8 +61,12 @@ def main():
             seed=a.seed, no_contamination=False, cache_dir=Path(a.cache_dir),
             refresh=False, fixed_natural=None, posteriors_path=None)
 
-    plot_combined_all(per_family, Path(a.outdir) / "combined_ppc.pdf",
-                      quantiles=a.rt_quantiles)
+    if a.layout == "wide":
+        plot_combined_all_wide(per_family, Path(a.outdir) / "combined_ppc_wide.pdf",
+                               quantiles=a.rt_quantiles)
+    else:
+        plot_combined_all(per_family, Path(a.outdir) / "combined_ppc.pdf",
+                          quantiles=a.rt_quantiles)
 
 
 if __name__ == "__main__":

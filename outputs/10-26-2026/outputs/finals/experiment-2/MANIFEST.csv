@@ -32,7 +32,7 @@ cdm/validation/metrics_pi.pdf,outputs/figures/model_class/cf/r4c4_enc128h4l4_a0.
 cdm/validation/predictions.npz,outputs/data/model_class/r4c4_enc128h4l4_a0.5_b128_e15000_ptc_gaussian_softmax_intoptional_beta22_encstruct_realdata/cdm_realdata_cf_pred.npz,75418198,2026-10-28 22:17:09Z,False
 cdm/validation/recovery.pdf,outputs/figures/model_class/cf/r4c4_enc128h4l4_a0.5_b128_e15000_ptc_gaussian_softmax_intoptional_beta22_encstruct_realdata/cdm/realdata/cdm_realdata_fm_recovery.pdf,193495,2026-10-28 22:17:11Z,False
 cdm/validation/recovery_pi.pdf,outputs/figures/model_class/cf/r4c4_enc128h4l4_a0.5_b128_e15000_ptc_gaussian_softmax_intoptional_beta22_encstruct_realdata/cdm/realdata/cdm_realdata_fm_recovery_global.pdf,18233,2026-10-28 22:17:11Z,False
-combined_ppc.pdf,outputs/figures/real_data/ppc/combined_ppc.pdf,48158,2026-10-28 22:21:08Z,False
+combined_ppc.pdf,outputs/figures/real_data/ppc/combined_ppc.pdf,77890,2026-11-02 15:01:22Z,False
 ddm/choice_ppc_stim_type.pdf,outputs/figures/real_data/ppc/ddm/ddm_mc_choice_ppc_stim_type.pdf,19958,2026-10-28 22:17:48Z,False
 ddm/choice_ppc_truth.pdf,outputs/figures/real_data/ppc/ddm/ddm_mc_choice_ppc_truth.pdf,20130,2026-10-28 22:17:48Z,False
 ddm/combined_ppc.pdf,outputs/figures/real_data/ppc/ddm/ddm_mc_combined_ppc.pdf,24843,2026-10-28 22:17:50Z,False
