@@ -113,7 +113,7 @@ def parse_args():
     return p.parse_args()
 
 
-def build_model_class():
+def build_model_class(num_workers=None):
     """The ModelClass the ensemble is defined over. No checkpoint, no GPU.
 
     Factored out of main so ``replot_ensemble`` can rebuild the parameter space the
@@ -122,11 +122,11 @@ def build_model_class():
     produced them.
     """
     model_families = {
-        "DDM": ModelFamily(model=DDM(), name="DDM", prior=ddm_priors(),
+        "DDM": ModelFamily(model=DDM(), name="DDM", prior=ddm_priors(), num_workers=num_workers,
                            intrinsic_params=_MODELS_WITH_PI["ddm"]["intrinsic_params"]),
-        "RDM": ModelFamily(model=RDM(), name="RDM", prior=rdm_priors(),
+        "RDM": ModelFamily(model=RDM(), name="RDM", prior=rdm_priors(), num_workers=num_workers,
                            intrinsic_params=_MODELS_WITH_PI["rdm"]["intrinsic_params"]),
-        "CDM": ModelFamily(model=CDM(), name="CDM", prior=cdm_priors(),
+        "CDM": ModelFamily(model=CDM(), name="CDM", prior=cdm_priors(), num_workers=num_workers,
                            intrinsic_params=_MODELS_WITH_PI["cdm"]["intrinsic_params"]),
     }
     link_funs = {

@@ -3,8 +3,9 @@
 The pretrained checkpoint (num_models=3, model_ids DDM=0 RDM=1 CDM=2) is
 loaded and the model embedding table is extended to num_models=4.  LBA's
 embedding (row 3) is warm-started from RDM's (row 1) since they share the
-same parameter space.  All other weights are loaded exactly.  Fine-tuning
-then trains only on LBA samples using the full global parameter space
+same parameter space. All other weights are loaded exactly. Scheme 2 (the
+default) jointly fine-tunes all four families; scheme 1 uses LBA samples only.
+Both schemes update the full network using the global parameter space
 established by the base training run.
 """
 import torch

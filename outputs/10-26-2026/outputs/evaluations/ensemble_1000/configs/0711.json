@@ -1,0 +1,82 @@
+{
+  "index": 711,
+  "family": "DDM",
+  "family_index": 237,
+  "design_config": {
+    "1": [
+      "v",
+      "a",
+      "z",
+      "tau",
+      "pi"
+    ],
+    "u_1": [],
+    "u_2": [
+      "v",
+      "a"
+    ]
+  },
+  "completed_at": "2026-11-03T16:05:21.617470+00:00",
+  "elapsed_seconds": 166.6172928335145,
+  "input_sha256": "39fc34755181a5e5fba60efc717f7eee1e9a4d9326395f3aa0f0596af0ded028",
+  "metrics": [
+    {
+      "parameter": "v",
+      "scope": "local",
+      "n_datasets": 200,
+      "NRMSE": 0.06181081011891365,
+      "Posterior Contraction": 0.9623262286186218,
+      "Calibration Error": 0.014999999999999986
+    },
+    {
+      "parameter": "a",
+      "scope": "local",
+      "n_datasets": 200,
+      "NRMSE": 0.052538953721523285,
+      "Posterior Contraction": 0.9806397557258606,
+      "Calibration Error": 0.03460526315789472
+    },
+    {
+      "parameter": "z",
+      "scope": "local",
+      "n_datasets": 200,
+      "NRMSE": 0.04551498591899872,
+      "Posterior Contraction": 0.9855908155441284,
+      "Calibration Error": 0.02723684210526313
+    },
+    {
+      "parameter": "tau",
+      "scope": "local",
+      "n_datasets": 200,
+      "NRMSE": 0.03536567836999893,
+      "Posterior Contraction": 0.995437741279602,
+      "Calibration Error": 0.010394736842105234
+    },
+    {
+      "parameter": "v -- $u_2:c_1$",
+      "scope": "local",
+      "n_datasets": 200,
+      "NRMSE": 0.06804369390010834,
+      "Posterior Contraction": 0.9761476516723633,
+      "Calibration Error": 0.013947368421052611
+    },
+    {
+      "parameter": "a -- $u_2:c_1$",
+      "scope": "local",
+      "n_datasets": 200,
+      "NRMSE": 0.0287184976041317,
+      "Posterior Contraction": 0.9957246780395508,
+      "Calibration Error": 0.012631578947368438
+    },
+    {
+      "parameter": "pi",
+      "scope": "pi",
+      "n_datasets": 200,
+      "NRMSE": 0.07224347442388535,
+      "Posterior Contraction": 0.9407996535301208,
+      "Calibration Error": 0.019473684210526337
+    }
+  ],
+  "gpu_peak_allocated_bytes": 706840576,
+  "gpu_peak_reserved_bytes": 981467136
+}

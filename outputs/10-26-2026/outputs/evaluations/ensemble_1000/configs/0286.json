@@ -1,0 +1,83 @@
+{
+  "index": 286,
+  "family": "RDM",
+  "family_index": 95,
+  "design_config": {
+    "1": [
+      "v",
+      "v_diff",
+      "a",
+      "tau",
+      "pi"
+    ],
+    "u_1": [
+      "a"
+    ],
+    "u_2": [
+      "v"
+    ]
+  },
+  "completed_at": "2026-11-03T05:05:50.753656+00:00",
+  "elapsed_seconds": 191.14666745159775,
+  "input_sha256": "d383df7525ccfe76af2005484f46d2efbd19f7eac333ace31159ddd7a468cd00",
+  "metrics": [
+    {
+      "parameter": "v",
+      "scope": "local",
+      "n_datasets": 200,
+      "NRMSE": 0.12311192601919174,
+      "Posterior Contraction": 0.7853383421897888,
+      "Calibration Error": 0.03144736842105263
+    },
+    {
+      "parameter": "a",
+      "scope": "local",
+      "n_datasets": 200,
+      "NRMSE": 0.05552595853805542,
+      "Posterior Contraction": 0.9646393656730652,
+      "Calibration Error": 0.013289473684210563
+    },
+    {
+      "parameter": "tau",
+      "scope": "local",
+      "n_datasets": 200,
+      "NRMSE": 0.031266696751117706,
+      "Posterior Contraction": 0.9960727095603943,
+      "Calibration Error": 0.008552631578947367
+    },
+    {
+      "parameter": "v_diff",
+      "scope": "local",
+      "n_datasets": 200,
+      "NRMSE": 0.10442233085632324,
+      "Posterior Contraction": 0.8680537939071655,
+      "Calibration Error": 0.015000000000000013
+    },
+    {
+      "parameter": "a -- $u_1$",
+      "scope": "local",
+      "n_datasets": 200,
+      "NRMSE": 0.014677879400551319,
+      "Posterior Contraction": 0.997602105140686,
+      "Calibration Error": 0.011184210526315769
+    },
+    {
+      "parameter": "v -- $u_2:c_1$",
+      "scope": "local",
+      "n_datasets": 200,
+      "NRMSE": 0.05250504985451698,
+      "Posterior Contraction": 0.9785727262496948,
+      "Calibration Error": 0.010657894736842033
+    },
+    {
+      "parameter": "pi",
+      "scope": "pi",
+      "n_datasets": 200,
+      "NRMSE": 0.08384190499782562,
+      "Posterior Contraction": 0.920889139175415,
+      "Calibration Error": 0.028157894736842104
+    }
+  ],
+  "gpu_peak_allocated_bytes": 706840576,
+  "gpu_peak_reserved_bytes": 981467136
+}

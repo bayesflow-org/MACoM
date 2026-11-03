@@ -1,0 +1,18 @@
+{
+  "updated_at": "2026-11-03T19:45:06.638169+00:00",
+  "status": "running",
+  "completed_configs": 834,
+  "target_configs": 1000,
+  "elapsed_seconds": 79031.59949602745,
+  "coordinator_pid": 2269447,
+  "workers": [
+    {
+      "pid": 2269451,
+      "returncode": null
+    },
+    {
+      "pid": 2269452,
+      "returncode": null
+    }
+  ]
+}

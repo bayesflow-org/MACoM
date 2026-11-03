@@ -1,0 +1,82 @@
+{
+  "index": 527,
+  "family": "CDM",
+  "family_index": 175,
+  "design_config": {
+    "1": [
+      "v",
+      "v_theta",
+      "a",
+      "tau",
+      "s_v",
+      "pi"
+    ],
+    "u_1": [],
+    "u_2": [
+      "v_theta"
+    ]
+  },
+  "completed_at": "2026-11-03T11:04:41.014908+00:00",
+  "elapsed_seconds": 166.34781309217215,
+  "input_sha256": "7ad507e061af0cff5f2f3b5585fdea9099ef98c37f62933ca905e532d67d5126",
+  "metrics": [
+    {
+      "parameter": "v",
+      "scope": "local",
+      "n_datasets": 200,
+      "NRMSE": 0.04428286850452423,
+      "Posterior Contraction": 0.975530207157135,
+      "Calibration Error": 0.03842105263157902
+    },
+    {
+      "parameter": "a",
+      "scope": "local",
+      "n_datasets": 200,
+      "NRMSE": 0.025571567937731743,
+      "Posterior Contraction": 0.9900282025337219,
+      "Calibration Error": 0.019078947368421015
+    },
+    {
+      "parameter": "tau",
+      "scope": "local",
+      "n_datasets": 200,
+      "NRMSE": 0.026015056297183037,
+      "Posterior Contraction": 0.9944996237754822,
+      "Calibration Error": 0.028421052631578986
+    },
+    {
+      "parameter": "s_v",
+      "scope": "local",
+      "n_datasets": 200,
+      "NRMSE": 0.2837909162044525,
+      "Posterior Contraction": 0.10788443684577942,
+      "Calibration Error": 0.018157894736842095
+    },
+    {
+      "parameter": "v_theta",
+      "scope": "local",
+      "n_datasets": 200,
+      "NRMSE": 0.04480583965778351,
+      "Posterior Contraction": 0.9873769283294678,
+      "Calibration Error": 0.016447368421052655
+    },
+    {
+      "parameter": "v_theta -- $u_2$",
+      "scope": "local",
+      "n_datasets": 200,
+      "NRMSE": 0.03978617861866951,
+      "Posterior Contraction": 0.9948129653930664,
+      "Calibration Error": 0.02157894736842103
+    },
+    {
+      "parameter": "pi",
+      "scope": "pi",
+      "n_datasets": 200,
+      "NRMSE": 0.09905359894037247,
+      "Posterior Contraction": 0.9099886417388916,
+      "Calibration Error": 0.042894736842105236
+    }
+  ],
+  "gpu_peak_allocated_bytes": 706840576,
+  "gpu_peak_reserved_bytes": 981467136
+}
