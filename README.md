@@ -136,5 +136,25 @@ under its generator; the main study's files are never modified. See
 `.claude/skills/experiment-orchestration/SKILL.md` (section 5a) for details and the
 `--reuse-main-bench-bf` alternative.
 
+# BayesFlow benchmark ensemble plots
+
+Overlay the five saved continuous benchmark cases for DDM, RDM, CDM, and LBA
+using the same recovery, ECDF, coverage, and metric grids and case colors as
+CogFormer. Global pi is plotted separately. No checkpoints or new inference are
+needed:
+
+```bash
+.venv/bin/python -m experiments.experiment_1a.model_family_bf_benchmark_ensemble \
+    --data_dir outputs/10-26-2026/outputs/data/model_family \
+    --outdir outputs/10-26-2026/outputs/figures/model_family/bf/ensemble_benchmark
+```
+
+Inputs are `<family>_<case>_data.npz` files from `model_family_bf_validate`.
+Each family produces eight PDFs, plus a shared `manifest.json` recording input
+paths, dataset/draw counts, outputs, and the log-gamma seed. Metric tiles report
+the mean, SD, and number of cases in which that coefficient is active; NRMSE
+uses range normalization. Use `--families ddm rdm` to select families or
+`--no-metrics` to omit metric heatmaps.
+
 # Citation
 [TBD]

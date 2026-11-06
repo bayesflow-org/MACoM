@@ -1,0 +1,102 @@
+{
+  "cases": [
+    "intercept_only",
+    "fixed",
+    "regressed",
+    "fixed_regressed",
+    "interaction"
+  ],
+  "global_params": [
+    "pi"
+  ],
+  "normalize": "range",
+  "metrics_aggregation": "Per-cell mean and population SD across active benchmark cases",
+  "seed": 0,
+  "num_null_draws": 1000,
+  "families": {
+    "ddm": {
+      "inputs": [
+        "/home/jerry/Documents/research/projects/CogFormer-2/outputs/10-26-2026/outputs/data/model_family/ddm_intercept_only_data.npz",
+        "/home/jerry/Documents/research/projects/CogFormer-2/outputs/10-26-2026/outputs/data/model_family/ddm_fixed_data.npz",
+        "/home/jerry/Documents/research/projects/CogFormer-2/outputs/10-26-2026/outputs/data/model_family/ddm_regressed_data.npz",
+        "/home/jerry/Documents/research/projects/CogFormer-2/outputs/10-26-2026/outputs/data/model_family/ddm_fixed_regressed_data.npz",
+        "/home/jerry/Documents/research/projects/CogFormer-2/outputs/10-26-2026/outputs/data/model_family/ddm_interaction_data.npz"
+      ],
+      "datasets_per_case": 200,
+      "draws_per_dataset": 200,
+      "outputs": [
+        "ddm_bench5_ensemble_recovery.pdf",
+        "ddm_bench5_ensemble_recovery_global.pdf",
+        "ddm_bench5_ensemble_ecdf.pdf",
+        "ddm_bench5_ensemble_ecdf_global.pdf",
+        "ddm_bench5_ensemble_coverage.pdf",
+        "ddm_bench5_ensemble_coverage_global.pdf",
+        "ddm_bench5_ensemble_metrics.pdf",
+        "ddm_bench5_ensemble_metrics_global.pdf"
+      ]
+    },
+    "rdm": {
+      "inputs": [
+        "/home/jerry/Documents/research/projects/CogFormer-2/outputs/10-26-2026/outputs/data/model_family/rdm_intercept_only_data.npz",
+        "/home/jerry/Documents/research/projects/CogFormer-2/outputs/10-26-2026/outputs/data/model_family/rdm_fixed_data.npz",
+        "/home/jerry/Documents/research/projects/CogFormer-2/outputs/10-26-2026/outputs/data/model_family/rdm_regressed_data.npz",
+        "/home/jerry/Documents/research/projects/CogFormer-2/outputs/10-26-2026/outputs/data/model_family/rdm_fixed_regressed_data.npz",
+        "/home/jerry/Documents/research/projects/CogFormer-2/outputs/10-26-2026/outputs/data/model_family/rdm_interaction_data.npz"
+      ],
+      "datasets_per_case": 200,
+      "draws_per_dataset": 200,
+      "outputs": [
+        "rdm_bench5_ensemble_recovery.pdf",
+        "rdm_bench5_ensemble_recovery_global.pdf",
+        "rdm_bench5_ensemble_ecdf.pdf",
+        "rdm_bench5_ensemble_ecdf_global.pdf",
+        "rdm_bench5_ensemble_coverage.pdf",
+        "rdm_bench5_ensemble_coverage_global.pdf",
+        "rdm_bench5_ensemble_metrics.pdf",
+        "rdm_bench5_ensemble_metrics_global.pdf"
+      ]
+    },
+    "cdm": {
+      "inputs": [
+        "/home/jerry/Documents/research/projects/CogFormer-2/outputs/10-26-2026/outputs/data/model_family/cdm_intercept_only_data.npz",
+        "/home/jerry/Documents/research/projects/CogFormer-2/outputs/10-26-2026/outputs/data/model_family/cdm_fixed_data.npz",
+        "/home/jerry/Documents/research/projects/CogFormer-2/outputs/10-26-2026/outputs/data/model_family/cdm_regressed_data.npz",
+        "/home/jerry/Documents/research/projects/CogFormer-2/outputs/10-26-2026/outputs/data/model_family/cdm_fixed_regressed_data.npz",
+        "/home/jerry/Documents/research/projects/CogFormer-2/outputs/10-26-2026/outputs/data/model_family/cdm_interaction_data.npz"
+      ],
+      "datasets_per_case": 200,
+      "draws_per_dataset": 200,
+      "outputs": [
+        "cdm_bench5_ensemble_recovery.pdf",
+        "cdm_bench5_ensemble_recovery_global.pdf",
+        "cdm_bench5_ensemble_ecdf.pdf",
+        "cdm_bench5_ensemble_ecdf_global.pdf",
+        "cdm_bench5_ensemble_coverage.pdf",
+        "cdm_bench5_ensemble_coverage_global.pdf",
+        "cdm_bench5_ensemble_metrics.pdf",
+        "cdm_bench5_ensemble_metrics_global.pdf"
+      ]
+    },
+    "lba": {
+      "inputs": [
+        "/home/jerry/Documents/research/projects/CogFormer-2/outputs/10-26-2026/outputs/data/model_family/lba_intercept_only_data.npz",
+        "/home/jerry/Documents/research/projects/CogFormer-2/outputs/10-26-2026/outputs/data/model_family/lba_fixed_data.npz",
+        "/home/jerry/Documents/research/projects/CogFormer-2/outputs/10-26-2026/outputs/data/model_family/lba_regressed_data.npz",
+        "/home/jerry/Documents/research/projects/CogFormer-2/outputs/10-26-2026/outputs/data/model_family/lba_fixed_regressed_data.npz",
+        "/home/jerry/Documents/research/projects/CogFormer-2/outputs/10-26-2026/outputs/data/model_family/lba_interaction_data.npz"
+      ],
+      "datasets_per_case": 200,
+      "draws_per_dataset": 200,
+      "outputs": [
+        "lba_bench5_ensemble_recovery.pdf",
+        "lba_bench5_ensemble_recovery_global.pdf",
+        "lba_bench5_ensemble_ecdf.pdf",
+        "lba_bench5_ensemble_ecdf_global.pdf",
+        "lba_bench5_ensemble_coverage.pdf",
+        "lba_bench5_ensemble_coverage_global.pdf",
+        "lba_bench5_ensemble_metrics.pdf",
+        "lba_bench5_ensemble_metrics_global.pdf"
+      ]
+    }
+  }
+}
