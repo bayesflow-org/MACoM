@@ -1,4 +1,13 @@
 destination,source,bytes,source_mtime,renamed_global_to_pi
+benchmark_ensemble/bayesflow/coverage.pdf,outputs/figures/model_family/bf/ensemble_benchmark/lba_bench5_ensemble_coverage.pdf,241439,2026-11-06 03:24:59Z,False
+benchmark_ensemble/bayesflow/coverage_pi.pdf,outputs/figures/model_family/bf/ensemble_benchmark/lba_bench5_ensemble_coverage_global.pdf,42750,2026-11-06 03:24:59Z,True
+benchmark_ensemble/bayesflow/ecdf.pdf,outputs/figures/model_family/bf/ensemble_benchmark/lba_bench5_ensemble_ecdf.pdf,134166,2026-11-06 03:24:57Z,False
+benchmark_ensemble/bayesflow/ecdf_pi.pdf,outputs/figures/model_family/bf/ensemble_benchmark/lba_bench5_ensemble_ecdf_global.pdf,34372,2026-11-06 03:24:57Z,True
+benchmark_ensemble/bayesflow/manifest.json,outputs/figures/model_family/bf/ensemble_benchmark/manifest.json,4622,2026-11-09 15:57:39Z,False
+benchmark_ensemble/bayesflow/metrics.pdf,outputs/figures/model_family/bf/ensemble_benchmark/lba_bench5_ensemble_metrics.pdf,44688,2026-11-06 03:25:00Z,False
+benchmark_ensemble/bayesflow/metrics_pi.pdf,outputs/figures/model_family/bf/ensemble_benchmark/lba_bench5_ensemble_metrics_global.pdf,20835,2026-11-06 03:25:01Z,True
+benchmark_ensemble/bayesflow/recovery.pdf,outputs/figures/model_family/bf/ensemble_benchmark/lba_bench5_ensemble_recovery.pdf,384704,2026-11-06 03:24:55Z,False
+benchmark_ensemble/bayesflow/recovery_pi.pdf,outputs/figures/model_family/bf/ensemble_benchmark/lba_bench5_ensemble_recovery_global.pdf,54624,2026-11-06 03:24:55Z,True
 benchmark_ensemble/finetuned/coverage.pdf,outputs/figures/model_class/cf/r4c4_enc128h4l4_a0.5_b128_e15000_ptc_gaussian_softmax_intoptional_beta22_encstruct_lba/ensemble_benchmark/finetuned/lba_bench5_ensemble_coverage.pdf,242292,2026-11-09 19:00:24Z,False
 benchmark_ensemble/finetuned/coverage_pi.pdf,outputs/figures/model_class/cf/r4c4_enc128h4l4_a0.5_b128_e15000_ptc_gaussian_softmax_intoptional_beta22_encstruct_lba/ensemble_benchmark/finetuned/lba_bench5_ensemble_coverage_global.pdf,43006,2026-11-09 19:00:25Z,True
 benchmark_ensemble/finetuned/ecdf.pdf,outputs/figures/model_class/cf/r4c4_enc128h4l4_a0.5_b128_e15000_ptc_gaussian_softmax_intoptional_beta22_encstruct_lba/ensemble_benchmark/finetuned/lba_bench5_ensemble_ecdf.pdf,134582,2026-11-09 19:00:22Z,False
