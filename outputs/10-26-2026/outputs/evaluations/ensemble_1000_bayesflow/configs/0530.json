@@ -1,0 +1,83 @@
+{
+  "index": 530,
+  "family": "CDM",
+  "family_index": 176,
+  "design_config": {
+    "1": [
+      "v",
+      "v_theta",
+      "a",
+      "tau",
+      "s_tau",
+      "pi"
+    ],
+    "u_1": [],
+    "u_2": []
+  },
+  "completed_at": "2026-11-06T18:54:09.244478+00:00",
+  "elapsed_seconds": 191.0776168424636,
+  "input_sha256": "de5640cfa0ffcadb0a37b32708abfd2c2ea6523b4365796715aad024a4a56873",
+  "metrics": [
+    {
+      "parameter": "v",
+      "scope": "local",
+      "n_datasets": 200,
+      "NRMSE": 0.024626724421977997,
+      "Posterior Contraction": 0.9812952876091003,
+      "Calibration Error": 0.014605263157894732
+    },
+    {
+      "parameter": "a",
+      "scope": "local",
+      "n_datasets": 200,
+      "NRMSE": 0.02748692035675049,
+      "Posterior Contraction": 0.9848763346672058,
+      "Calibration Error": 0.042105263157894715
+    },
+    {
+      "parameter": "tau",
+      "scope": "local",
+      "n_datasets": 200,
+      "NRMSE": 0.031458597630262375,
+      "Posterior Contraction": 0.9829340577125549,
+      "Calibration Error": 0.012500000000000015
+    },
+    {
+      "parameter": "s_tau",
+      "scope": "local",
+      "n_datasets": 200,
+      "NRMSE": 0.06989510357379913,
+      "Posterior Contraction": 0.8845252990722656,
+      "Calibration Error": 0.03407894736842108
+    },
+    {
+      "parameter": "pi",
+      "scope": "pi",
+      "n_datasets": 200,
+      "NRMSE": 0.07302448153495789,
+      "Posterior Contraction": 0.9181594848632812,
+      "Calibration Error": 0.06157894736842108
+    },
+    {
+      "parameter": "v_theta",
+      "scope": "local",
+      "n_datasets": 200,
+      "NRMSE": 0.02056494913995266,
+      "Posterior Contraction": 0.9929821491241455,
+      "Calibration Error": 0.016052631578947346
+    }
+  ],
+  "reference_input_sha256": "b70caa5c63301fb693c535ffb700dfc5343d00f0bfc8efd421a67d1fb8ab2ab1",
+  "reference_inputs_match": false,
+  "metric_implementation": {
+    "name": "bayesflow",
+    "version": "2.0.14",
+    "commit": "391acaf1e15a487e265e96bb06e8e837328cae8b",
+    "aggregation": "median",
+    "calibration_resolution": 20,
+    "calibration_min_quantile": 0.005,
+    "calibration_max_quantile": 0.995
+  },
+  "gpu_peak_allocated_bytes": 706841088,
+  "gpu_peak_reserved_bytes": 981467136
+}

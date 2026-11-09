@@ -13,6 +13,15 @@ from experiments.experiment_1 import ensemble_metrics_sweep as sweep
 
 
 class MetricsSweepTests(unittest.TestCase):
+    def test_numba_rng_reset_repeats_actual_correlation_draws(self):
+        from cogformer.utils.simulator_utils import sample_lkj_correlation
+        sweep.seed_numba_rng(45)
+        first = sample_lkj_correlation(3, 1.5)
+        second = sample_lkj_correlation(3, 1.5)
+        self.assertFalse(np.array_equal(first, second))
+        sweep.seed_numba_rng(45)
+        np.testing.assert_array_equal(first, sample_lkj_correlation(3, 1.5))
+
     def test_balanced_prefix_and_reproducible_structural_plan(self):
         args = SimpleNamespace(n_configs=1000, families='DDM,RDM,CDM', seed=13,
                                num_regressors=2, free_prob=.5,
@@ -31,7 +40,8 @@ class MetricsSweepTests(unittest.TestCase):
         model_class = SimpleNamespace(global_param_names=['v', 'a', 'pi'])
         truth = np.array([[[-1., 99., -1.]], [[1., 99., 1.]]])
         pred = np.repeat((truth + 1)[:, None], 2, axis=1)
-        with patch.object(sweep, 'adaptive_metrics', wraps=sweep.adaptive_metrics) as compute:
+        bf = sweep.bayesflow_metrics()
+        with patch.object(bf, 'root_mean_squared_error', wraps=bf.root_mean_squared_error) as compute:
             rows = sweep.config_metrics(args, model_class, {'1': ['v', 'pi']}, [],
                                         truth, pred, np.array([[1., 0., 1.]]))
         self.assertEqual(len(rows), 2)
@@ -41,7 +51,47 @@ class MetricsSweepTests(unittest.TestCase):
             self.assertEqual(row['Posterior Contraction'], 1.)
             self.assertAlmostEqual(row['Calibration Error'], .5)
             self.assertNotIn('Log Gamma', row)
-        self.assertTrue(all(c.kwargs['skip_log_gamma'] for c in compute.call_args_list))
+        self.assertTrue(all(c.kwargs['normalize'] == 'range' for c in compute.call_args_list))
+
+    def test_bayesflow_rmse_uses_posterior_rms_then_dataset_median(self):
+        # Unequal posterior errors distinguish BF's actual reduction axes from
+        # the former local implementation (which would give zero here).
+        args = SimpleNamespace(max_num_categories=2, max_num_regressors=0, normalize='range')
+        model_class = SimpleNamespace(global_param_names=['v'])
+        truth = np.array([[[-1.]], [[1.]]])
+        pred = np.array([[[[-1.]], [[-1.]], [[-1.]]], [[[1.]], [[1.]], [[4.]]]])
+        row, = sweep.config_metrics(args, model_class, {'1': ['v']}, [],
+                                    truth, pred, np.ones((1, 1)))
+        self.assertAlmostEqual(row['NRMSE'], np.sqrt(3) / 4)
+        self.assertAlmostEqual(row['Posterior Contraction'], .5)
+        self.assertAlmostEqual(row['Calibration Error'], .5)
+
+    def test_bayesflow_functions_match_direct_calls_on_supported_regression_cells(self):
+        args = SimpleNamespace(max_num_categories=2, max_num_regressors=1, normalize='range')
+        model_class = SimpleNamespace(global_param_names=['v', 'pi'])
+        rng = np.random.default_rng(71)
+        truth = rng.normal(size=(9, 2, 2))
+        pred = truth[:, None] + rng.normal(size=(9, 11, 2, 2))
+        mask = np.ones_like(truth)
+        mask[:, 1, 1] = 0
+        mask[:3, 1, 0] = 0
+        truth[mask == 0] = 1e8
+        for i in range(len(mask)):
+            pred[i, :, mask[i] == 0] = -1e8
+        rows = sweep.config_metrics(args, model_class, {'1': ['v', 'pi'], 'u_1': ['v']}, [],
+                                    truth, pred, mask)
+        self.assertEqual({r['parameter'] for r in rows}, {'v', 'pi', 'v -- $u_1$'})
+        bf = sweep.bayesflow_metrics()
+        for row in rows:
+            r, c = {'v': (0, 0), 'pi': (0, 1), 'v -- $u_1$': (1, 0)}[row['parameter']]
+            supported = mask[:, r, c] == 1
+            estimates = pred[supported, :, r, c][..., None]
+            targets = truth[supported, r, c][:, None]
+            self.assertEqual(row['n_datasets'], int(supported.sum()))
+            for fun in (bf.root_mean_squared_error, bf.posterior_contraction, bf.calibration_error):
+                kwargs = {'normalize': 'range'} if fun == bf.root_mean_squared_error else {}
+                result = fun(estimates=estimates, targets=targets, **kwargs)
+                self.assertEqual(row[result['metric_name']], float(result['values'][0]))
 
     def test_report_equal_config_weight_and_separate_global(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -111,6 +161,53 @@ class MetricsSweepTests(unittest.TestCase):
                 with self.assertRaisesRegex(ValueError, 'different settings'):
                     sweep.coordinate(args)
                 spawn.assert_not_called()
+
+    def test_replay_preserves_exact_plan_and_rejects_changed_sampling(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            out = Path(tmp)
+            checkpoint = out / 'weights.pt'
+            checkpoint.write_bytes(b'test checkpoint')
+            args = SimpleNamespace(checkpoint=checkpoint, reference_run=out / 'run.json',
+                                   n_configs=2, num_samples=200, report_every=200)
+            reference_settings = sweep.settings(args)
+            reference_settings['schema_version'] = 1
+            reference_settings.pop('metric_implementation')
+            reference_settings.pop('reference_run')
+            reference_settings['n_configs'] = 3
+            plan = [dict(index=i, family='DDM', design_config={'1': ['v']}) for i in range(3)]
+            sweep.atomic_json(args.reference_run, dict(settings=reference_settings, plan=plan))
+            self.assertEqual(sweep.build_plan(args), plan[:2])
+            args.num_samples = 100
+            with self.assertRaisesRegex(ValueError, 'different inference settings'):
+                sweep.build_plan(args)
+
+    def test_report_rejects_local_metric_records_in_a_bayesflow_run(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            out = Path(tmp)
+            (out / 'configs').mkdir()
+            sweep.atomic_json(out / 'run.json', dict(settings=dict(
+                batch_size=200, metric_implementation=dict(name='bayesflow', version='2.0.14'))))
+            sweep.atomic_json(sweep.result_path(out, 0), dict(index=0, family='DDM', metrics=[]))
+            with self.assertRaisesRegex(ValueError, 'different metric implementation'):
+                sweep.report(out, 1)
+
+    def test_report_labels_regenerated_inputs(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            out = Path(tmp)
+            (out / 'configs').mkdir()
+            implementation = dict(name='bayesflow', version='2.0.14')
+            sweep.atomic_json(out / 'run.json', dict(settings=dict(
+                batch_size=200, normalize='range', metric_implementation=implementation,
+                reference_run='old/run.json', reference_inputs='regenerate')))
+            records = [dict(parameter='v', scope='local', **dict.fromkeys(sweep.METRICS, .5))]
+            sweep.atomic_json(sweep.result_path(out, 0), dict(
+                index=0, family='DDM', metrics=records, metric_implementation=implementation))
+            sweep.report(out, 1)
+            text = (out / 'reports/metrics_0001.md').read_text()
+            self.assertIn('Metrics computed by BayesFlow 2.0.14', text)
+            self.assertIn('Freshly simulated datasets', text)
+            report = json.loads((out / 'reports/metrics_0001.json').read_text())
+            self.assertEqual(report['reference_inputs'], 'regenerate')
 
 
 if __name__ == '__main__':

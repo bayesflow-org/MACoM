@@ -136,6 +136,30 @@ under its generator; the main study's files are never modified. See
 `.claude/skills/experiment-orchestration/SKILL.md` (section 5a) for details and the
 `--reuse-main-bench-bf` alternative.
 
+# 1,000-configuration evaluation with BayesFlow metrics
+
+`experiments.experiment_1.ensemble_metrics_sweep` calls BayesFlow's public NRMSE,
+posterior contraction, and calibration error functions directly. NRMSE explicitly
+uses range normalization. Cells are evaluated only on datasets supporting them;
+configuration weighting and separate global pi summaries are retained. Run metadata
+records the BayesFlow version and commit, and prevents resuming with legacy metric
+records.
+
+The prepared replay uses the original checkpoint, exact 1,000-design plan, and
+sampling settings. It generates fresh datasets, since the old run discarded draws
+and did not reset the separate Numba RNG. The new run seeds NumPy, PyTorch, and
+Numba per configuration and records new and original input hashes.
+Launch or resume its frozen source with:
+
+```bash
+.venv/bin/python outputs/10-26-2026/continuation/ensemble_metrics_1000_bayesflow_20261105/launch.py
+```
+
+Results are written to
+`outputs/10-26-2026/outputs/evaluations/ensemble_1000_bayesflow/`, with reports every
+200 configurations. The original evaluation discarded its posterior draws, so this
+replay repeats inference. See the README in that output directory for details.
+
 # BayesFlow benchmark ensemble plots
 
 Overlay the five saved continuous benchmark cases for DDM, RDM, CDM, and LBA

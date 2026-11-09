@@ -1,0 +1,149 @@
+{
+  "index": 354,
+  "family": "DDM",
+  "family_index": 118,
+  "design_config": {
+    "1": [
+      "v",
+      "a",
+      "z",
+      "tau",
+      "s_tau",
+      "pi"
+    ],
+    "u_1": [
+      "v",
+      "a",
+      "tau",
+      "s_tau"
+    ],
+    "u_2": [
+      "v",
+      "z",
+      "s_tau"
+    ],
+    "u_1:u_2": []
+  },
+  "completed_at": "2026-11-06T14:11:30.042045+00:00",
+  "elapsed_seconds": 193.64228446222842,
+  "input_sha256": "3896d3d8cfd52193bafffb27398315b9561a9775d413f196fdb2e782a969cda7",
+  "metrics": [
+    {
+      "parameter": "v",
+      "scope": "local",
+      "n_datasets": 200,
+      "NRMSE": 0.06992173939943314,
+      "Posterior Contraction": 0.9250733852386475,
+      "Calibration Error": 0.012236842105263171
+    },
+    {
+      "parameter": "a",
+      "scope": "local",
+      "n_datasets": 200,
+      "NRMSE": 0.04070991277694702,
+      "Posterior Contraction": 0.9742335081100464,
+      "Calibration Error": 0.041447368421052594
+    },
+    {
+      "parameter": "z",
+      "scope": "local",
+      "n_datasets": 200,
+      "NRMSE": 0.048220399767160416,
+      "Posterior Contraction": 0.9627558588981628,
+      "Calibration Error": 0.030789473684210533
+    },
+    {
+      "parameter": "tau",
+      "scope": "local",
+      "n_datasets": 200,
+      "NRMSE": 0.04124879837036133,
+      "Posterior Contraction": 0.9659901857376099,
+      "Calibration Error": 0.023157894736842072
+    },
+    {
+      "parameter": "s_tau",
+      "scope": "local",
+      "n_datasets": 200,
+      "NRMSE": 0.1277903914451599,
+      "Posterior Contraction": 0.7714675664901733,
+      "Calibration Error": 0.06236842105263159
+    },
+    {
+      "parameter": "pi",
+      "scope": "pi",
+      "n_datasets": 200,
+      "NRMSE": 0.07543083280324936,
+      "Posterior Contraction": 0.8997191786766052,
+      "Calibration Error": 0.020789473684210552
+    },
+    {
+      "parameter": "v -- $u_1:c_1$",
+      "scope": "local",
+      "n_datasets": 200,
+      "NRMSE": 0.03950769081711769,
+      "Posterior Contraction": 0.964490532875061,
+      "Calibration Error": 0.01223684210526313
+    },
+    {
+      "parameter": "a -- $u_1:c_1$",
+      "scope": "local",
+      "n_datasets": 200,
+      "NRMSE": 0.021438168361783028,
+      "Posterior Contraction": 0.991428017616272,
+      "Calibration Error": 0.008026315789473715
+    },
+    {
+      "parameter": "tau -- $u_1:c_1$",
+      "scope": "local",
+      "n_datasets": 200,
+      "NRMSE": 0.015372296795248985,
+      "Posterior Contraction": 0.9950894713401794,
+      "Calibration Error": 0.008026315789473673
+    },
+    {
+      "parameter": "s_tau -- $u_1:c_1$",
+      "scope": "local",
+      "n_datasets": 200,
+      "NRMSE": 0.04905374348163605,
+      "Posterior Contraction": 0.9538172483444214,
+      "Calibration Error": 0.009605263157894728
+    },
+    {
+      "parameter": "v -- $u_2:c_1$",
+      "scope": "local",
+      "n_datasets": 200,
+      "NRMSE": 0.05274561047554016,
+      "Posterior Contraction": 0.9429508447647095,
+      "Calibration Error": 0.01210526315789473
+    },
+    {
+      "parameter": "z -- $u_2:c_1$",
+      "scope": "local",
+      "n_datasets": 200,
+      "NRMSE": 0.03858586400747299,
+      "Posterior Contraction": 0.9742817282676697,
+      "Calibration Error": 0.007894736842105204
+    },
+    {
+      "parameter": "s_tau -- $u_2:c_1$",
+      "scope": "local",
+      "n_datasets": 200,
+      "NRMSE": 0.04959568381309509,
+      "Posterior Contraction": 0.963139533996582,
+      "Calibration Error": 0.014605263157894732
+    }
+  ],
+  "reference_input_sha256": "bc54cb1164df6ff7d26d1ebc9350549ac514d02f706a756e71233e88bcb4bdda",
+  "reference_inputs_match": false,
+  "metric_implementation": {
+    "name": "bayesflow",
+    "version": "2.0.14",
+    "commit": "391acaf1e15a487e265e96bb06e8e837328cae8b",
+    "aggregation": "median",
+    "calibration_resolution": 20,
+    "calibration_min_quantile": 0.005,
+    "calibration_max_quantile": 0.995
+  },
+  "gpu_peak_allocated_bytes": 706841088,
+  "gpu_peak_reserved_bytes": 981467136
+}
