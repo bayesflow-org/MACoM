@@ -6,6 +6,11 @@ Loads .npz prediction files from two pred_dirs and computes:
   3. Delta metrics table (fine-tuned − base) for all models as CSV, and per case a
      NRMSE / calibration-error delta heatmap on the LBA's coefficient grid.
 
+Every coefficient heatmap shows all six intrinsic parameters as columns (inactive ones
+as N/A), so the figures of all cases and families line up. The contamination
+probability pi is drawn separately, in ``*_global.pdf`` companions, and its metric
+deltas go to ``delta_metrics_global.csv`` rather than ``delta_metrics.csv``.
+
 Expected file naming conventions:
   Zero-shot LBA  : {zero_shot_lba_pred_dir}/lba_{cfg}_mid1_cf_pred.npz
   Fine-tuned LBA : {finetuned_pred_dir}/lba_{cfg}_ft_pred.npz
@@ -131,7 +136,8 @@ def _delta_col(df: pd.DataFrame, metric: str) -> str | None:
 
 def plot_delta_metrics(combined: pd.DataFrame, layouts: dict, outdir: Path, condition: str,
                        max_num_categories: int, cell_size: float = 0.55,
-                       title_fontsize: int = 14) -> Path | None:
+                       title_fontsize: int = 14, global_only: bool = False,
+                       scales: dict | None = None) -> Path | None:
     """2 x 1 column of the LBA's per-cell metric deltas (fine-tuned minus zero-shot):
     NRMSE on top, calibration error below.
 
@@ -143,6 +149,13 @@ def plot_delta_metrics(combined: pd.DataFrame, layouts: dict, outdir: Path, cond
     Negative is improvement for both metrics (both are lower-is-better), so the
     diverging map puts improvement in blue and degradation in red, around a neutral
     zero; each panel has its own symmetric scale.
+
+    The coefficient panels always carry all six intrinsic columns; with ``global_only``
+    the panels hold pi alone (``combined`` then comes from the global metric tables).
+
+    ``scales`` maps (condition, metric) to a panel's color limit. A coefficient plot
+    records its limits there, and the pi plot of the same case reuses them: scaled
+    by its own single value, every pi cell would saturate whatever its size.
     """
     rows = combined[(combined["condition"] == condition) & (combined["model"] == DELTA_PLOT_MODEL)]
     if rows.empty or (DELTA_PLOT_MODEL, condition) not in layouts:
@@ -158,7 +171,8 @@ def plot_delta_metrics(combined: pd.DataFrame, layouts: dict, outdir: Path, cond
             continue
         *panel, unplaced = adaptive_metric_matrix(
             rows[col].dropna().to_dict(), mask, dc, cfg["intrinsic_params"], max_num_categories,
-            variable_names=cfg["variable_names"], global_params=GLOBAL_PARAMS)
+            variable_names=cfg["variable_names"], global_params=GLOBAL_PARAMS,
+            global_only=global_only, keep_all_cols=not global_only)
         if unplaced:
             raise SystemExit(f"{DELTA_PLOT_MODEL}/{condition} {metric}: no grid cell for "
                              f"{unplaced} -- metric labels and grid layout disagree")
@@ -178,6 +192,11 @@ def plot_delta_metrics(combined: pd.DataFrame, layouts: dict, outdir: Path, cond
     cmap = "RdBu_r"
     for ax, (metric, panel) in zip(axes[:, 0], panels.items()):
         vmax = np.nanmax(np.abs(panel[0])) if np.isfinite(panel[0]).any() else 1.0
+        if scales is not None:
+            if global_only:
+                vmax = max(scales.get((condition, metric), vmax), np.nanmax(np.abs(panel[0])))
+            else:
+                scales[(condition, metric)] = vmax
         norm = mcolors.Normalize(vmin=-vmax, vmax=vmax)
         heatmap_axes(ax, *panel, cmap=cmap, norm=norm, annot_fontsize=9, fmt="+.3f")
         ax.tick_params(axis="x", labelsize=16)
@@ -187,11 +206,16 @@ def plot_delta_metrics(combined: pd.DataFrame, layouts: dict, outdir: Path, cond
         sm.set_array([])
         fig.colorbar(sm, ax=ax, fraction=0.046, pad=0.03)
 
-    path = outdir / f"delta_metrics_{condition}.pdf"
+    path = outdir / f"delta_metrics_{condition}{'_global' if global_only else ''}.pdf"
     fig.savefig(path, bbox_inches="tight")
     plt.close(fig)
     logging.info(f"[saved] {path}")
     return path
+
+
+def _with_suffix(path: Path, suffix: str) -> Path:
+    """``x_metrics.csv`` -> ``x_metrics<suffix>.csv``."""
+    return path.with_name(f"{path.stem}{suffix}{path.suffix}")
 
 
 def _paired(true_a, true_b, what):
@@ -208,7 +232,7 @@ def main():
     zs, ft = Path(args.zero_shot_dir), Path(args.finetuned_dir)
     base_fig, base_pred = Path(args.base_fig_dir), Path(args.base_pred_dir)
     max_cats = args.max_num_categories
-    delta_rows = []
+    delta_rows, global_rows = [], []
     layouts = {}  # (family, case) -> (design_config, parameter_mask, model_config)
 
     arms = {"LBA": dict(cfg=_LBA_WITH_PI, labels=("zero-shot", "fine-tuned"),
@@ -239,25 +263,44 @@ def main():
             r_b, _ = compute_r_matrix(true_b, pred_b, dc, cfg["intrinsic_params"], max_cats, mask_b[None])
             fig = adaptive_correlation_delta(r_a, r_b, pm, dc, cfg["intrinsic_params"], max_cats,
                                              variable_names=cfg["variable_names"],
-                                             label_a=la, label_b=lb)
+                                             label_a=la, label_b=lb, global_params=GLOBAL_PARAMS,
+                                             keep_all_cols=True)
             (outdir / m).mkdir(exist_ok=True)
             fig.savefig(outdir / m / f"{sc}_{arm['stem']}.pdf", bbox_inches="tight")
             plt.close(fig)
+            gfig = adaptive_correlation_delta(r_a, r_b, pm, dc, cfg["intrinsic_params"], max_cats,
+                                              variable_names=cfg["variable_names"],
+                                              label_a=la, label_b=lb, global_params=GLOBAL_PARAMS,
+                                              global_only=True, figsize=(3.2, 3.0))
+            if gfig is not None:
+                gfig.savefig(outdir / m / f"{sc}_{arm['stem']}_global.pdf", bbox_inches="tight")
+                plt.close(gfig)
 
-            df_a = _load_metrics_csv(arm["a_csv"](sc))
-            df_b = _load_metrics_csv(ft / m / sc / f"{m}_{sc}_ft_metrics.csv")
-            if df_a is not None and df_b is not None:
-                d = _delta_metrics(df_a, df_b, la, lb)
-                d.insert(0, "model", name); d.insert(1, "condition", sc)
-                delta_rows.append(d)
+            # Intrinsic and global (pi) metric tables are kept apart, as the validators
+            # write them: delta_metrics.csv feeds the paper's captions.
+            for suffix, rows in (("", delta_rows), ("_global", global_rows)):
+                df_a = _load_metrics_csv(_with_suffix(arm["a_csv"](sc), suffix))
+                df_b = _load_metrics_csv(ft / m / sc / f"{m}_{sc}_ft_metrics{suffix}.csv")
+                if df_a is not None and df_b is not None:
+                    d = _delta_metrics(df_a, df_b, la, lb)
+                    d.insert(0, "model", name); d.insert(1, "condition", sc)
+                    rows.append(d)
 
     if not delta_rows:
         raise SystemExit("no paired metrics found; nothing to compare")
-    combined = pd.concat(delta_rows, axis=0)
-    combined.to_csv(outdir / "delta_metrics.csv")
-    logging.info(f"[saved] {outdir / 'delta_metrics.csv'}")
-    for sc in args.scenarios:
-        plot_delta_metrics(combined, layouts, outdir, condition=sc, max_num_categories=max_cats)
+    scales = {}  # filled by the coefficient plots, reused by the pi plots
+    for suffix, rows in (("", delta_rows), ("_global", global_rows)):
+        if not rows:
+            logging.warning(f"no paired metrics{suffix} tables; delta_metrics{suffix} skipped")
+            continue
+        combined = pd.concat(rows, axis=0)
+        combined.to_csv(outdir / f"delta_metrics{suffix}.csv")
+        logging.info(f"[saved] {outdir / f'delta_metrics{suffix}.csv'}")
+        for sc in args.scenarios:
+            # pi is one cell: a larger one leaves its colorbar room for ticks.
+            plot_delta_metrics(combined, layouts, outdir, condition=sc, max_num_categories=max_cats,
+                               global_only=bool(suffix), cell_size=1.1 if suffix else 0.55,
+                               scales=scales)
     logging.info("Done.")
 
 

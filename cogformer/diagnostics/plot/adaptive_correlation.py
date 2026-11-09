@@ -69,14 +69,17 @@ def compute_r_matrix(
 
 
 def _compact(r_matrix, parameter_mask, row_labels, row_colors, variable_names,
-             global_cols=None, global_only=False):
+             global_cols=None, global_only=False, keep_all_cols=False):
     """Drop all-NaN rows and columns for display; return compacted versions.
 
     ``global_cols`` (a set of column indices for global params like ``pi``) are
     excluded, or kept exclusively when ``global_only`` — so global params can be
-    rendered separately from the coefficient matrix.
+    rendered separately from the coefficient matrix. ``keep_all_cols`` keeps every
+    (non-excluded) column, inactive ones as N/A, so figures of different designs
+    share one column layout.
     """
-    col_idx = np.where(np.any(parameter_mask, axis=0))[0]
+    col_idx = (np.arange(parameter_mask.shape[1]) if keep_all_cols
+               else np.where(np.any(parameter_mask, axis=0))[0])
     if global_cols is not None:
         keep = (lambda c: c in global_cols) if global_only else (lambda c: c not in global_cols)
         col_idx = np.array([c for c in col_idx if keep(c)], dtype=int)
@@ -162,6 +165,8 @@ def adaptive_metric_matrix(
     interaction_color: str = "#ff6969",
     max_num_regressors: int = None,
     categorical_regressors: list[str] = None,
+    global_only: bool = False,
+    keep_all_cols: bool = False,
 ):
     """Place per-cell values keyed like ``adaptive_metrics`` rows on the coefficient grid.
 
@@ -170,7 +175,8 @@ def adaptive_metric_matrix(
     labels are rebuilt here exactly as ``adaptive_metrics`` builds them, so any key that
     finds no active cell means the two conventions have drifted.
 
-    Global parameters are dropped, as in ``adaptive_correlation``.
+    Global parameters are dropped, as in ``adaptive_correlation``, or kept alone with
+    ``global_only``. ``keep_all_cols`` keeps inactive columns (see :func:`_compact`).
 
     Returns ``(matrix, display_mask, row_labels, row_colors, col_labels, unplaced)``,
     compacted for display; ``unplaced`` lists the keys of ``values`` that matched no cell.
@@ -208,7 +214,8 @@ def adaptive_metric_matrix(
     )
     global_cols = {i for i, p in enumerate(intrinsic_params) if global_params and p in global_params}
     return (*_compact(matrix, parameter_mask, row_labels, row_colors, variable_names,
-                      global_cols=global_cols), unplaced)
+                      global_cols=global_cols, global_only=global_only,
+                      keep_all_cols=keep_all_cols), unplaced)
 
 
 def adaptive_correlation_delta(
@@ -233,7 +240,10 @@ def adaptive_correlation_delta(
     fmt: str = "+.2f",
     max_num_regressors: int = None,
     categorical_regressors: list[str] = None,
-) -> plt.Figure:
+    global_params: list[str] = None,
+    global_only: bool = False,
+    keep_all_cols: bool = False,
+) -> plt.Figure | None:
     """Heatmap of Δr = r_b − r_a, using the same cell layout as adaptive_correlation.
 
     Positive values (red, under the RdBu_r map) indicate improvement in b; negative values (blue) indicate
@@ -241,6 +251,10 @@ def adaptive_correlation_delta(
 
     r_matrix_a, r_matrix_b : outputs of compute_r_matrix (same shape, same design).
     parameter_mask          : clipped mask from compute_r_matrix.
+
+    ``global_params`` columns are excluded, or kept alone with ``global_only`` (as in
+    :func:`adaptive_correlation`); ``keep_all_cols`` keeps inactive columns as N/A.
+    Returns ``None`` if no column is selected.
     """
     if variable_names is None:
         variable_names = intrinsic_params
@@ -260,10 +274,17 @@ def adaptive_correlation_delta(
     delta_masked = np.where(active_mask, delta, np.nan)
     display_mask = parameter_mask.copy()
 
+    global_cols = (
+        {i for i, p in enumerate(intrinsic_params) if p in global_params}
+        if global_params else None
+    )
     delta_masked, display_mask, row_labels, row_colors, col_labels = _compact(
-        delta_masked, display_mask, row_labels, row_colors, variable_names
+        delta_masked, display_mask, row_labels, row_colors, variable_names,
+        global_cols=global_cols, global_only=global_only, keep_all_cols=keep_all_cols,
     )
     num_rows, num_cols = delta_masked.shape
+    if num_cols == 0:
+        return None
 
     cell_size = 1.0
     if figsize is None:

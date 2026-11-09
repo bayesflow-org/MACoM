@@ -1,7 +1,7 @@
 # Experiment 3 — LBA zero-shot inference and finetuning
 
-Assembled 2026-11-09 19:13:00Z by
-`experiments/finalize_experiment_3.py` — 718 files. Git commit `b21c58dafc16312e99ceff51c84a0a4c85ba7325`.
+Assembled 2026-11-09 20:12:09Z by
+`experiments/finalize_experiment_3.py` — 744 files. Git commit `ea3cda097038de86d42b8e33b6305940478edd75`.
 Model-class run `r4c4_enc128h4l4_a0.5_b128_e15000_ptc_gaussian_softmax_intoptional_beta22_encstruct`; `MANIFEST.csv` records per-file provenance.
 
 Everything here is **stimulus-coded** (`favored_idx` drawn per trial, for LBA and for
@@ -38,7 +38,10 @@ show a posterior moved. Always read `excess` over the empirical null, not raw `c
 `<family>/<case>_forgetting_delta_r.pdf` (DDM/RDM/CDM: finetuned minus original) map the
 change in recovery correlation per coefficient. `delta_metrics.csv` and
 `delta_metrics_<case>.pdf` give per-parameter NRMSE and calibration-error deltas
-(negative = better). `lba/interaction_overlay_recovery.pdf` draws zero-shot and finetuned
+(negative = better). Every coefficient map has the same six intrinsic-parameter
+columns (N/A where a case leaves one inactive); the contamination probability pi is
+drawn separately in the `_pi` companions (`delta_metrics_pi.csv` for its metrics),
+on the color scale of the matching coefficient panel. `lba/interaction_overlay_recovery.pdf` draws zero-shot and finetuned
 LBA recovery on one grid (main-text figure, with `delta_metrics_interaction.pdf`).
 `lba_calibration_plane.pdf` draws each LBA cell's move from
 zero-shot to finetuned in (posterior contraction, calibration error) -- how the
