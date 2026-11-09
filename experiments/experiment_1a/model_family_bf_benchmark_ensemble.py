@@ -85,9 +85,15 @@ def parse_args():
     return args
 
 
-def main():
-    logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
-    args = parse_args()
+def plot_bench5(cfg: dict, entries: list[dict], outdir: Path, family: str, *,
+                metrics: bool = True, num_null_draws: int = 1000, seed: int = 0) -> list[str]:
+    """Draw one family's bench5 ensemble set; return the saved file names.
+
+    ``entries`` are the five CASES in order, each {"true", "pred", "mask"} on the
+    compact four-row grid. Shared with experiment 3's CogFormer LBA ensembles so both
+    methods' figures use the same palette, labels, metric normalisation, null seed,
+    shared global axes and file names.
+    """
     # Six colors matches CogFormer's bench5/bench6 palette exactly; use its first five.
     colors = sns.husl_palette(6, h=0.05, l=0.72)[:len(CASES)]
     plotters = {
@@ -95,9 +101,47 @@ def main():
         "ecdf": (ensemble_ecdf, global_ensemble_ecdf, {"difference": True}),
         "coverage": (ensemble_coverage, global_ensemble_coverage, {"difference": True}),
     }
-    if args.metrics:
+    if metrics:
         plotters["metrics"] = (ensemble_metrics, global_ensemble_metrics,
-                               {"normalize": "range", "num_null_draws": args.num_null_draws})
+                               {"normalize": "range", "num_null_draws": num_null_draws})
+    shared = dict(
+        true_list=[e["true"] for e in entries], pred_list=[e["pred"] for e in entries],
+        parameter_masks=[e["mask"] for e in entries],
+        design_configs=[cfg["benchmark_configs"][case] for case in CASES],
+        intrinsic_params=cfg["intrinsic_params"], variable_names=cfg["variable_names"],
+        max_num_categories=2, max_num_regressors=2,
+        categorical_regressors_list=[[] for _ in CASES], global_params=GLOBAL_PARAMS,
+    )
+    outdir.mkdir(parents=True, exist_ok=True)
+    outputs = []
+    for name, (local_fn, global_fn, extra) in plotters.items():
+        kwargs = dict(shared, **extra)
+        if name != "metrics":
+            kwargs.update(colors=colors, labels=CASES)
+        for scope, plot_fn in (("local", local_fn), ("global", global_fn)):
+            logging.info("Plotting %s bench5 %s (%s)", family, name, scope)
+            # Reuse one seeded null reference for local and global heatmaps;
+            # the family seed is independent of which other families are plotted.
+            if name == "metrics":
+                np.random.seed(seed)
+            global_opts = GLOBAL_SHARE.get(name, {}) if scope == "global" else {}
+            fig = plot_fn(**kwargs, **global_opts)
+            if fig is None:
+                continue
+            suffix = "_global" if scope == "global" else ""
+            path = outdir / f"{family}_bench5_ensemble_{name}{suffix}.pdf"
+            try:
+                fig.savefig(path, bbox_inches="tight")
+            finally:
+                plt.close(fig)
+            outputs.append(path.name)
+            logging.info("[saved] %s", path)
+    return outputs
+
+
+def main():
+    logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
+    args = parse_args()
 
     # Check every requested input before creating any plots. bench5 always means
     # all five cases, so a missing file must not silently produce a partial ensemble.
@@ -118,37 +162,8 @@ def main():
         "families": {},
     }
     for family, (cfg, entries) in families.items():
-        shared = dict(
-            true_list=[e["true"] for e in entries], pred_list=[e["pred"] for e in entries],
-            parameter_masks=[e["mask"] for e in entries],
-            design_configs=[cfg["benchmark_configs"][case] for case in CASES],
-            intrinsic_params=cfg["intrinsic_params"], variable_names=cfg["variable_names"],
-            max_num_categories=2, max_num_regressors=2,
-            categorical_regressors_list=[[] for _ in CASES], global_params=GLOBAL_PARAMS,
-        )
-        outputs = []
-        for name, (local_fn, global_fn, extra) in plotters.items():
-            kwargs = dict(shared, **extra)
-            if name != "metrics":
-                kwargs.update(colors=colors, labels=CASES)
-            for scope, plot_fn in (("local", local_fn), ("global", global_fn)):
-                logging.info("Plotting %s bench5 %s (%s)", family, name, scope)
-                # Reuse one seeded null reference for local and global heatmaps;
-                # the family seed is independent of which other families are plotted.
-                if name == "metrics":
-                    np.random.seed(args.seed)
-                global_opts = GLOBAL_SHARE.get(name, {}) if scope == "global" else {}
-                fig = plot_fn(**kwargs, **global_opts)
-                if fig is None:
-                    continue
-                suffix = "_global" if scope == "global" else ""
-                path = args.outdir / f"{family}_bench5_ensemble_{name}{suffix}.pdf"
-                try:
-                    fig.savefig(path, bbox_inches="tight")
-                finally:
-                    plt.close(fig)
-                outputs.append(path.name)
-                logging.info("[saved] %s", path)
+        outputs = plot_bench5(cfg, entries, args.outdir, family, metrics=args.metrics,
+                              num_null_draws=args.num_null_draws, seed=args.seed)
         manifest["families"][family] = {
             "inputs": [e["source"] for e in entries],
             "datasets_per_case": int(entries[0]["pred"].shape[0]),

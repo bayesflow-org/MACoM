@@ -56,7 +56,7 @@ never disagree). Change the recipe THERE, never inline.
 |---|---|---|
 | exp1 | `e1_data` → `e1_train` → `e1_validate`, `e1_ensemble`, `e1_benchmark`, `e1_design_eig` | shared benchmark data; model-class checkpoint (r4c4, b128 × 15000 ep); per-case, ensemble, benchmark, information-gain figures |
 | exp2 | `e2_apply`, `e2_refit_svfix` → `e2_ppc`, `e2_validate` | real-data fits, PPCs (+ combined figure), validation on the real subjects' designs |
-| exp3 | `e3_zeroshot`, `e3_finetune` → `e3_ft_validate`, `e3_original` (links to e1_validate) → `e3_paired_c2st`, `e3_compare`, `e3_ppc_apply` → `e3_ppc`, `e3_realdata_validate` | LBA zero-shot, 1000-epoch finetune, forgetting C2ST, Δr / calibration plane, stimulus-coded real-data fit + PPC + validation |
+| exp3 | `e3_zeroshot`, `e3_finetune` → `e3_ft_validate`, `e3_original` (links to e1_validate) → `e3_paired_c2st`, `e3_compare`, `e3_ensemble`, `e3_ppc_apply` → `e3_ppc`, `e3_realdata_validate` | LBA zero-shot, 1000-epoch finetune, forgetting C2ST, Δr / calibration plane, bench5 ensembles (BF layout), stimulus-coded real-data fit + PPC + validation |
 | exp4 | `e4_probe` → `e4_compare` → `e4_representation` | 5-param (vsvfixed) aDDM probe, both arms; shared-validation C2ST; RSA/CKA + 5-family MDS |
 | gap (last) | `gap_train` = `e1a_bf`, `e3_bf` → `gap_eval` = `e1a_c2st`, `e3_gap_c2st`, `e1a_finalize`, `e3_gap_finalize` | the amortization gap: 15 DDM/RDM/CDM + 5 LBA BayesFlow baselines, their C2STs vs e1_validate / e3_ft_validate, finals 1a and experiment-3 `gap/` |
 | finalize | `e{1,1a,2,3,4}_finalize` | copy allowlisted outputs into `outputs/finals/`, write MANIFEST + README |

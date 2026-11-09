@@ -685,6 +685,21 @@ stage_e3_compare() {
             --max_num_regressors "$MC_MAX_REG"
 }
 
+# LBA bench5 ensembles, zero-shot and finetuned, drawn by experiment 1a's BayesFlow
+# plotter so they share its layout (palette, metrics, shared global axes) panel for
+# panel with figures/model_family/bf/ensemble_benchmark/lba_*. CPU only, saved preds.
+marker_e3_ensemble() { echo "${LBA_PAIRED}/ensemble_benchmark/manifest.json"; }
+stage_e3_ensemble() {
+    need "${LBA_PAIRED}/zeroshot" "stage e3_zeroshot" || return 1
+    need "${LBA_PAIRED}/finetuned" "stage e3_ft_validate" || return 1
+    run "LBA bench5 ensembles (zero-shot + finetuned, BF layout)" -- \
+        env MPLBACKEND=Agg \
+        "$PY" -m experiments.experiment_3.lba_benchmark_ensemble \
+            --zero_shot_dir "${LBA_PAIRED}/zeroshot/A${LBA_FIXED_A}" \
+            --finetuned_dir "${LBA_PAIRED}/finetuned" \
+            --outdir "${LBA_PAIRED}/ensemble_benchmark"
+}
+
 # LBA AMORTIZATION GAP -- the held-out family's counterpart of experiment 1a. LBA has
 # no original-checkpoint arm (it was not in the model class), so its CogFormer arm is
 # the FINETUNED checkpoint. Same budget per case as the 1a baselines, same shared
@@ -967,13 +982,13 @@ ALL_STAGES=(
     e1_data e1_train e1_validate e1_ensemble e1_benchmark e1_design_eig e1_finalize
     e2_apply e2_refit_svfix e2_ppc e2_validate e2_finalize
     e3_zeroshot e3_finetune e3_ft_validate e3_original e3_paired_c2st
-    e3_compare e3_ppc_apply e3_ppc e3_realdata_validate e3_finalize
+    e3_compare e3_ensemble e3_ppc_apply e3_ppc e3_realdata_validate e3_finalize
     e4_probe e4_compare e4_representation e4_finalize
     e1a_bf e3_bf e1a_c2st e3_gap_c2st e1a_finalize e3_gap_finalize
 )
 GROUP_exp1="e1_data e1_train e1_validate e1_ensemble e1_benchmark e1_design_eig e1_finalize"
 GROUP_exp2="e2_apply e2_refit_svfix e2_ppc e2_validate e2_finalize"
-GROUP_exp3="e3_zeroshot e3_finetune e3_ft_validate e3_original e3_paired_c2st e3_compare e3_ppc_apply e3_ppc e3_realdata_validate e3_finalize"
+GROUP_exp3="e3_zeroshot e3_finetune e3_ft_validate e3_original e3_paired_c2st e3_compare e3_ensemble e3_ppc_apply e3_ppc e3_realdata_validate e3_finalize"
 GROUP_exp4="e4_probe e4_compare e4_representation e4_finalize"
 GROUP_main="$GROUP_exp1 $GROUP_exp2 $GROUP_exp3 $GROUP_exp4"
 GROUP_gap_train="e1a_bf e3_bf"

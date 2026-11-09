@@ -35,6 +35,7 @@ e1_train ──► MC_CKPT ─┬─► e1_validate, e1_ensemble, e1_design_eig,
                       │   e3_finetune, e4_probe, e4_compare, e4_representation
 e3_original = links into e1_validate ─► e3_paired_c2st ◄── e3_ft_validate
 e3_zeroshot + e3_ft_validate + e1_validate ─► e3_compare
+e3_zeroshot + e3_ft_validate ─► e3_ensemble
 LBA_FT_CKPT ─► e3_ppc_apply ─► e3_ppc ;  LBA_FT_CKPT ─► e3_realdata_validate, e4_representation
 e4_probe ─► e4_compare ;  e4_representation needs e3_finetune too
 all source trees ─► e{1,1a,2,3,4}_finalize ─► outputs/finals/experiment-*
@@ -103,6 +104,7 @@ all source trees ─► e{1,1a,2,3,4}_finalize ─► outputs/finals/experiment-
 | `e3_compare` | `experiment_3/model_class_lba_compare.py` | figures: Δr heatmaps (LBA: ft − zero-shot; others: ft − original) | `LBA/compare/<fam>/<case>_{delta_r,forgetting_delta_r}.pdf` | `compare/<fam>/…` |
 | | | table + figures: per-parameter metric deltas | `LBA/compare/delta_metrics.csv`, `delta_metrics_<case>.pdf` | `compare/…` |
 | | `experiment_3/calibration_plane.py` (panel A, paired) | figure + table: contraction vs calibration, zero-shot → finetuned | `LBA/compare/lba_calibration_plane.{pdf,csv}` | `compare/lba_calibration_plane.{pdf,csv}` |
+| `e3_ensemble` | `experiment_3/lba_benchmark_ensemble.py` (draws with experiment 1a's `plot_bench5`, so the BF layout) | figures: LBA bench5 pooled `<plots>`, zero-shot and finetuned | `LBA/ensemble_benchmark/<arm>/lba_bench5_ensemble_<plot>[_global].pdf`, `manifest.json` | `benchmark_ensemble/<arm>/<plot>[_pi].pdf` |
 | `e3_gap_c2st` | `experiment_1a/model_family_c2st.py --model lba` (`BF_vs_Finetuned`) | tables: LBA amortization-gap C2ST | `outputs/figures/c2st/lba/lba_c2st_summary.csv`, `…/lba/<case>/lba_<case>_ft_vs_bf_c2st.csv` | `gap/summary.csv`, `gap/<case>/ft_vs_bf_c2st.csv` |
 | `e3_ppc_apply` | `experiment_2/lba_mc_cf_apply.py --design condition_only` | data: 17-subject posteriors (stimulus-coded) | `outputs/data/real_data/lba_stim_cond/mc/lba_mc_posteriors.npz` | `ppc/posteriors.npz` |
 | `e3_ppc` | `experiment_2/ppc.py` ×2 | figures: PPC free / conventional (s_v=1, s_τ=0) | `outputs/figures/real_data/ppc/lba_stim_cond[_conventional]/lba_mc_<type>_<cond>.pdf` | `ppc/free/`, `ppc/conventional/` |

@@ -1,0 +1,60 @@
+{
+  "cases": [
+    "intercept_only",
+    "fixed",
+    "regressed",
+    "fixed_regressed",
+    "interaction"
+  ],
+  "global_params": [
+    "pi"
+  ],
+  "normalize": "range",
+  "seed": 0,
+  "num_null_draws": 1000,
+  "layout": "experiment_1a.model_family_bf_benchmark_ensemble.plot_bench5",
+  "arms": {
+    "zeroshot": {
+      "inputs": [
+        "/home/jerry/Documents/research/projects/CogFormer-2/outputs/figures/model_class/cf/r4c4_enc128h4l4_a0.5_b128_e15000_ptc_gaussian_softmax_intoptional_beta22_encstruct_lba/zeroshot/A0.5/predictions/lba_intercept_only_mid1_cf_pred.npz",
+        "/home/jerry/Documents/research/projects/CogFormer-2/outputs/figures/model_class/cf/r4c4_enc128h4l4_a0.5_b128_e15000_ptc_gaussian_softmax_intoptional_beta22_encstruct_lba/zeroshot/A0.5/predictions/lba_fixed_mid1_cf_pred.npz",
+        "/home/jerry/Documents/research/projects/CogFormer-2/outputs/figures/model_class/cf/r4c4_enc128h4l4_a0.5_b128_e15000_ptc_gaussian_softmax_intoptional_beta22_encstruct_lba/zeroshot/A0.5/predictions/lba_regressed_mid1_cf_pred.npz",
+        "/home/jerry/Documents/research/projects/CogFormer-2/outputs/figures/model_class/cf/r4c4_enc128h4l4_a0.5_b128_e15000_ptc_gaussian_softmax_intoptional_beta22_encstruct_lba/zeroshot/A0.5/predictions/lba_fixed_regressed_mid1_cf_pred.npz",
+        "/home/jerry/Documents/research/projects/CogFormer-2/outputs/figures/model_class/cf/r4c4_enc128h4l4_a0.5_b128_e15000_ptc_gaussian_softmax_intoptional_beta22_encstruct_lba/zeroshot/A0.5/predictions/lba_interaction_mid1_cf_pred.npz"
+      ],
+      "datasets_per_case": 200,
+      "draws_per_dataset": 200,
+      "outputs": [
+        "lba_bench5_ensemble_recovery.pdf",
+        "lba_bench5_ensemble_recovery_global.pdf",
+        "lba_bench5_ensemble_ecdf.pdf",
+        "lba_bench5_ensemble_ecdf_global.pdf",
+        "lba_bench5_ensemble_coverage.pdf",
+        "lba_bench5_ensemble_coverage_global.pdf",
+        "lba_bench5_ensemble_metrics.pdf",
+        "lba_bench5_ensemble_metrics_global.pdf"
+      ]
+    },
+    "finetuned": {
+      "inputs": [
+        "/home/jerry/Documents/research/projects/CogFormer-2/outputs/figures/model_class/cf/r4c4_enc128h4l4_a0.5_b128_e15000_ptc_gaussian_softmax_intoptional_beta22_encstruct_lba/finetuned/predictions/lba_intercept_only_ft_pred.npz",
+        "/home/jerry/Documents/research/projects/CogFormer-2/outputs/figures/model_class/cf/r4c4_enc128h4l4_a0.5_b128_e15000_ptc_gaussian_softmax_intoptional_beta22_encstruct_lba/finetuned/predictions/lba_fixed_ft_pred.npz",
+        "/home/jerry/Documents/research/projects/CogFormer-2/outputs/figures/model_class/cf/r4c4_enc128h4l4_a0.5_b128_e15000_ptc_gaussian_softmax_intoptional_beta22_encstruct_lba/finetuned/predictions/lba_regressed_ft_pred.npz",
+        "/home/jerry/Documents/research/projects/CogFormer-2/outputs/figures/model_class/cf/r4c4_enc128h4l4_a0.5_b128_e15000_ptc_gaussian_softmax_intoptional_beta22_encstruct_lba/finetuned/predictions/lba_fixed_regressed_ft_pred.npz",
+        "/home/jerry/Documents/research/projects/CogFormer-2/outputs/figures/model_class/cf/r4c4_enc128h4l4_a0.5_b128_e15000_ptc_gaussian_softmax_intoptional_beta22_encstruct_lba/finetuned/predictions/lba_interaction_ft_pred.npz"
+      ],
+      "datasets_per_case": 200,
+      "draws_per_dataset": 200,
+      "outputs": [
+        "lba_bench5_ensemble_recovery.pdf",
+        "lba_bench5_ensemble_recovery_global.pdf",
+        "lba_bench5_ensemble_ecdf.pdf",
+        "lba_bench5_ensemble_ecdf_global.pdf",
+        "lba_bench5_ensemble_coverage.pdf",
+        "lba_bench5_ensemble_coverage_global.pdf",
+        "lba_bench5_ensemble_metrics.pdf",
+        "lba_bench5_ensemble_metrics_global.pdf"
+      ]
+    }
+  }
+}

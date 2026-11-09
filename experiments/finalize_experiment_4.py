@@ -16,7 +16,7 @@ than a consequence of which flags a run happened to pass.
 
     python -m experiments.finalize_experiment_4 --dry_run
 """
-from experiments.paths import RESULTS_ROOT
+from experiments.paths import RESULTS_ROOT, repo_relative
 import argparse
 import shutil
 import subprocess
@@ -159,7 +159,7 @@ def main():
         dest.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(src, dest)
         st = src.stat()
-        rows.append({"destination": str(dest.relative_to(FINALS)), "source": str(src),
+        rows.append({"destination": str(dest.relative_to(FINALS)), "source": repo_relative(src),
                      "bytes": st.st_size,
                      "source_mtime": datetime.fromtimestamp(st.st_mtime, timezone.utc)
                                      .strftime("%Y-%m-%d %H:%M:%SZ")})

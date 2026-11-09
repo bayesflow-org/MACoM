@@ -16,7 +16,7 @@ silently dropped.
     python -m experiments.finalize_experiment_2 --dry_run
     python -m experiments.finalize_experiment_2
 """
-from experiments.paths import RESULTS_ROOT
+from experiments.paths import RESULTS_ROOT, repo_relative
 import argparse
 import shutil
 import subprocess
@@ -214,7 +214,7 @@ def main():
         st = src.stat()
         rows.append({
             "destination": str(dest.relative_to(FINALS)),
-            "source": str(src),
+            "source": repo_relative(src),
             "bytes": st.st_size,
             "source_mtime": datetime.fromtimestamp(st.st_mtime, timezone.utc)
                             .strftime("%Y-%m-%d %H:%M:%SZ"),
