@@ -1,5 +1,0 @@
-family,trained,rsa_encoder_vs_params,noise_ceiling_rsa,noise_ceiling_cka
-ddm,True,0.5964,0.9748,0.9764
-rdm,True,0.6968,0.9578,0.9604
-cdm,True,0.6439,0.9721,0.9784
-addm,False,0.6788,0.9814,0.9806

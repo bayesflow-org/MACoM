@@ -88,6 +88,7 @@ information and start measuring encoder degradation out of distribution -- which
 looks identical on a plot and is not the same thing. --allow_ood lifts the guard for
 deliberate OOD probing; the output marks those rows.
 """
+from experiments.paths import RESULTS_ROOT
 import argparse
 import logging
 import os
@@ -597,7 +598,7 @@ def parse_args():
     p = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     add_structure_conditioning_arg(p)
     p.add_argument("--checkpoint", type=str, required=True)
-    p.add_argument("--outdir", type=str, default="./outputs/data/design_opt/ddm")
+    p.add_argument("--outdir", type=str, default=str(RESULTS_ROOT / "data/design_opt/ddm"))
     p.add_argument("--num_obs_grid", type=str, default="200,400,600,800,1000")
     p.add_argument("--allow_ood", action="store_true",
                    help=f"Permit num_obs outside the trained [{TRAIN_MIN_OBS}, {TRAIN_MAX_OBS}] range.")

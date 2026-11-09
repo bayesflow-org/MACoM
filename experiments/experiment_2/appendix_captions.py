@@ -18,6 +18,7 @@ from the data files and the saved posteriors, so the text cannot drift from the 
 
     python -m experiments.experiment_2.appendix_captions
 """
+from experiments.paths import INPUT_DATA_ROOT, RESULTS_ROOT
 from pathlib import Path
 
 import numpy as np
@@ -25,11 +26,11 @@ import numpy as np
 from experiments.experiment_2 import ppc
 from experiments.experiment_2.data_utils import load_cdm_data, load_ddm_data, load_rdm_data
 
-FINALS = Path("outputs/finals/experiment-2")
+FINALS = (RESULTS_ROOT / "finals/experiment-2")
 FAMILIES = {   # family: (loader, data file, grouping variables in figure order)
-    "ddm": (load_ddm_data, "data/data_application_ddm.csv", ("stim_type", "truth")),
-    "rdm": (load_rdm_data, "data/data_application_rdm.csv", ("congruency", "session")),
-    "cdm": (load_cdm_data, "data/data_application_cdm.csv", ("difficulty", "speed")),
+    "ddm": (load_ddm_data, str(INPUT_DATA_ROOT / "data_application_ddm.csv"), ("stim_type", "truth")),
+    "rdm": (load_rdm_data, str(INPUT_DATA_ROOT / "data_application_rdm.csv"), ("congruency", "session")),
+    "cdm": (load_cdm_data, str(INPUT_DATA_ROOT / "data_application_cdm.csv"), ("difficulty", "speed")),
 }
 NAMES = {"ddm": "DDM", "rdm": "RDM", "cdm": "CDM"}
 COND_NAMES = {"stim_type": "stimulus type", "truth": "factual truth", "congruency": "congruency",

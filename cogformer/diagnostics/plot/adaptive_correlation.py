@@ -226,7 +226,7 @@ def adaptive_correlation_delta(
     interaction_color: str = "#ff6969",
     cmap: str = "RdBu_r",
     figsize: tuple = None,
-    title_fontsize: int = 18,
+    title_fontsize: int = 16,
     label_fontsize: int = 15,
     tick_fontsize: int = 13,
     annot_fontsize: int = 11,

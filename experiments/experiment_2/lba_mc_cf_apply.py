@@ -25,6 +25,7 @@ THREE THINGS THAT DIFFER FROM THE OTHER APPLY SCRIPTS, all load-bearing:
 
     python -m experiments.experiment_2.lba_mc_cf_apply --checkpoint "$LBA_FT_CKPT"
 """
+from experiments.paths import INPUT_DATA_ROOT, RESULTS_ROOT
 import argparse
 import logging
 from pathlib import Path
@@ -104,9 +105,9 @@ LBA_DESIGNS = {"full": LBA_DESIGN_CONFIG,
 def parse_args():
     p = argparse.ArgumentParser()
     add_structure_conditioning_arg(p)
-    p.add_argument("--data", type=str, default="./data/data_application_lba.csv")
+    p.add_argument("--data", type=str, default=str(INPUT_DATA_ROOT / "data_application_lba.csv"))
     p.add_argument("--checkpoint", type=str, required=True)
-    p.add_argument("--outdir", type=str, default="./outputs/data/real_data/lba/mc/")
+    p.add_argument("--outdir", type=str, default=str(RESULTS_ROOT / "data/real_data/lba/mc/"))
     p.add_argument("--design", type=str, default="full", choices=sorted(LBA_DESIGNS),
                    help="Which design to fit. ppc.py takes the same flag and MUST be "
                         "given the matching value: the posteriors carry no record of "

@@ -29,6 +29,7 @@ isn't there.
 
     python -m experiments.experiment_4.combined_panel
 """
+from experiments.paths import RESULTS_ROOT
 import os
 os.environ.setdefault("KERAS_BACKEND", "torch")
 
@@ -47,7 +48,7 @@ from .crossfamily_representation import (pooled_embedding, draw_pooled, POOLED,
                                         _stacked_legend)
 from .addm_representation import plot_gram_panel
 
-FIG = Path("outputs/figures/encoder_rep")
+FIG = (RESULTS_ROOT / "figures/encoder_rep")
 
 FIG_W = 11.0
 H_TOP = 4.62
@@ -132,11 +133,11 @@ def _rect(x_in, y_in, w_in, h_in, fig_w, fig_h):
 def parse_args():
     p = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     p.add_argument("--geometry_npz", type=str,
-                   default="outputs/finals/experiment-4/representation/crossfamily"
-                           "/app3_summaries.npz")
+                   default=str(RESULTS_ROOT / "finals/experiment-4/representation/crossfamily"
+                           "/app3_summaries.npz"))
     p.add_argument("--rep_npz", type=str,
-                   default="outputs/finals/experiment-4/representation"
-                           "/frozen_vs_learned/summaries.npz")
+                   default=str(RESULTS_ROOT / "finals/experiment-4/representation"
+                           "/frozen_vs_learned/summaries.npz"))
     p.add_argument("--out", type=str,
                    default=str(FIG / "addm_compare/intercept_only_vsvfixed"
                                      "/addm_arm_compare_intercept_only_vsvfixed"

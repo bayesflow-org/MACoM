@@ -12,6 +12,7 @@ gray, and rows of terms absent from a draw's design are a lighter gray.
 Usage:
     python -m experiments.visualization.parameter_mask_stack --num_per_family 6 --seed 1
 """
+from experiments.paths import RESULTS_ROOT
 import argparse
 from pathlib import Path
 
@@ -31,7 +32,7 @@ from cogformer.utils.plot_utils import bf_colors, cogformer_cm_colors, cogformer
 from ..experiment_1.model_class_cf_train import _MODELS_WITH_PI, GLOBAL_PARAMS
 
 
-FIG_DIR = Path("./outputs/figures/visualization")
+FIG_DIR = (RESULTS_ROOT / "figures/visualization")
 
 FAMILIES = {
     "DDM": (DDM, ddm_priors, ddm_link_fun, ["v", "a", "z", "tau"]),

@@ -8,6 +8,7 @@ default) jointly fine-tunes all four families; scheme 1 uses LBA samples only.
 Both schemes update the full network using the global parameter space
 established by the base training run.
 """
+from experiments.paths import RESULTS_ROOT
 import torch
 try:
     import wandb
@@ -137,7 +138,7 @@ class LBAFinetuner:
         return self.adapter.adapt(samples)
 
     def train(self, train_config, val_config, checkpoint_path="cogformer_lba_finetune.pt", fig_path="fig",
-              checkpoint_dir="./outputs/checkpoints/model_class/cf/lba_finetune/"):
+              checkpoint_dir=str(RESULTS_ROOT / "checkpoints/model_class/cf/lba_finetune/")):
         checkpoint_dir = Path(checkpoint_dir)
         checkpoint_dir.mkdir(parents=True, exist_ok=True)
 
@@ -253,7 +254,7 @@ class LBAFinetuner:
         n_global = self.model_class.n_global_params
         colors = cogformer_fm_colors()
         training_max_cats = mfc["max_num_categories"]
-        figures_dir = Path("./outputs/figures/model_class/cf/lba_finetune/recovery")
+        figures_dir = (RESULTS_ROOT / "figures/model_class/cf/lba_finetune/recovery")
         figures_dir.mkdir(parents=True, exist_ok=True)
         batch_size = config["batch_size"]
 
@@ -410,7 +411,7 @@ def parse_args():
                              "with, else finetuning eats a regime re-adaptation cost. Use "
                              "--no-self_attn_padding_mask for a mask-off base.")
     parser.add_argument("--checkpoint_dir", type=str,
-                        default="./outputs/checkpoints/model_class/cf/lba_finetune/",
+                        default=str(RESULTS_ROOT / "checkpoints/model_class/cf/lba_finetune/"),
                         help="The filename does not encode the pretrained base, so the "
                              "orchestrator passes a directory scoped to it.")
     parser.add_argument("--time_power_law_alpha", type=float, default=0.0,

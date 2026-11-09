@@ -46,6 +46,7 @@ because both arms return the same prior, not because the summaries agree. The
 joint statistic is therefore also reported over the IDENTIFIED cells only,
 selected by contraction on this shared validation set.
 """
+from experiments.paths import RESULTS_ROOT
 import os
 
 os.environ["KERAS_BACKEND"] = "torch"
@@ -77,8 +78,8 @@ from .addm_bf_baseline import (
 )
 
 # BASELINE_COLOR is imported from addm_bf_apply (single definition).
-OUT_ROOT = Path("./outputs/data/encoder_rep/addm_compare")
-FIG_ROOT = Path("./outputs/figures/encoder_rep/addm_compare")
+OUT_ROOT = (RESULTS_ROOT / "data/encoder_rep/addm_compare")
+FIG_ROOT = (RESULTS_ROOT / "figures/encoder_rep/addm_compare")
 
 
 def build_shared_validation(args, device):

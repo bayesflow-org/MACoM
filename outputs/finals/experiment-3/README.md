@@ -1,8 +1,8 @@
 # Experiment 3 — LBA zero-shot inference and finetuning
 
-Assembled 2026-10-07 16:30:04Z by
-`experiments/finalize_experiment_3.py` — 692 files. Git commit `9394c50c99b753b5d4e855735f40a4a81265af3b`.
-Model-class run `r4c4_enc128h4l4_a0.5_b128_e15000_ptc`; `MANIFEST.csv` records per-file provenance.
+Assembled 2026-10-29 14:48:25Z by
+`experiments/finalize_experiment_3.py` — 692 files. Git commit `98179638383bc710b8e91e4fd91ab2cbeb733e50`.
+Model-class run `r4c4_enc128h4l4_a0.5_b128_e15000_ptc_gaussian_softmax_intoptional_beta22_encstruct`; `MANIFEST.csv` records per-file provenance.
 
 Everything here is **stimulus-coded** (`favored_idx` drawn per trial, for LBA and for
 RDM at every K) and comes from ONE lineage: the model-class checkpoint above, its

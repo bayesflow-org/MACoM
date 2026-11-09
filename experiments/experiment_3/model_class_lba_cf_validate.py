@@ -13,6 +13,7 @@ The CogFormer is run with a chosen model_id (default: RDM = 1, since the param
 spaces overlap exactly). Use --all_model_ids to evaluate under all three known
 model embeddings and compare recovery.
 """
+from experiments.paths import RESULTS_ROOT
 import argparse
 import logging
 from pathlib import Path
@@ -98,7 +99,7 @@ def parse_args():
     p = argparse.ArgumentParser()
     add_structure_conditioning_arg(p)
     p.add_argument("--checkpoint", type=str, required=True)
-    p.add_argument("--outdir", type=str, default="./outputs/figures/generalization/model_class_lba/cf/")
+    p.add_argument("--outdir", type=str, default=str(RESULTS_ROOT / "figures/generalization/model_class_lba/cf/"))
     p.add_argument("--pred_dir", type=str, default=None,
                    help="Where prediction .npz files go. Defaults to <outdir>/predictions so a "
                         "single --outdir keeps figures and predictions together; pass explicitly "

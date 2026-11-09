@@ -15,6 +15,7 @@ Condition coding is identical in both files -- data_utils.load_ddm_data does
 ``u_1 = stim_type - 0.5`` and ``u_2 = factual_truth - 0.5`` -- so stim_type 0 is
 Novel / 1 Familiar and factual_truth 0 is False / 1 True in each.
 """
+from experiments.paths import INPUT_DATA_ROOT, RESULTS_ROOT
 import argparse
 import logging
 from pathlib import Path
@@ -36,10 +37,10 @@ COL = {"stim_type": "stim_type", "truth": "factual_truth"}
 
 def parse_args():
     p = argparse.ArgumentParser()
-    p.add_argument("--pred_csv", type=str, default="./data/pred_data_exp_2.csv")
+    p.add_argument("--pred_csv", type=str, default=str(INPUT_DATA_ROOT / "pred_data_exp_2.csv"))
     p.add_argument("--model", type=str, default="ddm")
     p.add_argument("--outdir", type=str,
-                   default="./outputs/figures/real_data/ppc/ddm_original")
+                   default=str(RESULTS_ROOT / "figures/real_data/ppc/ddm_original"))
     p.add_argument("--rt_quantiles", type=float, nargs="+",
                    default=list(DEFAULT_RT_QUANTILES))
     return p.parse_args()

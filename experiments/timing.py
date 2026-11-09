@@ -1,4 +1,5 @@
 """Experiment timing utilities."""
+from experiments.paths import RESULTS_ROOT
 
 import json
 import time
@@ -16,7 +17,7 @@ class RunTimer:
     def __init__(
         self,
         name: str,
-        timing_dir: str = "./outputs/timing",
+        timing_dir: str = str(RESULTS_ROOT / "timing"),
         dry_run: bool = False,
         total_epochs: int | None = None,
         dry_run_epochs: int | None = None,

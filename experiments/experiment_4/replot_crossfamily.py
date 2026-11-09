@@ -13,6 +13,7 @@ datasets and the MDS embedding moves. The run persists every encoder summary in
 The plotting function is imported rather than copied, so a replot and a real run
 cannot drift apart.
 """
+from experiments.paths import RESULTS_ROOT
 import argparse
 import logging
 from pathlib import Path
@@ -28,8 +29,8 @@ SUFFIX = "__finetuned"
 
 def parse_args():
     p = argparse.ArgumentParser(description=__doc__.split("\n")[0])
-    p.add_argument("--npz", type=str, required=True)
-    p.add_argument("--figdir", type=str, required=True)
+    p.add_argument("--npz", type=str, default=str(RESULTS_ROOT / "data/encoder_rep/representation/crossfamily/app3_summaries.npz"))
+    p.add_argument("--figdir", type=str, default=str(RESULTS_ROOT / "figures/encoder_rep/representation/crossfamily"))
     p.add_argument("--csv_out", type=str, default=None,
                    help="Where to write the geometry summary table.")
     p.add_argument("--seed", type=int, default=0,

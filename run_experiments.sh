@@ -52,28 +52,19 @@
 set -uo pipefail
 
 PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-# STUDY_ROOT is the directory every stage runs IN. All pipeline paths (./outputs, ./logs,
-# ./data, wandb's run dir) are cwd-relative, so a study other than the main one -- e.g.
-# outputs/gaussian-softmax, set up by experiments/setup_study.sh -- gets its own
-# outputs/, finals/ and logs/ without touching the main tree. Its ./study.env sets the
-# design generator (read by shared_config.sh). Default: the repo root, the main study.
-STUDY_ROOT="$(cd "${STUDY_ROOT:-$PROJECT_ROOT}" && pwd)" || { echo "STUDY_ROOT does not exist" >&2; exit 2; }
-cd "$STUDY_ROOT"
+cd "$PROJECT_ROOT"
 export PYTHONPATH="${PROJECT_ROOT}${PYTHONPATH:+:$PYTHONPATH}"
 source "${PROJECT_ROOT}/experiments/shared_config.sh" || exit 2
-# A non-default generator writing into the main tree would mix two training
-# distributions under one outputs/; a study root without study.env would silently run
-# the mixture generator. Refuse both.
-if [[ "$STUDY_ROOT" == "$PROJECT_ROOT" && "$DESIGN_GENERATOR" != mixture ]]; then
-    echo "DESIGN_GENERATOR=$DESIGN_GENERATOR in the main study root; use a STUDY_ROOT (experiments/setup_study.sh)" >&2
+if [[ "$STUDY_ROOT" == "$PROJECT_ROOT" ]]; then
+    echo "STUDY_ROOT must be a results directory, not the repository root" >&2
     exit 2
 fi
-if [[ "$STUDY_ROOT" != "$PROJECT_ROOT" && ! -f ./study.env ]]; then
+if [[ ! -f "$STUDY_ROOT/study.env" ]]; then
     echo "STUDY_ROOT=$STUDY_ROOT has no study.env; set it up with experiments/setup_study.sh" >&2
     exit 2
 fi
 # Exported for the record (stage logs, child shells); shared_config.py re-derives it
-# from ./study.env itself.
+# from the selected study's study.env itself.
 export DESIGN_GENERATOR
 GEN=(--design_generator "$DESIGN_GENERATOR")
 # Names and tags the e1_train wandb run (wandb-only; checkpoint names carry MC_TAG).
@@ -89,7 +80,7 @@ export MPLBACKEND=Agg
 export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
 export NCCL_P2P_DISABLE=1
 
-PY="${PY:-python}"
+PY="${PY:-${PROJECT_ROOT}/.venv/bin/python}"
 GPU0="${GPU0:-0}"
 GPU1="${GPU1:-1}"
 
@@ -97,8 +88,8 @@ GPU1="${GPU1:-1}"
 # MC_EPOCHS, MC_TRAIN_BATCH, MC_TAG, MC_CKPT_DIR and MC_CKPT all come from
 # shared_config.sh, derived from one another so the tag and filename cannot drift.
 
-FIG_MC="./outputs/figures/model_class/cf"
-DATA_MC="./outputs/data/model_class"
+FIG_MC="${RESULTS_ROOT}/figures/model_class/cf"
+DATA_MC="${RESULTS_ROOT}/data/model_class"
 # Canonical three-arm LBA tree, consolidated 2026-08-17. The older paths
 # (generalization/model_class_lba/cf/paired_zeroshot, cf/paired_orig,
 # lba_finetune/paired_ft) are SYMLINKS into these arms — do not "clean up" by
@@ -109,7 +100,7 @@ LBA_PAIRED="${FIG_MC}/${MC_TAG}_lba"
 
 # Amortization gap: where BF validation writes its per-case npz (the shared datasets
 # plus BF's posterior draws), read by model_family_c2st.
-BF_DATA_DIR="./outputs/data/model_family"
+BF_DATA_DIR="${RESULTS_ROOT}/data/model_family"
 
 FAMILIES=(ddm rdm cdm)
 # One seed for every validation arm that is later compared PAIRED (per-case vs
@@ -122,7 +113,7 @@ VAL_SEED=0
 # e3_zeroshot, e3_ft_validate and the BayesFlow baselines. Loading, not
 # re-seeding, is what pairs them: the seed pins parameters but NOT the RTs/choices
 # (numba RNG) or the regressor designs. Cases it lacks fall back to simulation.
-BENCH_DATA="./outputs/data/benchmark/seed${VAL_SEED}"
+BENCH_DATA="${RESULTS_ROOT}/data/benchmark/seed${VAL_SEED}"
 # Row layout of predictions scored from BENCH_DATA: the compact bench grid (intercept,
 # u_1, u_2, u_1:u_2), i.e. 2 categories. The C2ST scripts use it only to LABEL rows;
 # the training value (4) mislabels u_2 and u_1:u_2 as extra categories of u_1.
@@ -132,8 +123,9 @@ BENCH_MAX_CAT=2
 GAP_CASES=(intercept_only fixed regressed fixed_regressed interaction)
 
 RUN_ID="$(date +%Y%m%d_%H%M%S)${PIPELINE_LABEL:+_${PIPELINE_LABEL}}"
-LOG_DIR="logs/finals/${RUN_ID}"
+LOG_DIR="${RESULTS_ROOT}/logs/finals/${RUN_ID}"
 mkdir -p "$LOG_DIR"
+export WANDB_DIR="${RESULTS_ROOT}"
 
 USE_WANDB="${USE_WANDB:-$TRACK_WANDB}"
 WANDB=();  [[ "$USE_WANDB" == 1 ]] && WANDB=(--use_wandb)
@@ -315,7 +307,7 @@ marker_e1_benchmark() { echo "${FIG_MC}/${MC_TAG}_ensemble_benchmark"; }
 stage_e1_benchmark() {
     need "${DATA_MC}/${MC_TAG}_validate" "stage e1_validate" || return 1
     # --pred_dir pinned to the validate run's own directory. The script's DEFAULT
-    # is ./outputs/data/model_class/, a mixed-vintage tree — that default is how a
+    # is "${RESULTS_ROOT}/data/model_class/," a mixed-vintage tree — that default is how a
     # "current" figure gets built from stale predictions with no error at all.
     run "benchmark ensembles (bench5 / bench6 x 3 families)" -- \
         "$PY" -m experiments.experiment_1.model_class_cf_benchmark_ensemble \
@@ -326,7 +318,7 @@ stage_e1_benchmark() {
 
 # Scoped to MC_TAG: an untagged directory lets a result from any other checkpoint
 # satisfy the marker and be copied into finals as this run's.
-DESIGN_OPT_DIR="./outputs/data/design_opt/${MC_TAG}/ddm"
+DESIGN_OPT_DIR="${RESULTS_ROOT}/data/design_opt/${MC_TAG}/ddm"
 marker_e1_design_eig() { echo "${DESIGN_OPT_DIR}/design_eig.csv"; }
 stage_e1_design_eig() {
     need "${MC_CKPT}.done" "stage e1_train" || return 1
@@ -374,7 +366,7 @@ stage_e1a_bf() {
                 echo "    · ${fam}/${case}: validated npz exists, skipped"; continue
             fi
             if [[ "${BF_REUSE_CHECKPOINTS:-0}" == 1 ]]; then
-                need "./outputs/checkpoints/model_family/bf/${fam}/${fam}_families_bf_${case}/model.keras" "copied compatible Gaussian-softmax BF checkpoint" || return 1
+                need "${RESULTS_ROOT}/checkpoints/model_family/bf/${fam}/${fam}_families_bf_${case}/model.keras" "copied compatible Gaussian-softmax BF checkpoint" || return 1
                 echo "    · ${fam}/${case}: reusing BF weights; evaluating this study's datasets"
             else
                 run "BF baseline train ${fam}/${case}" -- \
@@ -396,7 +388,7 @@ stage_e1a_bf() {
     done
 }
 
-marker_e1a_c2st() { echo "./outputs/figures/c2st/rdm/rdm_c2st_summary.csv"; }
+marker_e1a_c2st() { echo "${RESULTS_ROOT}/figures/c2st/rdm/rdm_c2st_summary.csv"; }
 stage_e1a_c2st() {
     # The CogFormer side is e1_validate's predictions: it scored the SAME shared
     # benchmark files as the baselines, so no separate paired run is needed.
@@ -438,7 +430,7 @@ stage_e1a_finalize() {
 # and one that does not exist for RDM at all. Two of the three MF checkpoints named
 # in shared_config.sh are absent from disk, so a run.sh-style "apply everything"
 # stage here would fail on inputs the finals tree does not even want.
-marker_e2_apply() { echo "./outputs/data/real_data/cdm/mc"; }
+marker_e2_apply() { echo "${RESULTS_ROOT}/data/real_data/cdm/mc"; }
 stage_e2_apply() {
     need "${MC_CKPT}.done" "stage e1_train" || return 1
     need "./data" "the empirical datasets (not produced by this pipeline)" || return 1
@@ -461,7 +453,7 @@ stage_e2_apply() {
 # Marker is the LAST variant produced, not ppc/cdm: the canonical loop and the
 # constrained variants are one stage, so a marker satisfied halfway through would
 # report the stage done with the variants missing.
-marker_e2_refit_svfix() { echo "./outputs/data/real_data/ddm/mc_sv_fixed/ddm_mc_posteriors.npz"; }
+marker_e2_refit_svfix() { echo "${RESULTS_ROOT}/data/real_data/ddm/mc_sv_fixed/ddm_mc_posteriors.npz"; }
 stage_e2_refit_svfix() {
     need "${MC_CKPT}.done" "stage e1_train" || return 1
     need "./data/data_application_ddm.csv" "the empirical DDM dataset (not produced here)" || return 1
@@ -485,9 +477,9 @@ stage_e2_refit_svfix() {
             --max_num_regressors "$MC_MAX_REG" --max_num_categories "$MC_MAX_CAT"
 }
 
-marker_e2_ppc() { echo "./outputs/figures/real_data/ppc/combined_ppc.pdf"; }
+marker_e2_ppc() { echo "${RESULTS_ROOT}/figures/real_data/ppc/combined_ppc.pdf"; }
 stage_e2_ppc() {
-    need "./outputs/data/real_data" "stage e2_apply" || return 1
+    need "${RESULTS_ROOT}/data/real_data" "stage e2_apply" || return 1
     for fam in "${FAMILIES[@]}"; do
         run "posterior predictive checks — ${fam} (mc)" -- \
             "$PY" -m experiments.experiment_2.ppc \
@@ -502,7 +494,7 @@ stage_e2_ppc() {
         "$PY" -m experiments.experiment_2.ppc \
             --model cdm --variant mc \
             --fix_natural "s_v=0.0" \
-            --outdir ./outputs/figures/real_data/ppc/cdm_sv0 \
+            --outdir "${RESULTS_ROOT}/figures/real_data/ppc/cdm_sv0" \
             --max_num_regressors "$MC_MAX_REG" \
             --max_num_categories "$MC_MAX_CAT" || return 1
     # Matches the ORIGINAL DDM specification: Stump et al. (2026) has no across-trial
@@ -512,20 +504,20 @@ stage_e2_ppc() {
         "$PY" -m experiments.experiment_2.ppc \
             --model ddm --variant mc \
             --fix_natural "s_v=0.0" \
-            --outdir ./outputs/figures/real_data/ppc/ddm_sv0 \
+            --outdir "${RESULTS_ROOT}/figures/real_data/ppc/ddm_sv0" \
             --max_num_regressors "$MC_MAX_REG" \
             --max_num_categories "$MC_MAX_CAT" || return 1
     # The REFIT's PPC. --fix_natural is REQUIRED here even though s_v was fixed at
     # fitting time: a parameter absent from the design has its coefficients masked to
     # zero, and ppc.py still applies the link -- shifted_softplus(0) = 0.693, not 0.
     # Without it this would silently simulate s_v at 0.693.
-    if [[ -f ./outputs/data/real_data/ddm/mc_sv_fixed/ddm_mc_posteriors.npz ]]; then
+    if [[ -f "${RESULTS_ROOT}/data/real_data/ddm/mc_sv_fixed/ddm_mc_posteriors.npz" ]]; then
         run "PPC — ddm refit, s_v fixed at fitting (original specification)" -- \
             "$PY" -m experiments.experiment_2.ppc \
                 --model ddm --variant mc \
-                --posteriors ./outputs/data/real_data/ddm/mc_sv_fixed/ddm_mc_posteriors.npz \
+                --posteriors "${RESULTS_ROOT}/data/real_data/ddm/mc_sv_fixed/ddm_mc_posteriors.npz" \
                 --fix_natural "s_v=0.0" \
-                --outdir ./outputs/figures/real_data/ppc/ddm_sv_fixed \
+                --outdir "${RESULTS_ROOT}/figures/real_data/ppc/ddm_sv_fixed" \
                 --max_num_regressors "$MC_MAX_REG" \
                 --max_num_categories "$MC_MAX_CAT"
     else
@@ -707,7 +699,7 @@ stage_e3_bf() {
             echo "    · lba/${case}: validated npz exists, skipped"; continue
         fi
         if [[ "${BF_REUSE_CHECKPOINTS:-0}" == 1 ]]; then
-            need "./outputs/checkpoints/model_family/bf/lba/lba_families_bf_${case}/model.keras" "copied compatible Gaussian-softmax BF checkpoint" || return 1
+            need "${RESULTS_ROOT}/checkpoints/model_family/bf/lba/lba_families_bf_${case}/model.keras" "copied compatible Gaussian-softmax BF checkpoint" || return 1
             echo "    · lba/${case}: reusing BF weights; evaluating this study's datasets"
         else
             run "BF baseline train lba/${case}" -- \
@@ -725,7 +717,7 @@ stage_e3_bf() {
     done
 }
 
-marker_e3_gap_c2st() { echo "./outputs/figures/c2st/lba/lba_c2st_summary.csv"; }
+marker_e3_gap_c2st() { echo "${RESULTS_ROOT}/figures/c2st/lba/lba_c2st_summary.csv"; }
 stage_e3_gap_c2st() {
     need "${BF_DATA_DIR}/lba_interaction_data.npz" "stage e3_bf" || return 1
     need "${LBA_PAIRED}/finetuned/predictions" "stage e3_ft_validate" || return 1
@@ -764,8 +756,8 @@ stage_e3_paired_c2st() {
 # 266 ms to 18 ms while keeping the observed Speed-Accuracy gap. Lexicality needs no
 # regressor under stimulus coding -- it reaches the model as favored_idx.
 LBA_RD_DESIGN="condition_only"
-LBA_RD_POST="./outputs/data/real_data/lba_stim_cond/mc/lba_mc_posteriors.npz"
-LBA_RD_PPC="./outputs/figures/real_data/ppc/lba_stim_cond"
+LBA_RD_POST="${RESULTS_ROOT}/data/real_data/lba_stim_cond/mc/lba_mc_posteriors.npz"
+LBA_RD_PPC="${RESULTS_ROOT}/figures/real_data/ppc/lba_stim_cond"
 
 marker_e3_ppc_apply() { echo "$LBA_RD_POST"; }
 stage_e3_ppc_apply() {
@@ -864,9 +856,9 @@ E4_VARIANT=(--case intercept_only --first_fixation item0 --fix_v --fix_s_v)
 E4_TAG="vsvfixed_e500"                 # baseline arm's run tag
 E4_EPOCHS=500                          # == the budget both arms were matched at
 E4_VAL=(--val_batch_size 500 --num_samples 500 --sample_chunk_size 50)
-E4_DATA="./outputs/data/encoder_rep"
-E4_FIG="./outputs/figures/encoder_rep"
-E4_BASELINE_CKPT="./outputs/checkpoints/encoder_rep/bf_baseline/addm_vsvfixed/intercept_only/item0_${E4_TAG}/addm_baseline_fm/model.keras"
+E4_DATA="${RESULTS_ROOT}/data/encoder_rep"
+E4_FIG="${RESULTS_ROOT}/figures/encoder_rep"
+E4_BASELINE_CKPT="${RESULTS_ROOT}/checkpoints/encoder_rep/bf_baseline/addm_vsvfixed/intercept_only/item0_${E4_TAG}/addm_baseline_fm/model.keras"
 
 marker_e4_probe() { echo "${E4_DATA}/addm_vsvfixed/intercept_only/addm_encoder_rep_data.npz"; }
 stage_e4_probe() {

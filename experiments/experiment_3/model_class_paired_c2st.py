@@ -59,6 +59,8 @@ one arm (h = num_draws // 2), and ``c2st_real_matched`` uses orig draws[:h] vs f
 draws[:h]. ``c2st_real_full`` additionally uses all draws on both sides for maximum
 power, but is not comparable to the null and is reported for reference only.
 """
+from experiments.paths import RESULTS_ROOT
+from experiments import shared_config
 
 import argparse
 import itertools
@@ -340,7 +342,7 @@ def parse_args():
     p = argparse.ArgumentParser(
         description="Paired C2ST: original vs LBA-finetuned checkpoint (forgetting arm)."
     )
-    base = "./outputs/figures/model_class/cf/paired_lba_20260816"
+    base = str(RESULTS_ROOT / "figures/model_class/cf" / f"{shared_config.get('MC_TAG')}_lba")
     p.add_argument("--orig_dir", type=str, default=f"{base}/original/predictions")
     p.add_argument("--ft_dir", type=str, default=f"{base}/finetuned/predictions")
     p.add_argument("--orig_suffix", type=str, default="_cf_pred.npz")

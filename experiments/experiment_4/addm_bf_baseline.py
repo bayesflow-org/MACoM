@@ -44,6 +44,7 @@ The arms are matched on training budget and on per-trial inputs, NOT on
 parameter count. Write it up as "each arm at its library's recommended
 defaults, same data budget" -- not as "capacity-matched to CogFormer".
 """
+from experiments.paths import RESULTS_ROOT
 import os
 
 os.environ["KERAS_BACKEND"] = "torch"
@@ -219,8 +220,8 @@ MAX_NUM_CATEGORIES = 4
 MAX_ALTERNATIVES = 4
 NUM_ALTERNATIVES = 2
 
-CKPT_DIR = Path("./outputs/checkpoints/encoder_rep/bf_baseline/addm")
-FIGURES_DIR = Path("./outputs/figures/encoder_rep/addm_baseline")
+CKPT_DIR = (RESULTS_ROOT / "checkpoints/encoder_rep/bf_baseline/addm")
+FIGURES_DIR = (RESULTS_ROOT / "figures/encoder_rep/addm_baseline")
 
 # Left deliberately empty: BayesFlow's own defaults are the configuration under
 # test here. See module docstring, NETWORK CONFIGURATION.

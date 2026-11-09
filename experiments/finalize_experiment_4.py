@@ -16,6 +16,7 @@ than a consequence of which flags a run happened to pass.
 
     python -m experiments.finalize_experiment_4 --dry_run
 """
+from experiments.paths import RESULTS_ROOT
 import argparse
 import shutil
 import subprocess
@@ -24,9 +25,9 @@ from pathlib import Path
 
 import pandas as pd
 
-FINALS = Path("outputs/finals/experiment-4")
-DATA = Path("outputs/data/encoder_rep")
-FIG = Path("outputs/figures/encoder_rep")
+FINALS = (RESULTS_ROOT / "finals/experiment-4")
+DATA = (RESULTS_ROOT / "data/encoder_rep")
+FIG = (RESULTS_ROOT / "figures/encoder_rep")
 
 # FINAL SCOPE (2026-09-27): the 5-parameter vsvfixed aDDM (v and s_v pinned) and the
 # 5-family pooled geometry. The other variants are out of the paper.

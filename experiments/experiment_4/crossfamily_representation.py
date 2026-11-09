@@ -33,6 +33,7 @@ All families are simulated at the same case (intercept-only), num_obs and regres
 budget. Without that, a family difference in the design distribution would masquerade
 as a difference in representational geometry.
 """
+from experiments.paths import RESULTS_ROOT
 import os
 os.environ.setdefault("KERAS_BACKEND", "torch")
 
@@ -85,8 +86,8 @@ COLORS = {f: FAMILY_PALETTES[f]()["main_effect"] for f in ("ddm", "rdm", "cdm", 
 COLORS["addm"] = "#0E7C86"
 MARKERS = {f: ("D" if f in HELD_OUT else "o") for f in POOLED}
 
-OUT = Path("./outputs/data/encoder_rep/representation/crossfamily")
-FIG = Path("./outputs/figures/encoder_rep/representation/crossfamily")
+OUT = (RESULTS_ROOT / "data/encoder_rep/representation/crossfamily")
+FIG = (RESULTS_ROOT / "figures/encoder_rep/representation/crossfamily")
 
 SPECS = {
     "ddm":  (DDM,  ddm_priors,  ddm_link_fun),

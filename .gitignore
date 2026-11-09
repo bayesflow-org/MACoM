@@ -237,12 +237,16 @@ outputs/data/benchmark/*
 !outputs/data/benchmark/seed0/
 outputs/timing/
 outputs/logs/
-# Ignore figures except real_data and model_class/cf. A negation cannot
+# Keep the final study's source figure and C2ST trees. A negation cannot
 # re-include a path whose parent directory is excluded, so the model_class
 # parent must be unignored first and its other children re-ignored.
 outputs/figures/*
 !outputs/figures/real_data
 !outputs/figures/encoder_rep
+!outputs/figures/c2st/
+!outputs/figures/model_family/
+outputs/figures/model_family/*
+!outputs/figures/model_family/bf/
 !outputs/figures/model_class/
 outputs/figures/model_class/*
 !outputs/figures/model_class/cf
@@ -273,23 +277,26 @@ cogformer/utils/fonts/*.otf
 # macOS Finder metadata
 .DS_Store
 
-# Study roots (experiments/setup_study.sh) mirror the whole tree one level down, at
-# outputs/<study>/outputs/..., where the anchored rules above do not reach -- that is
-# how the gaussian-softmax study's checkpoints and PPC caches (1.1 GB) got staged.
+# Study roots store results directly under outputs/<study>/, where the
+# repository-level rules above do not reach.
 # A study's results live in its finals/, figures/ and evaluations/; its checkpoints
-# and data stay local, except for the original October 26 checkpoint below.
-outputs/*/outputs/checkpoints/
-outputs/*/outputs/data/
-outputs/*/outputs/timing/
-outputs/*/outputs/logs/
+# and data stay local, except for the retained pretrained checkpoint below.
+outputs/*/checkpoints/
+outputs/*/data/
+outputs/*/timing/
+outputs/*/logs/
 outputs/*/superseded_copies_of_main/
 
 # Experiment diagnostics, including scripts, reports, and generated artifacts, stay local.
 /experiments/diagnostics/
 /outputs/diagnostics/
-/outputs/*/outputs/diagnostics/
+/outputs/*/diagnostics/
 
 # Local run checks, frozen source copies, and continuation scheduler state.
+/outputs/checks/
+/outputs/source_snapshot/
+/outputs/source_changes.patch
+/outputs/continuation/
 /outputs/*/checks/
 /outputs/*/source_snapshot/
 /outputs/*/source_changes.patch
@@ -307,12 +314,12 @@ outputs/*/superseded_copies_of_main/
 
 # Preserve the original October 26 pretrained checkpoint, including AdamW and
 # scheduler state. Keep all other checkpoints in this study ignored.
-!outputs/10-26-2026/outputs/checkpoints/
-outputs/10-26-2026/outputs/checkpoints/*
-!outputs/10-26-2026/outputs/checkpoints/model_class/
-outputs/10-26-2026/outputs/checkpoints/model_class/*
-!outputs/10-26-2026/outputs/checkpoints/model_class/cf/
-outputs/10-26-2026/outputs/checkpoints/model_class/cf/*
-!outputs/10-26-2026/outputs/checkpoints/model_class/cf/r4c4_enc128h4l4_a0.5_b128_e15000_ptc_gaussian_softmax_intoptional_beta22_encstruct/
-outputs/10-26-2026/outputs/checkpoints/model_class/cf/r4c4_enc128h4l4_a0.5_b128_e15000_ptc_gaussian_softmax_intoptional_beta22_encstruct/*
-!outputs/10-26-2026/outputs/checkpoints/model_class/cf/r4c4_enc128h4l4_a0.5_b128_e15000_ptc_gaussian_softmax_intoptional_beta22_encstruct/cogformer_model_class_fm_l8_h8_p256_s32_d128_b128_e15000_t100_intoptional_beta22_encstruct.pt
+!outputs/checkpoints/
+outputs/checkpoints/*
+!outputs/checkpoints/model_class/
+outputs/checkpoints/model_class/*
+!outputs/checkpoints/model_class/cf/
+outputs/checkpoints/model_class/cf/*
+!outputs/checkpoints/model_class/cf/r4c4_enc128h4l4_a0.5_b128_e15000_ptc_gaussian_softmax_intoptional_beta22_encstruct/
+outputs/checkpoints/model_class/cf/r4c4_enc128h4l4_a0.5_b128_e15000_ptc_gaussian_softmax_intoptional_beta22_encstruct/*
+!outputs/checkpoints/model_class/cf/r4c4_enc128h4l4_a0.5_b128_e15000_ptc_gaussian_softmax_intoptional_beta22_encstruct/cogformer_model_class_fm_l8_h8_p256_s32_d128_b128_e15000_t100_intoptional_beta22_encstruct.pt

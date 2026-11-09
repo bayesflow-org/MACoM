@@ -11,6 +11,7 @@ lost this parameter" from "the likelihood never carried it". A parameter with
 near-zero contraction has a posterior no narrower than its prior, which is an
 identifiability statement, not a representation failure.
 """
+from experiments.paths import RESULTS_ROOT
 import argparse
 import inspect
 import logging
@@ -87,6 +88,32 @@ def active_labels(mask_row):
     return plain, pretty
 
 
+def layout_calibration(fig, label_fontsize=13, legend_fontsize=10):
+    """Place a shared x label and legend below the five calibration panels."""
+    axes = fig.axes
+    handles, labels = axes[0].get_legend_handles_labels()
+    xlabel = axes[0].get_xlabel()
+    for ax in axes:
+        ax.set_xlabel("")
+        legend = ax.get_legend()
+        if legend is not None:
+            legend.remove()
+    # Measure the text rather than reserving a fraction of a shallow figure:
+    # the shared label and legend need distinct rows below the tick labels.
+    fig.tight_layout(w_pad=2.0)
+    fig.canvas.draw()
+    renderer = fig.canvas.get_renderer()
+    gap = 6 * fig.dpi / 72
+    bottom = min(ax.get_tightbbox(renderer).y0 for ax in axes)
+    label = fig.supxlabel(xlabel, y=(bottom - gap) / fig.bbox.height,
+                          va="top", fontsize=label_fontsize)
+    fig.canvas.draw()
+    legend_top = (label.get_window_extent(renderer).y0 - gap) / fig.bbox.height
+    fig.legend(handles, labels, loc="upper center", bbox_to_anchor=(0.5, legend_top),
+               ncol=len(handles), fontsize=legend_fontsize, frameon=False,
+               borderaxespad=0)
+
+
 def parse_args():
     p = argparse.ArgumentParser()
     # addm_bf_apply.py writes to DATA_DIR (outputs/data/...), NOT to FIGURES_DIR.
@@ -99,15 +126,18 @@ def parse_args():
     p.add_argument("--label_fs", type=float, default=13)
     p.add_argument("--metric_fs", type=float, default=11)
     p.add_argument("--tick_fs", type=float, default=11)
+    p.add_argument("--legend_fs", type=float, default=10)
     p.add_argument("--markersize", type=float, default=2.5)
     p.add_argument("--elinewidth", type=float, default=1.0,
                    help="Error-bar line width for the plots that draw them.")
     p.add_argument("--data", type=str,
-                   default="./outputs/data/encoder_rep/addm/intercept_only/"
-                           "addm_encoder_rep_data.npz")
+                   default=str(RESULTS_ROOT / "data/encoder_rep/addm_vsvfixed/intercept_only/"
+                           "addm_encoder_rep_data.npz"))
     p.add_argument("--outdir", type=str, default=None,
                    help="Defaults to the directory holding --data.")
     p.add_argument("--case", type=str, default="intercept_only")
+    p.add_argument("--plots", nargs="+", choices=list(plots_for("frozen")), default=None,
+                   help="Diagnostics to redraw (default: all four).")
     p.add_argument("--skip_metrics", action="store_true",
                    help="Redraw the figures only, leaving the bf_metrics CSV alone. Use "
                         "when RE-plotting: recomputing nrmse from the stored draws "
@@ -148,6 +178,8 @@ def main():
 
     prefix = ARM_PREFIX[args.arm]
     for name, (fn, color_kwargs) in plots_for(args.arm).items():
+        if args.plots is not None and name not in args.plots:
+            continue
         # Some BayesFlow plotters size their axis grid independently of the
         # variable count and then iterate every axis, which for 7 params builds
         # 2x4=8 panels and indexes past the end. Pin the layout to one row.
@@ -164,6 +196,7 @@ def main():
         wanted = dict(figsize=(args.fig_width, args.fig_width / n_params * 1.15),
                       label_fontsize=args.label_fs, title_fontsize=args.title_fs,
                       metric_fontsize=args.metric_fs, tick_fontsize=args.tick_fs,
+                      legend_fontsize=args.legend_fs,
                       markersize=args.markersize)
         params = inspect.signature(fn).parameters
         accepted = set(params)
@@ -175,8 +208,20 @@ def main():
                           for q in params.values())
         if takes_extra and args.elinewidth is not None and name in _ERRORBAR_PLOTS:
             style_kwargs["elinewidth"] = args.elinewidth
-        fig = fn(estimates=estimates, targets=targets, variable_names=names,
-                 num_row=1, num_col=n_params, **style_kwargs, **color_kwargs)
+        # The simultaneous ECDF reference band is simulated. Use the same seed
+        # for both arms and repeat redraws, without advancing the caller's RNG.
+        rng_state = np.random.get_state() if name == "calibration_ecdf" else None
+        try:
+            if rng_state is not None:
+                np.random.seed(0)
+            fig = fn(estimates=estimates, targets=targets, variable_names=names,
+                     num_row=1, num_col=n_params, **style_kwargs, **color_kwargs)
+        finally:
+            if rng_state is not None:
+                np.random.set_state(rng_state)
+        if name in {"calibration_ecdf", "coverage"}:
+            layout_calibration(fig, label_fontsize=args.label_fs,
+                               legend_fontsize=args.legend_fs)
         path = outdir / f"{prefix}_{args.case}_{name}.pdf"
         fig.savefig(path, bbox_inches="tight")
         plt.close(fig)

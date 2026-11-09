@@ -17,6 +17,7 @@ counts come from the benchmark configs and are checked against the saved masks.
 
     python -m experiments.experiment_3.appendix_captions
 """
+from experiments.paths import INPUT_DATA_ROOT, RESULTS_ROOT
 from pathlib import Path
 
 import numpy as np
@@ -27,7 +28,7 @@ from experiments.experiment_1.appendix_captions import KINDS, PANEL, label as mi
 from experiments.experiment_1a.appendix_captions import (CASE_NAMES, N_DATASETS, N_DRAWS, N_TRIALS,
                                                          design_sentence, label as label_1a, names)
 
-FINALS = Path("outputs/finals/experiment-3")
+FINALS = (RESULTS_ROOT / "finals/experiment-3")
 OUT = FINALS / "captions.tex"
 PRED = FINALS / "predictions"
 BENCH = ["intercept_only", "fixed", "regressed", "fixed_regressed", "interaction"]
@@ -196,7 +197,7 @@ def paired(paths, caption, lab, names_=None):
 
 def realdata_counts():
     from experiments.experiment_2.data_utils import load_lba_data
-    data, ids = load_lba_data("data/data_application_lba.csv")
+    data, ids = load_lba_data(str(INPUT_DATA_ROOT / "data_application_lba.csv"))
     n = np.array([len(data[s]["rts"]) for s in ids])
     post = np.load(FINALS / "ppc" / "posteriors.npz", allow_pickle=True)["posteriors"]
     if post.shape[0] != len(ids):
@@ -321,7 +322,7 @@ def write_tables():
 
     # T2: LBA absolute metrics, both arms from the SAME metric code (repo adaptive_metrics),
     # plus the BayesFlow-convention NRMSE from the saved posteriors for both arms.
-    bf_fig = Path("outputs/figures/model_family/bf/lba")
+    bf_fig = (RESULTS_ROOT / "figures/model_family/bf/lba")
     arm = {"bf": [], "cf": []}
     for c in BENCH:
         b = pd.concat([pd.read_csv(bf_fig / c / f"lba_family_{c}_bf_metrics.csv", index_col=0),
@@ -330,7 +331,7 @@ def write_tables():
                         pd.read_csv(FINALS / "finetuned" / "lba" / c / "metrics_pi.csv", index_col=0)])
         if len(b) != len(f_):
             raise SystemExit(f"lba/{c}: baseline {len(b)} vs fine-tuned {len(f_)} parameters")
-        B_ = np.load(f"outputs/data/model_family/lba_{c}_data.npz")
+        B_ = np.load(str(RESULTS_ROOT / f"data/model_family/lba_{c}_data.npz"))
         act = B_["param_masks"][0].astype(bool)
         F_ = np.load(PRED / PRED_FILE["finetuned"].format(fam="lba", case=c))
         m = (F_["params_mask"][0] if F_["params_mask"].ndim == 3 else F_["params_mask"]) == 1

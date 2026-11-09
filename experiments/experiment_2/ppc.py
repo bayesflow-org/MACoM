@@ -9,6 +9,7 @@ Usage:
     python -m experiments.experiment_2.ppc --model cdm --variant mc
     python -m experiments.experiment_2.ppc --model rdm --variant mf
 """
+from experiments.paths import INPUT_DATA_ROOT, RESULTS_ROOT
 import argparse
 import hashlib
 import json
@@ -40,9 +41,9 @@ from .data_utils import (
     build_real_design_matrix, build_real_param_mask,
 )
 
-DATA_DIR = Path("./outputs/data/real_data")
-FIG_DIR = Path("./outputs/figures/real_data/ppc")
-CACHE_DIR = Path("./outputs/data/real_data/ppc_cache")
+DATA_DIR = (RESULTS_ROOT / "data/real_data")
+FIG_DIR = (RESULTS_ROOT / "figures/real_data/ppc")
+CACHE_DIR = (RESULTS_ROOT / "data/real_data/ppc_cache")
 
 # Encoder design geometry. MUST match the checkpoint that produced the posteriors
 # (r5c5 for the 2026-06-02 npz, r4c4 for the model_class r4c4 checkpoint). A mismatch
@@ -102,7 +103,7 @@ LBA_CONDITIONS = [
 MODEL_REGISTRY = {
     "ddm": {
         "loader":        load_ddm_data,
-        "data_path":     "./data/data_application_ddm.csv",
+        "data_path":     str(INPUT_DATA_ROOT / "data_application_ddm.csv"),
         "design_config": DDM_DESIGN_CONFIG,
         "model_cls":     DDM,
         "link_fun":      ddm_link_fun,
@@ -114,7 +115,7 @@ MODEL_REGISTRY = {
     },
     "rdm": {
         "loader":        load_rdm_data,
-        "data_path":     "./data/data_application_rdm.csv",
+        "data_path":     str(INPUT_DATA_ROOT / "data_application_rdm.csv"),
         "design_config": RDM_DESIGN_CONFIG,
         "model_cls":     RDM,
         "link_fun":      rdm_link_fun,
@@ -129,7 +130,7 @@ MODEL_REGISTRY = {
     },
     "cdm": {
         "loader":        load_cdm_data,
-        "data_path":     "./data/data_application_cdm.csv",
+        "data_path":     str(INPUT_DATA_ROOT / "data_application_cdm.csv"),
         "design_config": CDM_DESIGN_CONFIG,
         "model_cls":     CDM,
         "link_fun":      cdm_link_fun,
@@ -140,7 +141,7 @@ MODEL_REGISTRY = {
     },
     "lba": {
         "loader":        load_lba_data,
-        "data_path":     "./data/data_application_lba.csv",
+        "data_path":     str(INPUT_DATA_ROOT / "data_application_lba.csv"),
         "design_config": LBA_DESIGN_CONFIG,
         "model_cls":     LBA,
         # fixed_A MUST match the checkpoint the posteriors came from. Without it `a`

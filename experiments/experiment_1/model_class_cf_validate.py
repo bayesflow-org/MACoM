@@ -1,3 +1,4 @@
+from experiments.paths import RESULTS_ROOT
 import argparse
 import logging
 from pathlib import Path
@@ -64,7 +65,7 @@ def infer_mask_randomizer_kwargs(design_config, all_intrinsics, default_fixed_va
 def parse_args():
     p = argparse.ArgumentParser()
     p.add_argument("--checkpoint", type=str, required=True)
-    p.add_argument("--outdir", type=str, default="./outputs/figures/model_class/cf/")
+    p.add_argument("--outdir", type=str, default=str(RESULTS_ROOT / "figures/model_class/cf/"))
     p.add_argument("--pred_dir", type=str, default=None,
                    help="Where prediction .npz files go. Defaults to <outdir>/predictions so a single "
                         "--outdir keeps figures and predictions together; pass explicitly to "

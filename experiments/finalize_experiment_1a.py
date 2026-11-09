@@ -34,6 +34,7 @@ partial rebuild never silently shrinks the record.
     python -m experiments.finalize_experiment_1a --dry_run
     python -m experiments.finalize_experiment_1a
 """
+from experiments.paths import RESULTS_ROOT
 import argparse
 import shutil
 from datetime import datetime, timezone
@@ -46,13 +47,13 @@ import pandas as pd
 from experiments.finalize_experiment_1 import git_commit, kept, tidy
 from experiments import shared_config
 
-FINALS = Path("outputs/finals/experiment-1a")
-C2ST = Path("outputs/figures/c2st")
-BF_FIG = Path("outputs/figures/model_family/bf")
-BF_EVAL = Path("outputs/evaluations/model_family/bf")
+FINALS = (RESULTS_ROOT / "finals/experiment-1a")
+C2ST = (RESULTS_ROOT / "figures/c2st")
+BF_FIG = (RESULTS_ROOT / "figures/model_family/bf")
+BF_EVAL = (RESULTS_ROOT / "evaluations/model_family/bf")
 # The CogFormer arm is experiment 1's per-case validation: it scores the same shared
 # benchmark files as the baselines (e1_data), so no separate paired run exists.
-CF_PAIRED = Path("outputs/figures/model_class/cf") / f"{shared_config.get('MC_TAG')}_validate"
+CF_PAIRED = (RESULTS_ROOT / "figures/model_class/cf") / f"{shared_config.get('MC_TAG')}_validate"
 
 FAMILIES = ["ddm", "rdm", "cdm"]
 # bench5. model_family_c2st drops "full", and the BF baselines were never trained on

@@ -1,13 +1,13 @@
 index,family,label,categorical_regressors,cells[1],cells[u_1],cells[u_2],cells[u_1:u_2]
-0,DDM,DDM | 1,u_2,"v,a,z,tau,s_v,s_tau,pi","v,z,tau,s_v","v,z,tau,s_tau","v,z,tau"
-1,DDM,DDM | 2,u_2,"v,a,z,tau,s_v,s_tau,pi","v,tau,s_tau","v,a,tau,s_v,s_tau","v,tau,s_tau"
-2,DDM,DDM | 3,,"v,a,z,tau,s_tau,pi","v,a,z,tau,s_tau",a,a
-3,DDM,DDM | 4,u_1,"v,a,z,tau,s_v,s_tau,pi","z,s_v","v,a,z,s_v,s_tau","z,s_v"
-4,RDM,RDM | 1,,"v,v_diff,a,tau,s_v,pi","v,v_diff,a,tau,s_v","v_diff,a,tau","v_diff,a,tau"
-5,RDM,RDM | 2,u_2,"v,v_diff,a,tau,s_v,pi","v,v_diff,tau","v,v_diff,a","v,v_diff"
-6,RDM,RDM | 3,u_2,"v,v_diff,a,tau,s_v,s_tau,pi","a,s_v,s_tau","v,a,s_v,s_tau","a,s_v,s_tau"
-7,RDM,RDM | 4,u_2,"v,v_diff,a,tau,pi","v_diff,tau","v_diff,a,tau","v_diff,tau"
-8,CDM,CDM | 1,,"v,v_theta,a,tau,s_v,s_tau,pi","v_theta,s_v,s_tau","v,v_theta,tau,s_v,s_tau","v_theta,s_v,s_tau"
-9,CDM,CDM | 2,u_1;u_2,"v,v_theta,a,tau,pi","v_theta,a",a,a
-10,CDM,CDM | 3,,"v,v_theta,a,tau,s_v,s_tau,pi","v,v_theta,a,s_tau","v,a,s_v","v,a"
-11,CDM,CDM | 4,u_1;u_2,"v,v_theta,a,tau,s_v,s_tau,pi","v,a,tau","v,a,tau","v,a,tau"
+0,DDM,DDM | 1,u_1;u_2,"v,a,z,tau,s_tau,pi","v,a,z,tau","v,z,tau,s_tau","z,tau"
+1,DDM,DDM | 2,u_1;u_2,"v,a,z,tau,pi","z,tau","v,z",
+2,DDM,DDM | 3,u_1,"v,a,z,tau,pi","a,tau",tau,
+3,DDM,DDM | 4,u_1,"v,a,z,tau,s_v,s_tau,pi","v,a,tau,s_v,s_tau","v,a,tau,s_v,s_tau","v,a,tau,s_v,s_tau"
+4,RDM,RDM | 1,u_1;u_2,"v,v_diff,a,tau,pi","v,v_diff,a","v,v_diff,a","v,v_diff,a"
+5,RDM,RDM | 2,u_1,"v,v_diff,a,tau,s_v,pi","v,v_diff,a,tau,s_v",v_diff,
+6,RDM,RDM | 3,u_1;u_2,"v,v_diff,a,tau,s_v,s_tau,pi","a,tau,s_v,s_tau","a,tau,s_v,s_tau","a,tau,s_v,s_tau"
+7,RDM,RDM | 4,u_2,"v,v_diff,a,tau,s_v,s_tau,pi","a,tau,s_v,s_tau","v_diff,s_v",s_v
+8,CDM,CDM | 1,,"v,v_theta,a,tau,pi","v,a,tau","v,a,tau","v,a,tau"
+9,CDM,CDM | 2,u_2,"v,v_theta,a,tau,s_v,s_tau,pi","v,v_theta,a,s_v,s_tau","v,v_theta,a,s_v","v,v_theta,a,s_v"
+10,CDM,CDM | 3,u_1,"v,v_theta,a,tau,s_v,s_tau,pi","v_theta,tau",v_theta,
+11,CDM,CDM | 4,,"v,v_theta,a,tau,s_tau,pi","v_theta,a,s_tau","v,a,s_tau","a,s_tau"

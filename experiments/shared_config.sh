@@ -3,6 +3,13 @@
 # pipeline (run_experiments.sh). Source this file; do not execute it directly.
 # experiments/shared_config.py reads the same values for the Python assemblers.
 
+PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+STUDY_ROOT="${STUDY_ROOT:-${PROJECT_ROOT}/outputs}"
+[[ "$STUDY_ROOT" == /* ]] || STUDY_ROOT="${PROJECT_ROOT}/${STUDY_ROOT}"
+STUDY_ROOT="$(realpath -m "$STUDY_ROOT")"
+export STUDY_ROOT
+export RESULTS_ROOT="$STUDY_ROOT"
+
 # ── Architecture ───────────────────────────────────────────────────────────────
 # Encoder matched to the BayesFlow baselines' SetTransformer summary network (width 128,
 # 4 heads of 32, 4 blocks; adopted 2026-10-03 from the arch A/B, logs/arch_ab.sh): it
@@ -66,14 +73,8 @@ LBA_FT_EPOCHS=1000
 SIM_BACKEND=gpu
 
 # ── Design generator (study identity) ──────────────────────────────────────────
-# Which design-matrix generator CogFormer trains and is evaluated on (see
-# design_utils.build_design_matrix). A study is a directory the pipeline runs IN
-# (run_experiments.sh's STUDY_ROOT); a study other than the main one carries a
-# ./study.env that sets DESIGN_GENERATOR, so every process whose cwd is that study --
-# the orchestrator and the finalize scripts' shared_config.py alike -- resolves the
-# same generator and MC_TAG without anything being exported by hand. The repo root has
-# no study.env, so the main study is the mixture generator and its tags are unchanged.
-if [[ -f ./study.env ]]; then source ./study.env; fi
+# Resolve study identity independently of the process working directory.
+if [[ -f "$STUDY_ROOT/study.env" ]]; then source "$STUDY_ROOT/study.env"; fi
 DESIGN_GENERATOR="${DESIGN_GENERATOR:-mixture}"
 GEN_SUFFIX=""; [[ "$DESIGN_GENERATOR" == mixture ]] || GEN_SUFFIX="_${DESIGN_GENERATOR}"
 
@@ -114,7 +115,7 @@ MC_MAX_REG=4; MC_MAX_CAT=4
 # earlier checkpoint saw favored_idx = 0 for all RDM/LBA training data.
 # GEN_SUFFIX is empty for the mixture generator, so the main study's tag is unchanged.
 MC_TAG="r${MC_MAX_REG}c${MC_MAX_CAT}_enc${ENC_EMBED}h${ENC_HEADS}l${ENC_LAYERS}_a${FM_TIME_ALPHA}_b${MC_TRAIN_BATCH}_e${MC_EPOCHS}_ptc${GEN_SUFFIX}${STRUCTURE_SUFFIX}"
-MC_CKPT_DIR="./outputs/checkpoints/model_class/cf/${MC_TAG}"
+MC_CKPT_DIR="${RESULTS_ROOT}/checkpoints/model_class/cf/${MC_TAG}"
 MC_CKPT="${MC_CKPT_DIR}/cogformer_model_class_fm_l${DEC_LAYERS}_h${HEADS}_p${PROJ}_s${SEEDS}_d${MC_DIM}_b${MC_TRAIN_BATCH}_e${MC_EPOCHS}_t${STEPS}${STRUCTURE_SUFFIX}.pt"
 
 # LBA_FIXED_A is the value every LBA arm must use -- finetune, zero-shot and
@@ -125,7 +126,7 @@ LBA_FIXED_A=0.5
 # 128, matching the model-class and BayesFlow batch (decided 2026-09-28; was 256).
 LBA_FT_BATCH=128
 # Under MC_TAG: the finetune's filename does not encode its base checkpoint.
-LBA_FT_CKPT="./outputs/checkpoints/model_class/cf/lba_finetune/${MC_TAG}/cogformer_lba_finetune_s2_A${LBA_FIXED_A}_l${DEC_LAYERS}_h${HEADS}_p${PROJ}_s${SEEDS}_d${MC_DIM}_b${LBA_FT_BATCH}_e${LBA_FT_EPOCHS}_t${STEPS}${STRUCTURE_SUFFIX}.pt"
+LBA_FT_CKPT="${RESULTS_ROOT}/checkpoints/model_class/cf/lba_finetune/${MC_TAG}/cogformer_lba_finetune_s2_A${LBA_FIXED_A}_l${DEC_LAYERS}_h${HEADS}_p${PROJ}_s${SEEDS}_d${MC_DIM}_b${LBA_FT_BATCH}_e${LBA_FT_EPOCHS}_t${STEPS}${STRUCTURE_SUFFIX}.pt"
 
 # Track every CogFormer training (e1_train, e3_finetune) in wandb project
 # "cogformer-model-class". The orchestrator refuses to start without credentials

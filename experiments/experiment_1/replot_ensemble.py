@@ -13,6 +13,8 @@ real run cannot drift apart.
     python -m experiments.experiment_1.replot_ensemble \\
         --datadir outputs/figures/model_class/cf/r4c4_b128_e15000_ensemble
 """
+from experiments.paths import RESULTS_ROOT
+from experiments import shared_config
 import argparse
 import json
 import logging
@@ -41,7 +43,7 @@ DATA_NAME = "model_class_ensemble_data.npz"
 
 def parse_args():
     p = argparse.ArgumentParser(description=__doc__.split("\n")[0])
-    p.add_argument("--datadir", type=str, required=True,
+    p.add_argument("--datadir", type=str, default=str(RESULTS_ROOT / "figures/model_class/cf" / f"{shared_config.get('MC_TAG')}_ensemble"),
                    help=f"Directory holding {DATA_NAME}.")
     p.add_argument("--outdir", type=str, default=None,
                    help="Where to write the PDFs (default: --datadir, i.e. in place).")

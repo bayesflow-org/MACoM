@@ -4,6 +4,7 @@ Applies a DDM+RDM+CDM-trained ModelClass CogFormer to real DDM data.
 Each subject is processed individually (batch_size=1). Posteriors are saved in
 global parameter space as (num_subjects, num_samples, n_rows, n_global_params).
 """
+from experiments.paths import INPUT_DATA_ROOT, RESULTS_ROOT
 import argparse
 import logging
 from pathlib import Path
@@ -34,7 +35,7 @@ from .data_utils import (
 def parse_args():
     p = argparse.ArgumentParser()
     add_structure_conditioning_arg(p)
-    p.add_argument("--data", type=str, default="./data/data_application_ddm.csv")
+    p.add_argument("--data", type=str, default=str(INPUT_DATA_ROOT / "data_application_ddm.csv"))
     p.add_argument("--checkpoint", type=str, required=True)
     p.add_argument("--outdir", type=str, default=None,
                    help="Default: ./outputs/data/real_data/ddm/mc/, or .../mc_sv_fixed/ "
@@ -245,8 +246,8 @@ def main():
     posteriors = np.stack(all_posteriors, axis=0)
 
     outdir = Path(args.outdir) if args.outdir else Path(
-        "./outputs/data/real_data/ddm/mc_sv_fixed/" if args.fix_s_v
-        else "./outputs/data/real_data/ddm/mc/")
+        str(RESULTS_ROOT / "data/real_data/ddm/mc_sv_fixed/") if args.fix_s_v
+        else str(RESULTS_ROOT / "data/real_data/ddm/mc/"))
     outdir.mkdir(parents=True, exist_ok=True)
     out_path = outdir / "ddm_mc_posteriors.npz"
     np.savez(

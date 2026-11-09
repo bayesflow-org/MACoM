@@ -1,3 +1,4 @@
+from experiments.paths import RESULTS_ROOT
 import os
 os.environ["KERAS_BACKEND"] = "jax"
 # ONE numba thread. Measured on this 24-core box, batch 256, num_obs 500:
@@ -330,7 +331,7 @@ def main(model_key: str, case: str, epochs: int = 1000, steps_per_epoch: int = 1
     inference_net = bf.networks.FlowMatching(**fm_kwargs)
 
     ckpt_prefix = model_cfg["ckpt_prefix"]
-    checkpoint_path = f"./outputs/checkpoints/model_family/bf/{model_key}/{ckpt_prefix}_{case}"
+    checkpoint_path = str(RESULTS_ROOT / f"checkpoints/model_family/bf/{model_key}/{ckpt_prefix}_{case}")
     if tag:
         checkpoint_path += f"__{tag}"
 

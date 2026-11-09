@@ -6,9 +6,11 @@ pointing at r4c4_b256_e10000 after the recipe changed; sourcing the shell file k
 the two from drifting.
 """
 import functools
+import os
 import subprocess
 from pathlib import Path
 
+from experiments.paths import RESULTS_ROOT
 _SH = Path(__file__).with_name("shared_config.sh")
 
 
@@ -16,6 +18,7 @@ _SH = Path(__file__).with_name("shared_config.sh")
 def get(name: str) -> str:
     out = subprocess.run(
         ["bash", "-c", f'source "{_SH}" >/dev/null 2>&1; printf "%s" "${{{name}}}"'],
+        env=dict(os.environ, STUDY_ROOT=str(RESULTS_ROOT)),
         capture_output=True, text=True, check=True).stdout
     if not out:
         raise KeyError(f"{name} is not set in {_SH}")

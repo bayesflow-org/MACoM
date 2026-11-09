@@ -16,6 +16,8 @@ Two variants are produced per family and plot type:
 Plot types: recovery, ECDF, coverage, metrics — each with a separate global
 (``pi``) companion where a global parameter is active.
 """
+from experiments.paths import RESULTS_ROOT
+from experiments import shared_config
 
 import argparse
 import logging
@@ -48,13 +50,13 @@ MIXED_CASE = "mixed_predictor"
 
 def parse_args():
     p = argparse.ArgumentParser()
-    p.add_argument("--pred_dir", type=str, default="./outputs/data/model_class/",
+    p.add_argument("--pred_dir", type=str, default=str(RESULTS_ROOT / "data/model_class" / f"{shared_config.get('MC_TAG')}_validate"),
                    help="Directory with <family>_<case>_cf_pred.npz saved by model_class_cf_validate.py")
     p.add_argument("--outdir", type=str,
-                   default="./outputs/figures/model_class/cf/ensemble_benchmark/")
-    p.add_argument("--max_num_regressors", type=int, default=5,
+                   default=str(RESULTS_ROOT / "figures/model_class/cf" / f"{shared_config.get('MC_TAG')}_ensemble_benchmark"))
+    p.add_argument("--max_num_regressors", type=int, default=4,
                    help="Must match the validation run (the mask row layout is padded to it)")
-    p.add_argument("--max_num_categories", type=int, default=5,
+    p.add_argument("--max_num_categories", type=int, default=4,
                    help="Must match the validation run (sizes the row blocks)")
     p.add_argument("--num_null_draws", type=int, default=1000)
     p.add_argument("--metrics", action=argparse.BooleanOptionalAction, default=True,

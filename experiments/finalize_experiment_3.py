@@ -17,6 +17,7 @@ sweep-everything copier would pull them in whenever someone re-runs without the 
     python -m experiments.finalize_experiment_3 --dry_run
     python -m experiments.finalize_experiment_3
 """
+from experiments.paths import RESULTS_ROOT
 import argparse
 import re
 import shutil
@@ -28,9 +29,9 @@ import pandas as pd
 
 from experiments import shared_config
 
-FINALS = Path("outputs/finals/experiment-3")
+FINALS = (RESULTS_ROOT / "finals/experiment-3")
 MC_TAG = shared_config.get("MC_TAG")
-FIG_MC = Path("outputs/figures/model_class/cf")
+FIG_MC = (RESULTS_ROOT / "figures/model_class/cf")
 SRC = FIG_MC / f"{MC_TAG}_lba"
 # The zero-shot validator nests one level per fixed_A value (A0.5/) and one per
 # embedding-initialisation variant (mid_rdm/: LBA's row copied from RDM's).
@@ -38,8 +39,8 @@ ZS_A = f"A{format(float(shared_config.get('LBA_FIXED_A')), 'g')}"
 # LBA applied to the empirical lexical-decision data. It lives HERE rather than in
 # experiment-2 because experiment-2 is the DDM/RDM/CDM real-data tree, while LBA is
 # the held-out family this experiment is about. Same checkpoint as finetuned/.
-PPC_SRC = Path("outputs/figures/real_data/ppc")
-PPC_DATA = Path("outputs/data/real_data/lba_stim_cond/mc/lba_mc_posteriors.npz")
+PPC_SRC = (RESULTS_ROOT / "figures/real_data/ppc")
+PPC_DATA = (RESULTS_ROOT / "data/real_data/lba_stim_cond/mc/lba_mc_posteriors.npz")
 # Two PPCs from the SAME posterior draws, differing only in what the forward
 # simulation holds fixed. Both kept, in labelled subtrees, because which one belongs
 # in the paper is still open.
@@ -51,15 +52,15 @@ PPC_KEEP = ("ppc", "choice_ppc", "rt_quantiles", "rt_qq", "choice_quantiles")
 # LBA amortization gap: BayesFlow LBA baselines vs the FINETUNED checkpoint, on the
 # LBA cases of the shared benchmark files. Same layout as experiment-1a's per-family
 # trees so the two gap studies read the same way.
-GAP_C2ST = Path("outputs/figures/c2st/lba")
-GAP_BF_FIG = Path("outputs/figures/model_family/bf/lba")
-GAP_BF_EVAL = Path("outputs/evaluations/model_family/bf")
+GAP_C2ST = (RESULTS_ROOT / "figures/c2st/lba")
+GAP_BF_FIG = (RESULTS_ROOT / "figures/model_family/bf/lba")
+GAP_BF_EVAL = (RESULTS_ROOT / "evaluations/model_family/bf")
 GAP_CASES = ["intercept_only", "fixed", "regressed", "fixed_regressed", "interaction"]
 
 # Real-data-DESIGN validation (experiment_2/realdata_validate.py --model lba): simulated
 # data on the real subjects' designs, filed beside the real-data fit it validates.
 VAL_FIG = FIG_MC / f"{MC_TAG}_realdata" / "lba" / "realdata"
-VAL_PRED = Path("outputs/data/model_class") / f"{MC_TAG}_realdata" / "lba_realdata_cf_pred.npz"
+VAL_PRED = (RESULTS_ROOT / "data/model_class") / f"{MC_TAG}_realdata" / "lba_realdata_cf_pred.npz"
 
 # arm -> (families, filename infix). zeroshot covers LBA only.
 ARMS = {"zeroshot": (["lba"], "mid1"),

@@ -25,6 +25,7 @@ the unstyled defaults into finals.
     python -m experiments.finalize_experiment_1 --dry_run
     python -m experiments.finalize_experiment_1
 """
+from experiments.paths import RESULTS_ROOT
 import argparse
 import hashlib
 import os
@@ -38,14 +39,14 @@ import pandas as pd
 
 from experiments import shared_config
 
-FINALS = Path("outputs/finals/experiment-1")
-FIG = Path("outputs/figures/model_class/cf")
-DATA = Path("outputs/data/model_class")
+FINALS = (RESULTS_ROOT / "finals/experiment-1")
+FIG = (RESULTS_ROOT / "figures/model_class/cf")
+DATA = (RESULTS_ROOT / "data/model_class")
 # Run identity comes from shared_config.sh, the same file the orchestrator sources, so
 # a recipe change there cannot leave this assembler reading the previous run's tree.
 BASE = shared_config.get("MC_TAG")
 CKPT = Path(shared_config.get("MC_CKPT"))
-DESIGN_OPT = Path(f"outputs/data/design_opt/{BASE}/ddm")
+DESIGN_OPT = (RESULTS_ROOT / f"data/design_opt/{BASE}/ddm")
 
 FAMILIES = ["ddm", "rdm", "cdm"]
 CASES = ["intercept_only", "fixed", "regressed", "fixed_regressed",

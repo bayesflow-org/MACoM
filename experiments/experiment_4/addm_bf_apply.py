@@ -21,6 +21,7 @@ first_fixation drives omega's identifiability, so it is a CLI switch:
 Measured at 500 trials/dataset, v_diff=0: P(choose 0) runs 0.578 -> 0.506 across
 omega 0 -> 1 under "item0", and is flat (~0.50) under "random".
 """
+from experiments.paths import RESULTS_ROOT
 import os
 os.environ["KERAS_BACKEND"] = "torch"
 
@@ -199,9 +200,9 @@ MAX_NUM_CATEGORIES = 4
 MAX_ALTERNATIVES   = 4
 NUM_ALTERNATIVES   = 2
 
-CKPT_DIR    = Path("./outputs/checkpoints/encoder_rep/bf/addm")
-DATA_DIR    = Path("./outputs/data/encoder_rep/addm")
-FIGURES_DIR = Path("./outputs/figures/encoder_rep/addm")
+CKPT_DIR    = (RESULTS_ROOT / "checkpoints/encoder_rep/bf/addm")
+DATA_DIR    = (RESULTS_ROOT / "data/encoder_rep/addm")
+FIGURES_DIR = (RESULTS_ROOT / "figures/encoder_rep/addm")
 
 
 class CogFormerEncoderSummary:

@@ -13,6 +13,7 @@ Outputs (per model × benchmark condition):
   - {tag}_ecdf.pdf
   - {tag}_metrics.pdf
 """
+from experiments.paths import RESULTS_ROOT
 import argparse
 import logging
 from pathlib import Path
@@ -75,7 +76,7 @@ def parse_args():
                              "meanings across families. Pass 0 to also remove start-point "
                              "variability entirely; None restores the original parameterization.")
     p.add_argument("--checkpoint", type=str, required=True)
-    p.add_argument("--outdir", type=str, default="./outputs/figures/model_class/cf/lba_finetune/")
+    p.add_argument("--outdir", type=str, default=str(RESULTS_ROOT / "figures/model_class/cf/lba_finetune/"))
     p.add_argument("--data_dir", type=str, default=None,
                    help="Directory with BayesFlow validation data. When set, every arm "
                         "scores the SAME simulated datasets the BF baseline was scored "

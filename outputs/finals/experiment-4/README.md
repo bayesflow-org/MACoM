@@ -1,7 +1,7 @@
 # Experiment 4 — encoder representation
 
-Assembled 2026-10-07 16:30:02Z by
-`experiments/finalize_experiment_4.py` — 28 files. Commit `9394c50c99b753b5d4e855735f40a4a81265af3b`.
+Assembled 2026-10-28 23:24:27Z by
+`experiments/finalize_experiment_4.py` — 28 files. Commit `c2a42c04eb59bc738f7eedfcf76c19802f2902ed`.
 `MANIFEST.csv` records per-file provenance.
 
 ## Scope
@@ -9,6 +9,10 @@ Assembled 2026-10-07 16:30:02Z by
 The **5-parameter aDDM** (v and s_v pinned at 1.0375 and 0.3133, their
 prior medians; free: v_diff, omega, a, tau, s_tau) and the **5-family pooled geometry**
 (DDM, RDM, CDM trained; aDDM, LBA held out), before and after LBA finetuning.
+
+The frozen probe calls `encoder(x)` without family or coefficient-structure
+context. For a structure-conditioned checkpoint, this is a data-only representation
+probe, not the full `encode_conditions` path used for posterior inference.
 
 ## Layout
 

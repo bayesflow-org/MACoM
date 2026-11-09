@@ -6,6 +6,34 @@ Jerry M. Huang, Lukas Schumacher, Niek Stevenson, Mischa von Krause, and Stefan 
 
 Repository for the Nature Communications paper on meta-amortized cognitive models.
 
+Final results from the October 26, 2026 study are retained directly in
+[`outputs/`](outputs/), including its continuation results. Final figures and
+tables are in [`outputs/finals/`](outputs/finals/). Earlier local results,
+checkpoints, and run histories have been removed.
+
+Experiment scripts and `run_experiments.sh` default to this results directory and
+read its `study.env` for the Gaussian-softmax generator and structural settings.
+Paths resolve from the repository location, independently of the working directory.
+Empirical inputs stay in `data/`; generated datasets are in `outputs/data/`.
+
+To regenerate figures from saved data, run the corresponding replot module;
+its input and output defaults select the retained run. For example:
+
+```bash
+.venv/bin/python -m experiments.experiment_4.replot_crossfamily
+.venv/bin/python -m experiments.experiment_4.replot_representation
+.venv/bin/python -m experiments.experiment_1.replot_per_case
+bash run_experiments.sh finalize
+```
+
+The last command copies regenerated source figures into `outputs/finals/`.
+Run each experiment's `appendix_captions` module and
+`experiments.experiment_1a.gap_tables` to refresh its text and tables.
+Inspect the complete reproduction commands with
+`DRY_RUN=1 FORCE=1 USE_WANDB=0 bash run_experiments.sh all`. Select an alternative
+results directory with `STUDY_ROOT=/path/to/study`; its files use the same flat
+layout and its `study.env` selects the study settings.
+
 # Install
 
 **Prerequisites**
@@ -123,18 +151,16 @@ Saved validation datasets are reused as stored; training-time benchmark validati
 continues to use its original generator. Adding this option does not change existing
 checkpoints or results.
 
-To rerun the whole finals pipeline under `gaussian_softmax`, run it in its own study
-directory, which keeps every output separate from the main study:
+To prepare an additional study with its own datasets and checkpoints:
 
 ```bash
-bash experiments/setup_study.sh outputs/gaussian-softmax gaussian_softmax
-STUDY_ROOT=outputs/gaussian-softmax bash run_experiments.sh --list
+bash experiments/setup_study.sh /path/to/new-study gaussian_softmax
+STUDY_ROOT=/path/to/new-study bash run_experiments.sh --list
 ```
 
 The study regenerates its own shared test set and retrains the BayesFlow baselines
-under its generator; the main study's files are never modified. See
-`.claude/skills/experiment-orchestration/SKILL.md` (section 5a) for details and the
-`--reuse-main-bench-bf` alternative.
+under its generator. `--reuse-main-bench-bf` instead copies the retained study's
+benchmark files and BayesFlow baselines into the new study.
 
 # 1,000-configuration evaluation with BayesFlow metrics
 
@@ -152,11 +178,11 @@ Numba per configuration and records new and original input hashes.
 Launch or resume its frozen source with:
 
 ```bash
-.venv/bin/python outputs/10-26-2026/continuation/ensemble_metrics_1000_bayesflow_20261105/launch.py
+.venv/bin/python outputs/continuation/ensemble_metrics_1000_bayesflow_20261105/launch.py
 ```
 
 Results are written to
-`outputs/10-26-2026/outputs/evaluations/ensemble_1000_bayesflow/`, with reports every
+`outputs/evaluations/ensemble_1000_bayesflow/`, with reports every
 200 configurations. The original evaluation discarded its posterior draws, so this
 replay repeats inference. See the README in that output directory for details.
 
@@ -169,8 +195,8 @@ needed:
 
 ```bash
 .venv/bin/python -m experiments.experiment_1a.model_family_bf_benchmark_ensemble \
-    --data_dir outputs/10-26-2026/outputs/data/model_family \
-    --outdir outputs/10-26-2026/outputs/figures/model_family/bf/ensemble_benchmark
+    --data_dir outputs/data/model_family \
+    --outdir outputs/figures/model_family/bf/ensemble_benchmark
 ```
 
 Inputs are `<family>_<case>_data.npz` files from `model_family_bf_validate`.

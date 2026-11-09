@@ -35,6 +35,7 @@ SE bands); the realised split balance is read from information_gain.csv.
 
     python -m experiments.experiment_1.appendix_captions
 """
+from experiments.paths import RESULTS_ROOT
 from pathlib import Path
 
 import numpy as np
@@ -44,9 +45,9 @@ from experiments.configs import MODELS as BASE
 from experiments.experiment_1a.appendix_captions import (FAMILIES, N_DATASETS, N_DRAWS,
                                                          N_TRIALS, label as label_1a, names)
 
-FINALS = Path("outputs/finals/experiment-1")
+FINALS = (RESULTS_ROOT / "finals/experiment-1")
 OUT = FINALS / "captions.tex"
-PRED = Path("outputs/data/model_class") / f"{shared_config.get('MC_TAG')}_validate"
+PRED = (RESULTS_ROOT / "data/model_class") / f"{shared_config.get('MC_TAG')}_validate"
 CASE = "mixed_predictor"
 NUM_CATEGORIES = 4          # exact_num_categories at the training grid's max_num_categories
 KINDS = {"recovery": "Parameter recovery", "ecdf": "Simulation-based calibration",

@@ -16,6 +16,7 @@ silently dropped.
     python -m experiments.finalize_experiment_2 --dry_run
     python -m experiments.finalize_experiment_2
 """
+from experiments.paths import RESULTS_ROOT
 import argparse
 import shutil
 import subprocess
@@ -27,9 +28,9 @@ import pandas as pd
 from experiments import shared_config
 from experiments.finalize_experiment_1 import kept as val_kept, tidy as val_tidy
 
-FINALS = Path("outputs/finals/experiment-2")
-SRC = Path("outputs/figures/real_data/ppc")
-DATA = Path("outputs/data/real_data")
+FINALS = (RESULTS_ROOT / "finals/experiment-2")
+SRC = (RESULTS_ROOT / "figures/real_data/ppc")
+DATA = (RESULTS_ROOT / "data/real_data")
 FAMILIES = ["ddm", "rdm", "cdm"]
 
 # Real-data-DESIGN validation (realdata_validate.py): simulated data on each family's
@@ -37,8 +38,8 @@ FAMILIES = ["ddm", "rdm", "cdm"]
 # canonical fit, ddm/sv_fixed/validation/ for the refit -- so each folder pairs a real
 # fit with the check of how well that design identifies it.
 _MC_TAG = shared_config.get("MC_TAG")
-VAL_FIG = Path("outputs/figures/model_class/cf") / f"{_MC_TAG}_realdata"
-VAL_PRED = Path("outputs/data/model_class") / f"{_MC_TAG}_realdata"
+VAL_FIG = (RESULTS_ROOT / "figures/model_class/cf") / f"{_MC_TAG}_realdata"
+VAL_PRED = (RESULTS_ROOT / "data/model_class") / f"{_MC_TAG}_realdata"
 # (family, validation case) -> destination under FINALS
 VAL_CASES = {("ddm", "realdata"): "ddm/validation",
              ("ddm", "realdata_sv_fixed"): "ddm/sv_fixed/validation",

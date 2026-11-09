@@ -38,6 +38,7 @@ CKA = 0.33 -- not 0. Both metrics are therefore reported against a
 dimensionality-matched null built from random projections of the frozen summary, and
 only the excess over that null is evidence of shared structure.
 """
+from experiments.paths import RESULTS_ROOT
 import os
 os.environ.setdefault("KERAS_BACKEND", "torch")
 
@@ -68,8 +69,8 @@ from .addm_bf_baseline import (ADDMBaselineSimulator, MAX_NUM_REGRESSORS,
                                ckpt_path as baseline_ckpt_path, active_labels)
 
 # BASELINE_COLOR is imported from addm_bf_apply (single definition).
-OUT = Path("./outputs/data/encoder_rep/representation")
-FIG = Path("./outputs/figures/encoder_rep/representation")
+OUT = (RESULTS_ROOT / "data/encoder_rep/representation")
+FIG = (RESULTS_ROOT / "figures/encoder_rep/representation")
 
 
 def build_dataset(summaries):
@@ -672,7 +673,7 @@ def variant_tag(case, fix_v, fix_s_v):
 
 def _load_contraction(case, fix_v, names, fix_s_v=False):
     """Posterior contraction per cell, for annotating application 2."""
-    p = (Path("outputs/data/encoder_rep") /
+    p = ((RESULTS_ROOT / "data/encoder_rep") /
          ("addm" + _VARIANT_SUFFIX[tuple(_pinned(fix_v, fix_s_v))]) /
          case / f"addm_{case}_bf_metrics.csv")
     if not p.exists():

@@ -13,6 +13,7 @@ log-density scatter -- and the summary CSV names the subsets and their dimension
 
 ``_plot`` is imported rather than copied, so a replot and a real run cannot drift.
 """
+from experiments.paths import RESULTS_ROOT
 import argparse
 import logging
 from pathlib import Path
@@ -27,9 +28,9 @@ from .addm_arm_compare import _plot
 
 def parse_args():
     p = argparse.ArgumentParser(description=__doc__.split("\n")[0])
-    p.add_argument("--datadir", type=str, required=True)
-    p.add_argument("--figdir", type=str, required=True)
-    p.add_argument("--tag", type=str, required=True,
+    p.add_argument("--datadir", type=str, default=str(RESULTS_ROOT / "data/encoder_rep/addm_compare/intercept_only_vsvfixed"))
+    p.add_argument("--figdir", type=str, default=str(RESULTS_ROOT / "figures/encoder_rep/addm_compare/intercept_only_vsvfixed"))
+    p.add_argument("--tag", type=str, default="intercept_only_vsvfixed",
                    help="Output stem: addm_arm_compare_<tag>.pdf")
     return p.parse_args()
 

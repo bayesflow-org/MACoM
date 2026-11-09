@@ -3,6 +3,7 @@
 Every task still runs through the canonical launcher, with one process per GPU.
 The existing Experiment 1 checkpoint and benchmark files must already be complete.
 """
+from experiments.paths import RESULTS_ROOT
 import argparse
 from datetime import datetime, timezone
 import json
@@ -61,7 +62,7 @@ def timestamp():
     return datetime.now(timezone.utc).isoformat()
 
 
-def verify_bf_inputs(families, root=Path('outputs')):
+def verify_bf_inputs(families, root=(RESULTS_ROOT)):
     """Reject parameter-only pairing: every saved observation must match too."""
     import numpy as np
     checked = []
@@ -101,7 +102,7 @@ def main():
         parser.error('Leave CUDA_VISIBLE_DEVICES unset for the scheduler; use GPU0/GPU1')
     if os.environ.get('BF_REUSE_CHECKPOINTS') != '1':
         parser.error('This continuation requires BF_REUSE_CHECKPOINTS=1 and copied BF weights')
-    run_dir = Path(os.environ.get('CONTINUATION_DIR', 'continuation'))
+    run_dir = Path(os.environ.get('CONTINUATION_DIR', RESULTS_ROOT / 'continuation'))
     run_dir.mkdir(parents=True, exist_ok=True)
     # Prevent an accidental second scheduler from assigning the same GPUs/study.
     import fcntl

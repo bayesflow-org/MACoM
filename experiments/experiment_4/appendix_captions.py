@@ -31,6 +31,7 @@ it cannot read, for review elsewhere -- never commit a draft.
 
     python -m experiments.experiment_4.appendix_captions [--draft]
 """
+from experiments.paths import RESULTS_ROOT
 import argparse
 import sys
 from pathlib import Path
@@ -41,7 +42,7 @@ import pandas as pd
 from experiments import shared_config
 from experiments.experiment_4.addm_bf_apply import S_V_FIXED, V_FIXED
 
-FINALS = Path("outputs/finals/experiment-4")
+FINALS = (RESULTS_ROOT / "finals/experiment-4")
 PROBE = FINALS / "probe"
 REP = FINALS / "representation"
 PANEL = "probe/compare/panel.pdf"

@@ -18,6 +18,8 @@ and a real run cannot drift apart.
 Posterior pairplots are never redrawn: they are per-dataset, the finalized tree
 excludes them by allowlist, and there are 10 per case.
 """
+from experiments.paths import RESULTS_ROOT
+from experiments import shared_config
 import argparse
 import logging
 from pathlib import Path
@@ -56,11 +58,11 @@ def build_model_class():
 
 def parse_args():
     p = argparse.ArgumentParser(description=__doc__.split("\n")[0])
-    p.add_argument("--pred_dir", type=str, required=True,
+    p.add_argument("--pred_dir", type=str, default=str(RESULTS_ROOT / "data/model_class" / f"{shared_config.get('MC_TAG')}_validate"),
                    help="Directory of <family>_<case>_cf_pred.npz. Point this at the "
                         "VALIDATE RUN's own directory, not the mixed-vintage default "
                         "tree, or the figures come from stale predictions silently.")
-    p.add_argument("--outdir", type=str, required=True)
+    p.add_argument("--outdir", type=str, default=str(RESULTS_ROOT / "figures/model_class/cf" / f"{shared_config.get('MC_TAG')}_validate"))
     p.add_argument("--max_num_regressors", type=int, default=4)
     p.add_argument("--max_num_categories", type=int, default=4)
     # Mirrors the validation script: the metric is slow and off by default there,

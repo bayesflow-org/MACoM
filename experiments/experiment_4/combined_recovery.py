@@ -18,6 +18,7 @@ Replots from each arm's saved npz -- CPU only, no checkpoint, no GPU:
 
     python -m experiments.experiment_4.combined_recovery
 """
+from experiments.paths import RESULTS_ROOT
 import argparse
 import logging
 from pathlib import Path
@@ -37,8 +38,8 @@ from .addm_diagnostics import active_labels, ARM_COLOR
 # are distinguished by colour only, and the caption has to say which row is which.
 ROWS = ["baseline", "frozen"]
 
-FIG = Path("outputs/figures/encoder_rep")
-DATA = Path("outputs/data/encoder_rep")
+FIG = (RESULTS_ROOT / "figures/encoder_rep")
+DATA = (RESULTS_ROOT / "data/encoder_rep")
 
 
 def parse_args(argv=None):

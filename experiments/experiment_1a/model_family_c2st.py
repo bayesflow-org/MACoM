@@ -1,3 +1,4 @@
+from experiments.paths import RESULTS_ROOT
 import argparse
 import logging
 import multiprocessing as mp
@@ -28,10 +29,10 @@ GLOBAL_VARIABLE_NAMES = [r"$\pi$"]
 
 _C2ST_MODELS = ("ddm", "cdm", "rdm", "lba")
 _C2ST_OUTDIRS = {
-    "ddm": "./outputs/figures/c2st/ddm/",
-    "cdm": "./outputs/figures/c2st/cdm/",
-    "rdm": "./outputs/figures/c2st/rdm/",
-    "lba": "./outputs/figures/c2st/lba/",
+    "ddm": str(RESULTS_ROOT / "figures/c2st/ddm/"),
+    "cdm": str(RESULTS_ROOT / "figures/c2st/cdm/"),
+    "rdm": str(RESULTS_ROOT / "figures/c2st/rdm/"),
+    "lba": str(RESULTS_ROOT / "figures/c2st/lba/"),
 }
 
 MODELS = {}
@@ -185,7 +186,7 @@ def run_comparison(pred_a, pred_b, design_config, intrinsic_params, variable_nam
 def parse_args():
     p = argparse.ArgumentParser()
     p.add_argument("--model", type=str, required=True, choices=list(MODELS.keys()))
-    p.add_argument("--bf_data_dir", type=str, default="./outputs/data/model_family",
+    p.add_argument("--bf_data_dir", type=str, default=str(RESULTS_ROOT / "data/model_family"),
                    help="Directory with BF validation .npz files (model_family_bf_validate).")
     p.add_argument("--mc_pred_dir", type=str, default=None,
                    help="Predictions from the ORIGINAL model-class checkpoint.")

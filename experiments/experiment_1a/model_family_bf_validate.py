@@ -1,3 +1,4 @@
+from experiments.paths import RESULTS_ROOT
 import os
 os.environ["KERAS_BACKEND"] = "jax"
 
@@ -40,10 +41,10 @@ def bf_conditions(sims: dict) -> dict:
 
 
 _BF_DIRS = {
-    "ddm": ("ddm_families_bf", "./outputs/figures/model_family/bf/ddm"),
-    "cdm": ("cdm_families_bf", "./outputs/figures/model_family/bf/cdm"),
-    "rdm": ("rdm_families_bf", "./outputs/figures/model_family/bf/rdm"),
-    "lba": ("lba_families_bf", "./outputs/figures/model_family/bf/lba"),
+    "ddm": ("ddm_families_bf", str(RESULTS_ROOT / "figures/model_family/bf/ddm")),
+    "cdm": ("cdm_families_bf", str(RESULTS_ROOT / "figures/model_family/bf/cdm")),
+    "rdm": ("rdm_families_bf", str(RESULTS_ROOT / "figures/model_family/bf/rdm")),
+    "lba": ("lba_families_bf", str(RESULTS_ROOT / "figures/model_family/bf/lba")),
 }
 
 # The BF baselines estimate the contamination parameter (_bf_cases_with_globals puts it
@@ -59,8 +60,8 @@ for _key, _raw in {k: v for k, v in _BASE_MODELS.items() if k in _BF_DIRS}.items
     _cfg = dict(_base)
     _cfg["case_configs"] = _cfg["bf_case_configs"]
     _cfg["ckpt_prefix"], _cfg["figures_dir"] = _BF_DIRS[_key]
-    _cfg["data_dir"] = "./outputs/data/model_family"
-    _cfg["evals_dir"] = "./outputs/evaluations/model_family/bf"
+    _cfg["data_dir"] = str(RESULTS_ROOT / "data/model_family")
+    _cfg["evals_dir"] = str(RESULTS_ROOT / "evaluations/model_family/bf")
     MODELS[_key] = _cfg
 
 
@@ -171,7 +172,7 @@ def test(model_key: str, case: str):
     print(f"  [Check] Params zero where masked: {'OK' if zero_where_masked else 'FAIL'}")
     assert zero_where_masked
 
-    checkpoint_path = f"./outputs/checkpoints/model_family/bf/{model_key}/{MODELS[model_key]['ckpt_prefix']}_{case}/model.keras"
+    checkpoint_path = str(RESULTS_ROOT / f"checkpoints/model_family/bf/{model_key}/{MODELS[model_key]['ckpt_prefix']}_{case}/model.keras")
     approximator = keras.saving.load_model(checkpoint_path)
     val_sims = simulator.sample(100)
     post_draws = approximator.sample(
@@ -208,7 +209,7 @@ def main(model_key: str, case: str, batch_size: int = 200, num_samples: int = 20
     ckpt_dir = f"{model_cfg['ckpt_prefix']}_{case}" + (f"__{tag}" if tag else "")
 
     simulator = ModelFamilyBF(model_key=model_key, case=case, design_generator=design_generator)
-    ckpt_path = f"./outputs/checkpoints/model_family/bf/{model_key}/{ckpt_dir}/model.keras"
+    ckpt_path = str(RESULTS_ROOT / f"checkpoints/model_family/bf/{model_key}/{ckpt_dir}/model.keras")
     approximator = keras.saving.load_model(ckpt_path)
 
     data_dir = Path(model_cfg["data_dir"])

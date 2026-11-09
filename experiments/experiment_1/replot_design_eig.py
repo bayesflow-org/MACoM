@@ -11,6 +11,8 @@ LOOKS must not require running it again. Everything the figure draws is either i
 made before the SE column existed still get a shaded band. The plotting function is
 imported rather than copied, so a replot and a real run cannot drift apart.
 """
+from experiments.paths import RESULTS_ROOT
+from experiments import shared_config
 import argparse
 import logging
 from pathlib import Path
@@ -37,7 +39,7 @@ def _first_existing(datadir, names, what):
 
 def parse_args():
     p = argparse.ArgumentParser()
-    p.add_argument("--datadir", type=str, required=True,
+    p.add_argument("--datadir", type=str, default=str(RESULTS_ROOT / "data/design_opt" / shared_config.get("MC_TAG") / "ddm"),
                    help="Directory holding the sweep CSV and, optionally, the draws npz.")
     p.add_argument("--outdir", type=str, default=None,
                    help="Where to write design_eig.pdf. Defaults to --datadir.")

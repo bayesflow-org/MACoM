@@ -4,6 +4,7 @@ Applies a DDM+RDM+CDM-trained ModelClass CogFormer to real RDM data.
 Each subject is processed individually (batch_size=1). Posteriors are saved in
 global parameter space as (num_subjects, num_samples, n_rows, n_global_params).
 """
+from experiments.paths import INPUT_DATA_ROOT, RESULTS_ROOT
 import argparse
 import logging
 from pathlib import Path
@@ -34,9 +35,9 @@ from .data_utils import (
 def parse_args():
     p = argparse.ArgumentParser()
     add_structure_conditioning_arg(p)
-    p.add_argument("--data", type=str, default="./data/data_application_rdm.csv")
+    p.add_argument("--data", type=str, default=str(INPUT_DATA_ROOT / "data_application_rdm.csv"))
     p.add_argument("--checkpoint", type=str, required=True)
-    p.add_argument("--outdir", type=str, default="./outputs/data/real_data/rdm/mc/")
+    p.add_argument("--outdir", type=str, default=str(RESULTS_ROOT / "data/real_data/rdm/mc/"))
 
     # Design
     p.add_argument("--max_num_regressors", type=int, default=5)

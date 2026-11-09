@@ -4,6 +4,7 @@ Reads <family>_<case>_data.npz from model_family_bf_validate, without loading
 checkpoints or rerunning inference. Each family gets recovery, ECDF, coverage,
 and metric PDFs for the five continuous benchmark cases, with pi separate.
 """
+from experiments.paths import RESULTS_ROOT
 
 import argparse
 import json
@@ -69,9 +70,9 @@ def load_case(data_dir: Path, family: str, case: str, cfg: dict) -> dict:
 
 def parse_args():
     p = argparse.ArgumentParser(description=__doc__.split("\n")[0])
-    p.add_argument("--data_dir", type=Path, default=Path("outputs/data/model_family"))
+    p.add_argument("--data_dir", type=Path, default=(RESULTS_ROOT / "data/model_family"))
     p.add_argument("--outdir", type=Path,
-                   default=Path("outputs/figures/model_family/bf/ensemble_benchmark"))
+                   default=(RESULTS_ROOT / "figures/model_family/bf/ensemble_benchmark"))
     p.add_argument("--families", nargs="+", choices=FAMILIES, default=FAMILIES)
     p.add_argument("--metrics", action=argparse.BooleanOptionalAction, default=True)
     p.add_argument("--num_null_draws", type=int, default=1000)

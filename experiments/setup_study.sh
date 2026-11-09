@@ -10,12 +10,11 @@
 #   STUDY_ROOT=outputs/gaussian-softmax DRY_RUN=1 bash run_experiments.sh all
 #   STUDY_ROOT=outputs/gaussian-softmax bash run_experiments.sh --list
 #
-# Every pipeline path is cwd-relative, so the study gets its own outputs/, logs/ and
-# wandb/ under STUDY_ROOT, and the main tree is never written. This script:
+# Generated data, checkpoints, figures, finals, logs and wandb files live directly
+# under STUDY_ROOT. Empirical inputs are read from the repository data/. This script:
 #
-#   study.env   pins DESIGN_GENERATOR; shared_config.sh reads it from the cwd, which is
-#               what gives the study its own MC_TAG (suffix _<generator>).
-#   data        symlink to the repo's empirical datasets (read-only inputs).
+#   study.env   pins DESIGN_GENERATOR; shared_config.sh reads it from STUDY_ROOT,
+#               which gives the study its own MC_TAG (suffix _<generator>).
 #   a COPY of the Exp-4 aDDM baseline-arm checkpoint: its design is intercept-only, so no
 #               generator ever draws a regressor for it, and it does not depend on the
 #               CogFormer encoder (e4_probe reuses it when present, re-validates it always).
@@ -42,6 +41,7 @@ set -euo pipefail
 PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 USAGE="usage: setup_study.sh <study_dir> <design_generator> [--reuse-main-bench-bf]"
 STUDY="${1:?$USAGE}"
+[[ "$STUDY" == /* ]] || STUDY="${PROJECT_ROOT}/${STUDY}"
 GENERATOR="${2:?$USAGE}"
 REUSE_MAIN=0
 case "${3:-}" in
@@ -53,7 +53,6 @@ esac
 valid="$(cd "$PROJECT_ROOT" && .venv/bin/python -c \
     'from cogformer.simulator.design_utils import DESIGN_GENERATORS as G; print(" ".join(G))')"
 [[ " $valid " == *" $GENERATOR "* ]] || { echo "unknown generator '$GENERATOR' (expected: $valid)" >&2; exit 2; }
-[[ "$GENERATOR" != mixture ]] || { echo "mixture is the main study; run the pipeline from the repo root" >&2; exit 2; }
 
 mkdir -p "$STUDY"
 STUDY="$(cd "$STUDY" && pwd)"
@@ -65,14 +64,13 @@ if [[ -f "$STUDY/study.env" ]]; then
 else
     cat > "$STUDY/study.env" <<EOF
 # Written by experiments/setup_study.sh on $(date +%F) at $(cd "$PROJECT_ROOT" && git rev-parse --short HEAD).
-# Sourced by experiments/shared_config.sh whenever the cwd is this directory.
+# Sourced by experiments/shared_config.sh when STUDY_ROOT selects this directory.
 DESIGN_GENERATOR=$GENERATOR
 EOF
 fi
-[[ -e "$STUDY/data" ]] || ln -s "$PROJECT_ROOT/data" "$STUDY/data"
 
 MAIN="$PROJECT_ROOT/outputs"
-DEST="$STUDY/outputs"
+DEST="$STUDY"
 copy() {                      # copy <path relative to outputs/> — never overwrites
     local rel="$1"
     [[ -e "$MAIN/$rel" ]] || { echo "  ! missing in main study: outputs/$rel" >&2; return 1; }

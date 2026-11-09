@@ -6,12 +6,13 @@ data whose numbers are already settled. Everything the figures draw is a functio
 the two summary tensors, and those are exactly what the run persisted.
 
     python -m experiments.experiment_4.replot_representation \\
-        --npz outputs/finals/experiment-4/representation/varying_values/summaries.npz \\
-        --figdir outputs/figures/encoder_rep/representation/varying_values
+        --npz outputs/finals/experiment-4/representation/intercept_only_vsvfixed/summaries.npz \\
+        --figdir outputs/figures/encoder_rep/representation/intercept_only_vsvfixed
 
 The plotting functions are imported from addm_representation rather than copied, so a
 replot and a real run can never drift apart in appearance.
 """
+from experiments.paths import RESULTS_ROOT
 import os
 os.environ.setdefault("KERAS_BACKEND", "torch")
 
@@ -31,9 +32,9 @@ from .representation import cka
 
 def parse_args():
     p = argparse.ArgumentParser()
-    p.add_argument("--npz", type=str, required=True,
+    p.add_argument("--npz", type=str, default=str(RESULTS_ROOT / "data/encoder_rep/representation/intercept_only_vsvfixed/summaries.npz"),
                    help="summaries.npz written by addm_representation.py")
-    p.add_argument("--figdir", type=str, required=True)
+    p.add_argument("--figdir", type=str, default=str(RESULTS_ROOT / "figures/encoder_rep/representation/intercept_only_vsvfixed"))
     p.add_argument("--n_null", type=int, default=20,
                    help="Null draws, used only when the npz predates null persistence.")
     p.add_argument("--seed", type=int, default=0,

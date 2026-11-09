@@ -38,6 +38,7 @@ read here.
 
     python -m experiments.experiment_3.calibration_plane
 """
+from experiments.paths import RESULTS_ROOT
 import argparse
 import logging
 from pathlib import Path
@@ -50,7 +51,7 @@ import matplotlib.pyplot as plt
 
 from cogformer.utils.plot_utils import family_colors, GUIDE_COLOR
 
-TRAJ = Path("outputs/data/model_class/cf/lba_trajectory")
+TRAJ = (RESULTS_ROOT / "data/model_class/cf/lba_trajectory")
 EPOCHS = [0, 500, 1000, 1500, 2000]
 FAMILIES = ["lba", "ddm", "rdm", "cdm"]
 CONTR, CALIB = "Posterior Contraction", "Calibration Error"
@@ -73,7 +74,7 @@ SCRIM = dict(facecolor="white", alpha=0.78, edgecolor="none", pad=2.0)
 # panel A (the arrows) and not panel B (the epoch traces): the four trained-family
 # lines and the epoch path both need checkpoints validated along the way, and this
 # batch has two endpoints. Panel A is the one carrying the claim.
-STIM = Path("outputs/figures/model_class/cf/paired_lba_stimcoded")
+STIM = (RESULTS_ROOT / "figures/model_class/cf/paired_lba_stimcoded")
 STIM_ARMS = {
     "zero-shot": "zeroshot/A0.5/{scen}/mid_rdm/lba_{scen}_mid1_metrics.csv",
     "finetuned": "finetuned/lba/{scen}/lba_{scen}_ft_metrics.csv",
@@ -216,11 +217,11 @@ def main():
     p.add_argument("--scenarios", nargs="+", default=STIM_SCENARIOS,
                    help="Paired mode: cases to draw (default bench5).")
     p.add_argument("--out", type=str,
-                   default="outputs/figures/model_class/cf/lba_trajectory"
-                           "/lba_calibration_plane.pdf")
+                   default=str(RESULTS_ROOT / "figures/model_class/cf/lba_trajectory"
+                           "/lba_calibration_plane.pdf"))
     p.add_argument("--csv_out", type=str,
-                   default="outputs/figures/model_class/cf/lba_trajectory"
-                           "/lba_calibration_plane.csv")
+                   default=str(RESULTS_ROOT / "figures/model_class/cf/lba_trajectory"
+                           "/lba_calibration_plane.csv"))
     a = p.parse_args()
 
     if a.paired_root:

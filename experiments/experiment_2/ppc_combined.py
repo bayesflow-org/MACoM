@@ -14,6 +14,7 @@ ppc.py computes its quantiles inside the plotting function and never persists
 them. Their predictions are restricted to the subjects our loader keeps, so both
 sets of quantiles are pooled over exactly the same trials.
 """
+from experiments.paths import INPUT_DATA_ROOT, RESULTS_ROOT
 import argparse
 import logging
 from pathlib import Path
@@ -38,8 +39,8 @@ def parse_args():
     p = argparse.ArgumentParser()
     p.add_argument("--model", type=str, default="ddm")
     p.add_argument("--variant", type=str, default="mc")
-    p.add_argument("--pred_csv", type=str, default="./data/pred_data_exp_2.csv")
-    p.add_argument("--outdir", type=str, default="./outputs/figures/real_data/ppc/ddm_combined")
+    p.add_argument("--pred_csv", type=str, default=str(INPUT_DATA_ROOT / "pred_data_exp_2.csv"))
+    p.add_argument("--outdir", type=str, default=str(RESULTS_ROOT / "figures/real_data/ppc/ddm_combined"))
     p.add_argument("--max_num_regressors", type=int, default=4)
     p.add_argument("--max_num_categories", type=int, default=4)
     p.add_argument("--n_ppc_samples", type=int, default=None)

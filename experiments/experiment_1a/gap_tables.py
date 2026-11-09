@@ -31,6 +31,7 @@ SEM = sample standard deviation / sqrt(n).
 
     python -m experiments.experiment_1a.gap_tables
 """
+from experiments.paths import RESULTS_ROOT
 import argparse
 from pathlib import Path
 
@@ -55,12 +56,12 @@ METRICS = [("NRMSE", r"\textbf{NRMSE} ($\downarrow$)"),
 CF_NAME = r"\textbf{CogFormer}-$\mathcal{C}$"
 BF_NAME = r"\textbf{Baseline}"
 
-BF_FIG = Path("outputs/figures/model_family/bf")
-BF_DATA = Path("outputs/data/model_family")
-CF_PRED = Path("outputs/data/model_class") / f"{shared_config.get('MC_TAG')}_validate"
-CF_VAL = Path("outputs/figures/model_class/cf") / f"{shared_config.get('MC_TAG')}_validate"
-C2ST = Path("outputs/figures/c2st")
-OUT = Path("outputs/finals/experiment-1a/amortization_gap_tables.tex")
+BF_FIG = (RESULTS_ROOT / "figures/model_family/bf")
+BF_DATA = (RESULTS_ROOT / "data/model_family")
+CF_PRED = (RESULTS_ROOT / "data/model_class") / f"{shared_config.get('MC_TAG')}_validate"
+CF_VAL = (RESULTS_ROOT / "figures/model_class/cf") / f"{shared_config.get('MC_TAG')}_validate"
+C2ST = (RESULTS_ROOT / "figures/c2st")
+OUT = (RESULTS_ROOT / "finals/experiment-1a/amortization_gap_tables.tex")
 
 
 def sem(x) -> float:

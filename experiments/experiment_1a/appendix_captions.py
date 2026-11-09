@@ -21,12 +21,13 @@ interval levels in [0.005, 0.995]; all on fixed 0-1 colour scales).
 
     python -m experiments.experiment_1a.appendix_captions
 """
+from experiments.paths import RESULTS_ROOT
 from pathlib import Path
 
 from experiments.configs import MODELS as BASE
 from experiments.experiment_1a.model_family_c2st import MODELS
 
-FINALS = Path("outputs/finals/experiment-1a")
+FINALS = (RESULTS_ROOT / "finals/experiment-1a")
 OUT = FINALS / "captions.tex"
 FAMILIES = ["ddm", "rdm", "cdm"]
 CASES = ["intercept_only", "fixed", "regressed", "fixed_regressed", "interaction"]

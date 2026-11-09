@@ -1,3 +1,4 @@
+from experiments.paths import RESULTS_ROOT
 import os
 import torch
 import torch.distributed as dist
@@ -64,7 +65,7 @@ MODEL_CONFIGS = {
     for m, cfg in _MODELS_WITH_PI.items()
 }
 
-CHECKPOINT_DIR = "./outputs/checkpoints/model_class/cf/"
+CHECKPOINT_DIR = str(RESULTS_ROOT / "checkpoints/model_class/cf/")
 
 
 class CogFormerTrainer:
@@ -314,7 +315,7 @@ class CogFormerTrainer:
         if self.fig_dir is not None:
             figures_dir = Path(self.fig_dir) / "recovery"
         else:
-            figures_dir = Path("./outputs/figures/model_class/cf/recovery")
+            figures_dir = (RESULTS_ROOT / "figures/model_class/cf/recovery")
         figures_dir.mkdir(parents=True, exist_ok=True)
 
         for val in self._val_data:

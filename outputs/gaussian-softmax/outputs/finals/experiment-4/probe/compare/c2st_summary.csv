@@ -1,3 +1,0 @@
-subset,n_dims,n_datasets,c2st_arms,c2st_null,excess,se,z
-joint,5,200,0.6272,0.5002,0.1271,0.0042,29.9206
-identified,4,200,0.6266,0.4996,0.1269,0.0042,30.1900

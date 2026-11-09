@@ -130,7 +130,8 @@ def _delta_col(df: pd.DataFrame, metric: str) -> str | None:
 
 
 def plot_delta_metrics(combined: pd.DataFrame, layouts: dict, outdir: Path, condition: str,
-                       max_num_categories: int, cell_size: float = 0.55) -> Path | None:
+                       max_num_categories: int, cell_size: float = 0.55,
+                       title_fontsize: int = 14) -> Path | None:
     """2 x 1 column of the LBA's per-cell metric deltas (fine-tuned minus zero-shot):
     NRMSE on top, calibration error below.
 
@@ -181,7 +182,7 @@ def plot_delta_metrics(combined: pd.DataFrame, layouts: dict, outdir: Path, cond
         heatmap_axes(ax, *panel, cmap=cmap, norm=norm, annot_fontsize=9, fmt="+.3f")
         ax.tick_params(axis="x", labelsize=16)
         ax.tick_params(axis="y", labelsize=13)
-        ax.set_title(f"\u0394 {metric}", fontsize=18)
+        ax.set_title(f"\u0394 {metric}", fontsize=title_fontsize)
         sm = plt.cm.ScalarMappable(cmap=cmap, norm=norm)
         sm.set_array([])
         fig.colorbar(sm, ax=ax, fraction=0.046, pad=0.03)
