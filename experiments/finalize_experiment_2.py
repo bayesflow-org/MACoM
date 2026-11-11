@@ -13,6 +13,9 @@ at all -- so mixing them in would reintroduce exactly the provenance ambiguity t
 tree exists to remove. They are listed in the README as excluded rather than
 silently dropped.
 
+The default snapshot contains the standard fits used by the overall combined PPC.
+Constrained sensitivity analyses are opt-in with --include_constrained.
+
     python -m experiments.finalize_experiment_2 --dry_run
     python -m experiments.finalize_experiment_2
 """
@@ -90,7 +93,7 @@ def tidy(rest: str) -> str:
     return f"rt_{rest}" if rest.startswith("ppc_") else rest
 
 
-def plan() -> tuple[list[tuple[Path, Path]], list[Path]]:
+def plan(include_constrained: bool = False) -> tuple[list[tuple[Path, Path]], list[Path]]:
     jobs, excluded = [], []
     skipped: list[Path] = []
 
@@ -130,13 +133,15 @@ def plan() -> tuple[list[tuple[Path, Path]], list[Path]]:
     # distinct object and DO belong here -- unlike the simulation-only variants below,
     # which share their family's draws.
     refit_post = DATA / "ddm" / "mc_sv_fixed" / "ddm_mc_posteriors.npz"
-    if refit_post.exists():
+    if include_constrained and refit_post.exists():
         jobs.append((refit_post, FINALS / "posteriors" / "ddm_sv_fixed.npz"))
 
     # Constrained variants. No posteriors.npz for the simulation-only ones: each reads
     # the same draws as its family's canonical set, so a second copy would imply a
     # second fit where there is none.
     for vdir, (fam, dest) in PPC_VARIANTS.items():
+        if not include_constrained:
+            continue
         d = SRC / vdir
         if not d.is_dir():
             continue
@@ -152,6 +157,8 @@ def plan() -> tuple[list[tuple[Path, Path]], list[Path]]:
     # Real-data-design validation: experiment 1's plot allowlist and naming, plus the
     # draws (true_set / pred_set) so the figures can be redrawn without re-running.
     for (fam, case), dest in VAL_CASES.items():
+        if case == "realdata_sv_fixed" and not include_constrained:
+            continue
         cdir = VAL_FIG / fam / case
         for src in sorted(cdir.glob("*")) if cdir.is_dir() else []:
             rest = src.name.replace(f"{fam}_{case}_fm_", "")
@@ -173,9 +180,11 @@ def git_commit() -> str:
 def main():
     p = argparse.ArgumentParser()
     p.add_argument("--dry_run", action="store_true")
+    p.add_argument("--include_constrained", action="store_true",
+                   help="Also assemble the s_v=0 sensitivity plots and DDM constrained refit.")
     args = p.parse_args()
 
-    jobs, excluded = plan()
+    jobs, excluded = plan(include_constrained=args.include_constrained)
     present = [(s, d) for s, d in jobs if s.exists()]
     # Keyed by the destination's parent PATH, not its name: `ddm/sv0` and `cdm/sv0`
     # share the basename `sv0`, so keying on the name silently merged the two into a
@@ -194,7 +203,7 @@ def main():
     for fam in FAMILIES:
         labels.append((fam, fam))
         for _v, (vfam, dest) in PPC_VARIANTS.items():
-            if vfam == fam:
+            if vfam == fam and args.include_constrained:
                 labels.append((f"  {fam}/{dest}", f"{fam}/{dest}"))
     labels.append(("posteriors", "posteriors"))
     for label, key in labels:
@@ -222,180 +231,91 @@ def main():
         })
     pd.DataFrame(rows).sort_values("destination").to_csv(FINALS / "MANIFEST.csv",
                                                          index=False)
-    write_readme(rows, excluded)
+    write_readme(rows, excluded, include_constrained=args.include_constrained)
     print(f"\nwrote {len(rows)} files -> {FINALS}")
 
 
-def write_readme(rows, excluded):
-    n = len(rows)
+def write_readme(rows, excluded, include_constrained=False):
     exc = "\n".join(f"- `{e}`" for e in excluded) or "- none"
+    constrained = (
+        "Constrained variants are included by request: `ddm/sv0/` and `cdm/sv0/` "
+        "reuse the standard posteriors with `s_v=0` during simulation. "
+        "`ddm/sv_fixed/` is a separate fit with `s_v` fixed at fitting, paired with "
+        "`posteriors/ddm_sv_fixed.npz` and its own validation. None feeds the root figure."
+        if include_constrained else
+        "Constrained variants are excluded from the default final snapshot. The "
+        "archived snapshot is in `../../archive/experiment-2/constrained/`, with "
+        "its original provenance and analysis notes. Source predictions and PPC "
+        "caches remain available. To assemble those analyses again, use "
+        "`python -m experiments.finalize_experiment_2 --include_constrained`."
+    )
     (FINALS / "README.md").write_text(f"""# Experiment 2 — real data (posterior predictive checks)
 
-Frozen snapshot, organised by model family. Assembled
+Organised by model family. Metadata refreshed
 {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%SZ')} by
-`experiments/finalize_experiment_2.py` — {n} files. Git commit `{git_commit()}`.
-Per-file sources and original mtimes: `MANIFEST.csv`.
+`experiments/finalize_experiment_2.py` — {len(rows)} recorded result files.
+Git commit `{git_commit()}` identifies the metadata code; original source paths and
+figure mtimes are recorded separately in `MANIFEST.csv`.
 
-## Contents
+## Where the overall combined PPC comes from
 
-Each family folder holds, per grouping variable:
+The root `combined_ppc.pdf` uses the **standard CogFormer model-class fits** for
+DDM, RDM and CDM, with contamination included and no simulation-time parameter
+constraints. It is generated by `experiments.experiment_2.combined_all`, which calls
+`collect_ppc_cached` with `variant=mc`, `n_ppc_samples=None` (all stored draws),
+`seed=0`, `no_contamination=False`, `fixed_natural=None`, `posteriors_path=None`,
+and the training geometry (4 regressors, 4 categories).
+
+| family | empirical input | posterior source | retained copy | grouping variables |
+|---|---|---|---|---|
+| DDM | `data/data_application_ddm.csv` | `outputs/data/real_data/ddm/mc/ddm_mc_posteriors.npz` | `posteriors/ddm.npz` | stimulus type, factual truth |
+| RDM | `data/data_application_rdm.csv` | `outputs/data/real_data/rdm/mc/rdm_mc_posteriors.npz` | `posteriors/rdm.npz` | congruency, session |
+| CDM | `data/data_application_cdm.csv` | `outputs/data/real_data/cdm/mc/cdm_mc_posteriors.npz` | `posteriors/cdm.npz` | difficulty, speed instruction |
+
+Paths in the input/source columns are relative to the repository for this study.
+The standard per-family PPCs and the overall figure use the same cached predictive
+draws in `outputs/data/real_data/ppc_cache/`. Every draw simulates each subject's own
+trials and design, then pools simulated trials over subjects. The root figure is
+copied from `outputs/figures/real_data/ppc/combined_ppc.pdf`. Its paper layout has DDM
+and RDM in the first two rows, CDM RT quantiles in the third and response-angle
+quantiles in the fourth. `PROVENANCE.json` records the audit of the retained figure.
+
+## Retained results
 
 | file | what it checks |
 |---|---|
-| `rt_ppc_<cond>.pdf` | RT distribution, observed vs posterior predictive |
-| `choice_ppc_<cond>.pdf` | response dimension: proportions (DDM/RDM) or distribution (CDM) |
-| `rt_quantiles_<cond>.pdf` | RT quantiles with predictive intervals |
-| `rt_qq_<cond>.pdf` | RT quantile–quantile |
-| `choice_quantiles_<cond>.pdf` | **CDM only** — see below |
-| `combined_ppc.pdf` | every grouping variable in ONE figure — see below |
-| `main_figure.tex`, `main_figure_details.tex`, `captions.tex` (root) | main-text figure (root `combined_ppc.pdf`) + short caption, its methods/appendix paragraph, and the appendix RT / CDM response-angle figures (generated by `python -m experiments.experiment_2.appendix_captions`; no manifest row) |
+| `combined_ppc.pdf` (root) | overall PPC for all three standard fits |
+| `<family>/combined_ppc.pdf` | the same family's check on one page |
+| `<family>/rt_ppc_<cond>.pdf` | observed and predictive RT distributions |
+| `<family>/choice_ppc_<cond>.pdf` | choice proportions (DDM/RDM), response-angle distribution (CDM) |
+| `<family>/rt_quantiles_<cond>.pdf` | observed and predictive RT quantiles |
+| `<family>/rt_qq_<cond>.pdf` | RT quantile–quantile comparison |
+| `cdm/choice_quantiles_<cond>.pdf` | continuous response-angle quantiles |
+| `<family>/validation/` | simulation-based validation on that family's empirical design, with saved predictions |
+| `posteriors/` | the three standard posterior-draw files |
+| `main_figure.tex`, `main_figure_details.tex`, `captions.tex` | paper figure and appendix definitions |
 
-At the tree ROOT, `combined_ppc.pdf` puts all three families in a single figure:
-DDM and RDM take one row each (four RT-quantile panels plus their 2x2 choice block),
-CDM takes two (RT quantiles, then response-angle quantiles). Dashed rules separate
-anything within a family; solid rules separate the families, the one boundary across
-which nothing is comparable.
+The appendix uses per-condition RT distributions for all three families and CDM
+response-angle distributions. Those complementary checks remain alongside the
+combined figure. RDM is the three-alternative Stroop analysis. CDM angles are doubled
+from the recorded half-angle to the model's response-angle scale.
 
-`posteriors/{{ddm,rdm,cdm}}.npz` holds the posterior draws every figure was simulated
-from, so the plots can be regenerated without re-running inference.
-`posteriors/ddm_sv_fixed.npz` is the separate fit behind `ddm/sv_fixed/`; the
-simulation-only variants have no npz of their own because they reuse their family's.
+## Optional constrained analyses
 
-### combined_ppc.pdf
+{constrained}
 
-The family's whole check on one page, for the per-condition figures above are the same
-data split across files. Condition groups are separated by a dashed vertical divider.
+## Assembly rules
 
-- **DDM / RDM** — one row: an RT-quantile panel per level of each grouping variable,
-  then a solid divider and the choice-proportion check as a 2x2 of per-level panels
-  folded into the footprint ONE quantile panel would take. The solid rule marks a
-  change of MEASURE, not of grouping. Inside the 2x2 the grouping variables are the
-  rows, separated by a dashed rule; the four share a y scale, and only the top-left
-  panel carries a legend.
-- **CDM** — two rows of five: RT quantiles on top, response-angle quantiles beneath,
-  difficulty then speed across.
+Only model-class (`mc`) PPC results enter this snapshot. Separate model-family
+checkpoints (`mf`) are excluded. The plot allowlist retains `ppc`, `choice_ppc`,
+`rt_quantiles`, `rt_qq`, `choice_quantiles`, and `combined_ppc`. The source `ppc_`
+prefix becomes `rt_ppc_`, and `_mc_` is dropped; the manifest records the mapping.
+LBA empirical PPCs belong to Experiment 3.
 
-No titles: each panel is labelled only by its condition level, and one legend on the
-first panel covers every series in the figure.
-
-Grouping variables: DDM `stim_type`/`truth`, RDM `congruency`/`session`,
-CDM `difficulty`/`speed`.
-
-## Constrained variants
-
-A family folder's ROOT is always the model's own fit, simulated as-is. Subfolders hold
-PPCs run from the **same posterior draws** with something pinned during the forward
-simulation. They are not separate fits, which is why there is deliberately no second
-`posteriors/*.npz` for them.
-
-| folder | pinned | produced by |
-|---|---|---|
-| folder | `s_v` | kind |
-|---|---|---|
-| `ddm/sv0/` | 0 at simulation | constrained **PPC** (`--fix_natural s_v=0.0`) |
-| `ddm/sv_fixed/` | 0 at fitting | constrained **REFIT** (`--fix_s_v`) |
-| `cdm/sv0/` | 0 at simulation | constrained PPC (`--fix_natural s_v=0.0`) |
-
-### A constrained PPC is not a constrained fit
-
-`ddm/sv0/` and `ddm/sv_fixed/` both set `s_v` to zero, and they are NOT the same thing.
-
-- **`sv0/`** overrides at SIMULATION time. The posterior draws still come from a fit
-  where `s_v` was free, so `v`, `a` and `tau` carry the compensation they acquired
-  while it was estimated. This answers "what does this fit predict with drift
-  variability switched off".
-- **`sv_fixed/`** is a genuine REFIT. `s_v` is dropped from the design, so it is never
-  an estimation target and the simulator injects 0.0 directly, bypassing the link.
-  Every other parameter is re-estimated under that constraint. This is the one that
-  matches the original specification (Stump et al., 2026).
-
-`s_v` is a substantial component -- natural-scale median 0.456 against a median |v| of
-1.243, a ratio of 0.37 -- so neither is a formality. Measured over RT quantiles
-0.1/0.3/0.5/0.7/0.9, both conditions, 72 subjects:
-
-| run | mean abs quantile error | predictive SD (truth=True) |
-|---|---|---|
-| observed | — | 1.173 |
-| canonical | 0.0869 | 1.503 |
-| `sv0/` (simulation-only) | 0.0695 | 1.581 |
-| `sv_fixed/` (refit) | 0.0784 | 1.533 |
-
-Read the aggregate with care: it is sensitive to which quantiles you score. On a coarse
-0.1/0.5/0.9 grid the canonical run wins; adding 0.3 and 0.7 reverses it, because the
-canonical fit's largest miss sits at q0.7 (-0.146). What is STABLE across grids is the
-shape, not the ranking:
-
-- `sv0/` fits the BODY better but overshoots the right tail badly (q0.9: +0.112 and
-  +0.161 against observed), and is the most over-dispersed of the three. Switching off
-  drift variability without re-estimating leaves `v`, `a` and `tau` compensating for a
-  component that is no longer there.
-- `sv_fixed/` tracks the canonical fit closely everywhere and slightly improves the
-  right tail (q0.9 +0.019 vs -0.049 on truth=True). Re-estimating under the constraint
-  re-absorbs what `s_v` was doing, so the predictive barely moves. **That similarity is
-  the result**: for this dataset, dropping across-trial drift variability properly costs
-  almost nothing.
-
-All three under-predict RT through the body and are over-dispersed relative to observed
-(SD ~1.5 against 1.17), which is a pre-existing property of the lapse model, not
-something these variants introduce.
-
-`cdm/sv0/` asks the simulation-time question of CDM;
-
-Note that `sv_fixed/`'s PPC must still pass `--fix_natural s_v=0.0`: a parameter absent
-from the design has its coefficients masked to zero, and the link is still applied --
-`shifted_softplus(0) = 0.693`, not 0, because that function never implemented the
--log(2) shift its name implies.
-
-`cdm/sv0/` asks the same simulation-time question of CDM.
-
-## Why choice quantiles are CDM-only
-
-Not an omission. CDM's response is a continuous angle, so quantiles of theta are
-meaningful the way RT quantiles are. DDM and RDM respond with a binary choice, where
-quantiles carry no information — for those the response-dimension check IS the
-proportion comparison in `choice_ppc_*`. `plot_choice_quantiles` in
-`experiments/experiment_2/ppc.py` gates on this explicitly and logs a skip.
-
-## Naming
-
-The source calls the RT-distribution plot just `ppc_`, which says nothing about which
-dimension it checks when it sits beside `choice_ppc_`. Renamed to `rt_ppc_` here; the
-`_mc_` infix is dropped since the whole tree is model-class. `MANIFEST.csv` records
-every rename.
-
-## What is included
-
-An allowlist of plot types -- `rt_ppc`, `choice_ppc`, `rt_quantiles`, `rt_qq`,
-`choice_quantiles` -- not "whatever was in the source directory", so the tree's
-contents do not depend on which flags a given PPC run happened to pass.
-
-## Excluded
-
-Model-FAMILY checkpoint figures and their posteriors — a different lineage from
-everything else here (and one that does not exist for RDM at all, since
-`RDM_MF_CKPT` was never retrained after the 2026-07-09 factorisation). The mf
-posteriors are additionally stale, dated 2026-06-02:
+Other excluded source files found during assembly:
 
 {exc}
-
-## Caveats
-
-- **RDM predates the Stroop data.** Every RDM figure here was produced before the
-  Stroop dataset landed and will need regenerating once that analysis is settled.
-- **These figures come from uncommitted code.** As of this snapshot
-  `experiments/experiment_2/ppc.py` carries an uncommitted restyle: per-family
-  identity colours from `cogformer.utils.plot_utils.FAMILY_PALETTES` (DDM
-  magenta, RDM purple-blue, CDM green), one `PPC_CI` interval level replacing a
-  mix of 90% and 95% bands, condition names routed through `CONDITION_DISPLAY`,
-  and titles no longer carrying the `(mc)` variant tag. The git commit recorded
-  above is therefore the parent of the code that drew these, not that code
-  itself. A clean checkout would reproduce the same NUMBERS -- the posterior
-  draws in `posteriors/` are unchanged -- but not the same appearance.
-- Adjacent analyses NOT included here: `ppc/r4c4_fulldraws/` (contamination
-  sensitivity, contam vs nocontam per family, 20 files) and the DDM-only
-  `ppc/ddm_combined/` and `ppc/ddm_original/` sets.
 """)
-
 
 if __name__ == "__main__":
     main()
