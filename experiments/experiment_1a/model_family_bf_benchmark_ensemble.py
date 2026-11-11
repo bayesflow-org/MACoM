@@ -24,6 +24,7 @@ from cogformer.diagnostics.plot.ensemble_recovery import ensemble_recovery, glob
 
 from ..configs import MODELS as BASE_MODELS, GLOBAL_PARAMS, GLOBAL_VARIABLE_NAMES
 from ..utils import add_global_params, reshape_bf_to_cf
+from ..visualization.ensemble_style import GLOBAL_RECOVERY_RC, global_recovery_options
 
 
 CASES = ["intercept_only", "fixed", "regressed", "fixed_regressed", "interaction"]
@@ -125,7 +126,13 @@ def plot_bench5(cfg: dict, entries: list[dict], outdir: Path, family: str, *,
             if name == "metrics":
                 np.random.seed(seed)
             global_opts = GLOBAL_SHARE.get(name, {}) if scope == "global" else {}
-            fig = plot_fn(**kwargs, **global_opts)
+            styled_kwargs = dict(kwargs, **global_opts)
+            rc = {}
+            if scope == "global" and name == "recovery":
+                styled_kwargs.update(global_recovery_options(CASES))
+                rc = GLOBAL_RECOVERY_RC
+            with matplotlib.rc_context(rc):
+                fig = plot_fn(**styled_kwargs)
             if fig is None:
                 continue
             suffix = "_global" if scope == "global" else ""

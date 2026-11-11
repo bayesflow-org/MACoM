@@ -15,6 +15,11 @@ Two variants are produced per family and plot type:
 
 Plot types: recovery, ECDF, coverage, metrics — each with a separate global
 (``pi``) companion where a global parameter is active.
+
+Redraw just the five-case contamination recovery rows from saved predictions:
+
+    python -m experiments.experiment_1.model_class_cf_benchmark_ensemble \
+        --plots recovery --variants bench5 --global_only
 """
 from experiments.paths import RESULTS_ROOT
 from experiments import shared_config
@@ -25,6 +30,7 @@ from pathlib import Path
 
 import numpy as np
 import seaborn as sns
+import matplotlib
 import matplotlib.pyplot as plt
 
 from cogformer.diagnostics.plot.ensemble_recovery import ensemble_recovery, global_ensemble_recovery
@@ -34,6 +40,7 @@ from cogformer.diagnostics.plot.ensemble_metrics import ensemble_metrics, global
 
 from ..configs import MODELS as _BASE_MODELS
 from ..utils import add_global_params
+from ..visualization.ensemble_style import GLOBAL_RECOVERY_RC, global_recovery_options
 
 GLOBAL_PARAMS = ["pi"]
 GLOBAL_VARIABLE_NAMES = [r"$\pi$"]
@@ -61,6 +68,12 @@ def parse_args():
     p.add_argument("--num_null_draws", type=int, default=1000)
     p.add_argument("--metrics", action=argparse.BooleanOptionalAction, default=True,
                    help="Also produce the (slower) metrics heatmaps")
+    p.add_argument("--plots", type=str, default=None,
+                   help="Comma-separated subset of recovery,ecdf,coverage,metrics to redraw.")
+    p.add_argument("--variants", nargs="+", choices=["bench5", "bench6"],
+                   default=["bench5", "bench6"])
+    p.add_argument("--global_only", action="store_true",
+                   help="Redraw only the contamination companions from saved predictions.")
     return p.parse_args()
 
 
@@ -130,6 +143,12 @@ def main():
     if args.metrics:
         plotters["metrics"] = (ensemble_metrics, global_ensemble_metrics,
                                {"num_null_draws": args.num_null_draws})
+    if args.plots is not None:
+        wanted = [name.strip() for name in args.plots.split(",") if name.strip()]
+        unknown = set(wanted) - plotters.keys()
+        if unknown or not wanted:
+            raise SystemExit(f"Choose plots from {list(plotters)}; got {args.plots!r}")
+        plotters = {name: plotters[name] for name in wanted}
 
     for family, cfg in _MODELS_WITH_PI.items():
         scenarios = {name: (dc, opts) for name, dc, opts in cfg["val_scenarios"]}
@@ -145,6 +164,8 @@ def main():
                 loaded[case] = entry
 
         for variant, case_names in (("bench5", OG_CASES), ("bench6", all_cases)):
+            if variant not in args.variants:
+                continue
             cases = [c for c in case_names if c in loaded]
             if len(cases) < 2:
                 logging.warning(f"[skip] {family} {variant}: only {len(cases)} case(s) available")
@@ -191,14 +212,20 @@ def main():
                     kwargs.update(color_kwargs)
 
                 logging.info(f"Plotting {family} {variant} ensemble {plot_name} ({len(cases)} cases)...")
-                fig = plot_fn(**kwargs)
+                fig = None if args.global_only else plot_fn(**kwargs)
                 if fig is not None:
                     path = outdir / f"{family}_{variant}_ensemble_{plot_name}.pdf"
                     fig.savefig(path, bbox_inches="tight")
                     plt.close(fig)
                     logging.info(f"[saved] {path}")
 
-                glob_fig = global_fn(**kwargs)
+                global_kwargs = dict(kwargs)
+                rc = {}
+                if plot_name == "recovery":
+                    global_kwargs.update(global_recovery_options(cases))
+                    rc = GLOBAL_RECOVERY_RC
+                with matplotlib.rc_context(rc):
+                    glob_fig = global_fn(**global_kwargs)
                 if glob_fig is not None:
                     path = outdir / f"{family}_{variant}_ensemble_{plot_name}_global.pdf"
                     glob_fig.savefig(path, bbox_inches="tight")
