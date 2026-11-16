@@ -167,6 +167,25 @@ def log_page_sizes(fig, key):
                  f" | on page: labels {label * scale:.1f} pt, ticks {tick * scale:.1f} pt")
 
 
+def add_recovery_panel_labels(fig, n_grid_axes):
+    """Label the pixel maps (A) and recovery grid (B) below their left edges.
+
+    Add these after the grid/divider fit so they cannot affect its ink measurements.
+    The tight save includes the labels in a shared band below the existing content.
+    """
+    fig.canvas.draw()
+    renderer = fig.canvas.get_renderer()
+    inv = fig.transFigure.inverted()
+    grid = [ax.get_tightbbox(renderer).transformed(inv)
+            for ax in fig.axes[:n_grid_axes] if ax.get_visible()]
+    maps = [ax.get_tightbbox(renderer).transformed(inv)
+            for ax in fig.axes[n_grid_axes:] if ax.get_visible()]
+    y = min(box.y0 for box in maps + grid) - 0.08 / fig.get_figheight()
+    for label, boxes in (("A", maps), ("B", grid)):
+        fig.text(min(box.x0 for box in boxes), y, label,
+                 fontsize=20, fontweight="bold", ha="left", va="top")
+
+
 def main():
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
     a = parse_args()
@@ -278,6 +297,8 @@ def main():
         fig = (fit_grid_to_divider(draw, spec_for(name)["width"]) if name == "recovery"
                else draw())
         if fig is not None:
+            if name == "recovery":
+                add_recovery_panel_labels(fig, n_rows_grid * n_cols_main)
             path = outdir / f"model_class_ensemble_{name}.pdf"
             log_page_sizes(fig, name)
             fig.savefig(path, bbox_inches="tight"); plt.close(fig)
@@ -295,6 +316,13 @@ def main():
         gfig = sized(global_fn, f"{name}_global", g_rows, GLOBAL_PER_ROW,
                      **shared, **extra, **gkw)
         if gfig is not None:
+            if name == "recovery":
+                gfig.canvas.draw()
+                bbox = gfig.get_tightbbox(gfig.canvas.get_renderer())
+                # Match A/B's printed size at this panel's narrower page width.
+                gfig.text(bbox.x0 / gfig.get_figwidth(),
+                          (bbox.y0 - 0.08) / gfig.get_figheight(), "C",
+                          fontsize=16.5, fontweight="bold", ha="left", va="top")
             path = outdir / f"model_class_ensemble_{name}_global.pdf"
             log_page_sizes(gfig, f"{name}_global")
             gfig.savefig(path, bbox_inches="tight"); plt.close(gfig)

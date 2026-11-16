@@ -476,7 +476,7 @@ def main():
 
 
 def _plot(df, outdir, figsize=(9.0, 5.0), label_fs=14, legend_fs=12, tick_fs=None,
-          stack_legend=False):
+          stack_legend=False, panel_label=None):
     """EIG and NRMSE by design.
 
     The second panel used to show mean posterior contraction, which said the same
@@ -492,6 +492,17 @@ def _plot(df, outdir, figsize=(9.0, 5.0), label_fs=14, legend_fs=12, tick_fs=Non
     # set_box_aspect below fixes each axes box to 1:1, and a figure much wider than
     # 2x the panel height would just pad the middle with whitespace.
     fig, axes = plt.subplots(1, 2, figsize=figsize)
+
+    def save():
+        if panel_label is not None:
+            fig.canvas.draw()
+            bbox = fig.get_tightbbox(fig.canvas.get_renderer())
+            fig.text(bbox.x0 / fig.get_figwidth(),
+                     (bbox.y0 - 0.08) / fig.get_figheight(), panel_label,
+                     fontsize=label_fs, fontweight="bold", ha="left", va="top")
+        fig.savefig(outdir / "design_eig.pdf", bbox_inches="tight")
+        plt.close(fig)
+
     handles, labels = [], []
     for label in [d[0] for d in DESIGNS]:
         sub = df[df.design == label].sort_values("num_obs")
@@ -533,12 +544,11 @@ def _plot(df, outdir, figsize=(9.0, 5.0), label_fs=14, legend_fs=12, tick_fs=Non
     # matplotlib's legend `title` cannot do -- it only ever stacks the title on top.
     # So the text is a separate artist: draw once to measure both, place the pair so
     # the combined block is centred, then pin the text to the legend's left edge.
-    # A stacked legend is two rows tall, so it needs more of the figure reserved than
-    # the single row does -- otherwise the descriptor lands on the x axis labels.
-    fig.tight_layout(rect=[0, 0.22 if stack_legend else 0.09, 1, 1])
+    # Place a stacked legend below the finished axes instead of shrinking the panels.
+    fig.tight_layout(rect=[0, 0.09, 1, 1])
     leg = fig.legend(handles, labels, loc="lower center", ncol=len(labels),
                      frameon=False, fontsize=LEGEND_FS, bbox_to_anchor=(0.5, 0.028))
-    desc_text = "u\u2081u\u2082   (C = Continuous, B = Binary)"
+    desc_text = "C = Continuous, B = Binary"
 
     if stack_legend:
         # STACKED, for a narrow target. Side by side, the text and the entries ADD
@@ -546,17 +556,20 @@ def _plot(df, outdir, figsize=(9.0, 5.0), label_fs=14, legend_fs=12, tick_fs=Non
         # figure width, which caps how large anything can be once the page scales it
         # down. Stacked, the width is the LARGER of the two instead of their sum.
         #
-        # The descriptor is placed against the legend's MEASURED top rather than a
-        # guessed offset: the legend's height depends on its font size, so a fixed
-        # y lands on the entries as soon as LEGEND_FS changes.
+        # Measure both rows so larger text clears the x labels and legend entries.
         inv = fig.transFigure.inverted()
-        leg.set_bbox_to_anchor((0.5, 0.0), transform=fig.transFigure)
         fig.canvas.draw()
-        lb = leg.get_window_extent().transformed(inv)
-        desc = fig.text(0.5, lb.y1 + 0.015, desc_text, ha="center", va="bottom",
+        bottom = min(ax.get_tightbbox(fig.canvas.get_renderer()).transformed(inv).y0
+                     for ax in axes)
+        desc = fig.text(0.5, bottom - 0.08 / fig.get_figheight(), desc_text,
+                        ha="center", va="top",
                         fontsize=LEGEND_FS)
-        fig.savefig(outdir / "design_eig.pdf", bbox_inches="tight")
-        plt.close(fig)
+        fig.canvas.draw()
+        tb = desc.get_window_extent().transformed(inv)
+        leg.set_loc("upper center")
+        leg.set_bbox_to_anchor((0.5, tb.y0 - 0.04 / fig.get_figheight()),
+                               transform=fig.transFigure)
+        save()
         return
 
     desc = fig.text(0.5, 0.045, desc_text, ha="right", va="center", fontsize=LEGEND_FS)
@@ -590,8 +603,7 @@ def _plot(df, outdir, figsize=(9.0, 5.0), label_fs=14, legend_fs=12, tick_fs=Non
     fig.canvas.draw()
     lb = leg.get_window_extent().transformed(inv)
     desc.set_position((lb.x0 - gap, (lb.y0 + lb.y1) / 2))
-    fig.savefig(outdir / "design_eig.pdf", bbox_inches="tight")
-    plt.close(fig)
+    save()
 
 
 def parse_args():

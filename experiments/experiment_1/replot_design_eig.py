@@ -47,12 +47,10 @@ def parse_args():
                    help="Figure width in inches. The main figure places it at "
                         "0.75\\textwidth, so the page scales it by ~0.76.")
     p.add_argument("--label_fs", type=float, default=12)
-    p.add_argument("--legend_fs", type=float, default=13)
+    p.add_argument("--legend_fs", type=float, default=14)
     p.add_argument("--tick_fs", type=float, default=10)
-    # One row across the full width. It does make the saved figure wider than the
-    # panels alone -- the decoder text and the entries sit side by side and their
-    # widths add -- and that width is what the page scale is computed against.
-    p.add_argument("--stack_legend", action=argparse.BooleanOptionalAction, default=False,
+    # Separate rows keep the larger legend text within the panels' width.
+    p.add_argument("--stack_legend", action=argparse.BooleanOptionalAction, default=True,
                    help="Stack the decoder text above the entries instead of beside "
                         "them. Narrower, but two rows.")
     p.add_argument("--n_boot", type=int, default=200)
@@ -88,16 +86,11 @@ def main():
             df.to_csv(csv_path, index=False, float_format="%.4f")
             logging.info(f"[updated] {csv_path} (+nrmse_se)")
 
-    # SIZED FOR THE MAIN FIGURE, where it is placed at 0.75\textwidth (4.1 in of a
-    # 5.5 in \textwidth). MEASURED on the saved PDF, which is what matters:
-    # bbox_inches='tight' sets the final width from the widest artist, so the
-    # requested figsize is not the scale factor. The saved figure is 5.4 in, so the
-    # page scales it by 0.76 and gets 9.2 / 7.6 / 6.3 pt (labels / ticks / legend --
-    # the legend is shrunk to the panels' span, whatever --legend_fs asks for); the
-    # sweep's own 9x5 default puts the labels at 6.5 pt.
+    # Sized for 0.75\textwidth in the main figure. Stack the legend so its text
+    # can be enlarged without widening the saved PDF and shrinking the panels.
     _plot(df, outdir, figsize=(a.width, a.width * 0.56),
           label_fs=a.label_fs, legend_fs=a.legend_fs, tick_fs=a.tick_fs,
-          stack_legend=a.stack_legend)
+          stack_legend=a.stack_legend, panel_label="D")
     logging.info(f"[saved] {outdir / 'design_eig.pdf'}")
 
 
