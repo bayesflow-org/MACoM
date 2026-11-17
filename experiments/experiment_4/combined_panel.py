@@ -196,6 +196,11 @@ def main():
     _draw_bottom(fig, summ, (fro, lea, cka_obs), a.seed, a.fig_width, h_bottom, S, xs)
     _save(fig, out.with_name(out.stem + "_representation.pdf"))
 
+    # Apply the same bottom-left labels when rebuilding from the saved arrays.
+    from .panel_labels import label_panels
+    label_panels(out.with_name(out.stem + "_recovery.pdf"),
+                 out.with_name(out.stem + "_representation.pdf"), out)
+
 
 def _save(fig, path):
     w, h = fig.get_size_inches()
