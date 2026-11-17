@@ -23,6 +23,8 @@ dependencies = [
     "numba>=0.67.0",
     "numpy>=2.5.3",
     "pandas>=3.0.6",
+    # Compose the publication figures while retaining their vector graphics.
+    "pymupdf==1.28.2",
     # Experiment 4's representation analysis (RSA / crossnobis). Not pulled in by any
     # other dependency, so it must be listed or a fresh `uv sync` cannot run exp 4.
     "rsatoolbox>=0.3.2",
