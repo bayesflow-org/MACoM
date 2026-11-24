@@ -215,111 +215,29 @@ __marimo__/
 # Streamlit
 .streamlit/secrets.toml
 
-# Results
-# Ignore checkpoints EXCEPT the LBA-finetuned one: it is the artifact behind
-# experiment 3's forgetting result, and at 27 MB it is small enough to version
-# alongside the figures it produced. Same structure as the figures block below --
-# a negation cannot re-include a path whose parent directory is excluded, so every
-# parent level is unignored and its other children re-ignored in turn.
-outputs/checkpoints/*
-!outputs/checkpoints/model_class/
-outputs/checkpoints/model_class/*
-!outputs/checkpoints/model_class/cf/
-outputs/checkpoints/model_class/cf/*
-!outputs/checkpoints/model_class/cf/lba_finetune/
-outputs/checkpoints/model_class/cf/lba_finetune/*
-!outputs/checkpoints/model_class/cf/lba_finetune/*.pt
-# Keep the shared benchmark test set (e1_data): every arm is scored on these exact
-# files and a regeneration does not reproduce them, so they travel with the repo.
-outputs/data/*
-!outputs/data/benchmark/
-outputs/data/benchmark/*
-!outputs/data/benchmark/seed0/
-outputs/timing/
-outputs/logs/
-# Keep the final study's source figure and C2ST trees. A negation cannot
-# re-include a path whose parent directory is excluded, so the model_class
-# parent must be unignored first and its other children re-ignored.
-outputs/figures/*
-!outputs/figures/real_data
-!outputs/figures/encoder_rep
-!outputs/figures/c2st/
-!outputs/figures/model_family/
-outputs/figures/model_family/*
-!outputs/figures/model_family/bf/
-!outputs/figures/model_class/
-outputs/figures/model_class/*
-!outputs/figures/model_class/cf
-outputs/figures/model_class/cf/**/*.npz
-
-# .claude: skills are SHARED across hosts (tracked); settings.local.json is machine-local.
-.claude/*
-!.claude/skills/
-.claude/settings.local.json
-
+# Local workspace and separately distributed study artifacts
+/.claude/
+/.mcp.json
+/-.png
+/data/
+/outputs/
+/writeup/
+/experiments/diagnostics/
 wandb/
 
-# Datasets
+# Generated datasets and model artifacts
 datasets/
 *.npz
-# encoder_rep results are small and are the experiment's record — keep them.
-# Must come AFTER the global *.npz rule: last matching pattern wins.
-!outputs/figures/encoder_rep/**/*.npz
-!outputs/data/benchmark/seed0/*.npz
-
-# Vendored typeface. The TTFs are ~2 MB of binary that never changes and is not
-# ours; `fetch_fonts.sh` pulls the pinned release into cogformer/utils/fonts/.
-# The LICENSE stays tracked: it records the terms and the exact version a
-# checkout is meant to fetch, which is the part that has to survive in git.
-cogformer/utils/fonts/*.ttf
-cogformer/utils/fonts/*.otf
-
-# macOS Finder metadata
-.DS_Store
-
-# Study roots store results directly under outputs/<study>/, where the
-# repository-level rules above do not reach.
-# A study's results live in its finals/, figures/ and evaluations/; its checkpoints
-# and data stay local, except for the retained pretrained checkpoint below.
-outputs/*/checkpoints/
-outputs/*/data/
-outputs/*/timing/
-outputs/*/logs/
-outputs/*/superseded_copies_of_main/
-
-# Experiment diagnostics, including scripts, reports, and generated artifacts, stay local.
-/experiments/diagnostics/
-/outputs/diagnostics/
-/outputs/*/diagnostics/
-
-# Local run checks, frozen source copies, and continuation scheduler state.
-/outputs/checks/
-/outputs/source_snapshot/
-/outputs/source_changes.patch
-/outputs/continuation/
-/outputs/*/checks/
-/outputs/*/source_snapshot/
-/outputs/*/source_changes.patch
-/outputs/*/continuation/
-
-# Safety net for any other path: model weights and pickled caches stay local.
-# Deliberate checkpoint exceptions follow, since the last matching pattern wins.
 *.pt
 *.pth
 *.ckpt
 *.keras
 *.h5
 *.pkl
-!outputs/checkpoints/model_class/cf/lba_finetune/*.pt
 
-# Preserve the original October 26 pretrained checkpoint, including AdamW and
-# scheduler state. Keep all other checkpoints in this study ignored.
-!outputs/checkpoints/
-outputs/checkpoints/*
-!outputs/checkpoints/model_class/
-outputs/checkpoints/model_class/*
-!outputs/checkpoints/model_class/cf/
-outputs/checkpoints/model_class/cf/*
-!outputs/checkpoints/model_class/cf/r4c4_enc128h4l4_a0.5_b128_e15000_ptc_gaussian_softmax_intoptional_beta22_encstruct/
-outputs/checkpoints/model_class/cf/r4c4_enc128h4l4_a0.5_b128_e15000_ptc_gaussian_softmax_intoptional_beta22_encstruct/*
-!outputs/checkpoints/model_class/cf/r4c4_enc128h4l4_a0.5_b128_e15000_ptc_gaussian_softmax_intoptional_beta22_encstruct/cogformer_model_class_fm_l8_h8_p256_s32_d128_b128_e15000_t100_intoptional_beta22_encstruct.pt
+# Fetch the pinned typeface with fetch_fonts.sh. Keep its license tracked.
+cogformer/utils/fonts/*.ttf
+cogformer/utils/fonts/*.otf
+
+# macOS Finder metadata
+.DS_Store

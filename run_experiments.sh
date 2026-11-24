@@ -59,12 +59,12 @@ if [[ "$STUDY_ROOT" == "$PROJECT_ROOT" ]]; then
     echo "STUDY_ROOT must be a results directory, not the repository root" >&2
     exit 2
 fi
-if [[ ! -f "$STUDY_ROOT/study.env" ]]; then
+if [[ ! -f "$STUDY_CONFIG" ]]; then
     echo "STUDY_ROOT=$STUDY_ROOT has no study.env; set it up with experiments/setup_study.sh" >&2
     exit 2
 fi
 # Exported for the record (stage logs, child shells); shared_config.py re-derives it
-# from the selected study's study.env itself.
+# from the selected study configuration itself.
 export DESIGN_GENERATOR
 GEN=(--design_generator "$DESIGN_GENERATOR")
 # Names and tags the e1_train wandb run (wandb-only; checkpoint names carry MC_TAG).

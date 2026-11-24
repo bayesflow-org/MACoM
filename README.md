@@ -6,33 +6,47 @@ Jerry M. Huang, Lukas Schumacher, Niek Stevenson, Mischa von Krause, and Stefan 
 
 Repository for the Nature Communications paper on meta-amortized cognitive models.
 
-Final results from the October 26, 2026 study are retained directly in
-[`outputs/`](outputs/), including its continuation results. Final figures and
-tables are in [`outputs/finals/`](outputs/finals/). Earlier local results,
-checkpoints, and run histories have been removed.
+## Reproducing the study
 
-Experiment scripts and `run_experiments.sh` default to this results directory and
-read its `study.env` for the Gaussian-softmax generator and structural settings.
-Paths resolve from the repository location, independently of the working directory.
-Empirical inputs stay in `data/`; generated datasets are in `outputs/data/`.
+The code and locked environment are tracked here. Empirical inputs and saved
+study artifacts are supplied separately. Place `data_application_ddm.csv`,
+`data_application_rdm.csv`, `data_application_cdm.csv`, and
+`data_application_lba.csv` in `data/`. The original-prediction comparison scripts
+also use `data/pred_data_exp_2.csv`.
 
-To regenerate figures from saved data, run the corresponding replot module;
-its input and output defaults select the retained run. For example:
+For the reported run, restore the original artifacts under `outputs/` with
+their directory layout intact. Use the trained checkpoints and their completion
+markers for rescoring, `outputs/data/benchmark/seed0/` for the shared benchmark,
+and the saved predictions and predictive caches when redrawing the reported
+figures. Final figures and tables are assembled in `outputs/finals/`.
+
+To initialize a fresh run with the paper's settings, install the environment
+below, then run:
+
+```bash
+USE_WANDB=0 bash run_experiments.sh all
+```
+
+The experiments read `study.env` from the selected study directory when present.
+The default `outputs/` directory uses `experiments/paper_study.env` as its
+fallback. Set `STUDY_ROOT=/path/to/study` to run in a different directory with
+its own `study.env`. Paths resolve independently of the working directory.
+
+With the saved arrays in place, regenerate figures with the corresponding replot
+module. Run `bash fetch_fonts.sh` to install the pinned figure typeface. For example:
 
 ```bash
 .venv/bin/python -m experiments.experiment_4.replot_crossfamily
 .venv/bin/python -m experiments.experiment_4.replot_representation
 .venv/bin/python -m experiments.experiment_1.replot_per_case
-bash run_experiments.sh finalize
+USE_WANDB=0 bash run_experiments.sh finalize
 ```
 
 The last command copies regenerated source figures into `outputs/finals/`.
 Run each experiment's `appendix_captions` module and
 `experiments.experiment_1a.gap_tables` to refresh its text and tables.
-Inspect the complete reproduction commands with
-`DRY_RUN=1 FORCE=1 USE_WANDB=0 bash run_experiments.sh all`. Select an alternative
-results directory with `STUDY_ROOT=/path/to/study`; its files use the same flat
-layout and its `study.env` selects the study settings.
+Inspect the full command sequence with
+`DRY_RUN=1 FORCE=1 USE_WANDB=0 bash run_experiments.sh all`.
 
 # Install
 
@@ -103,8 +117,8 @@ Both features are opt-in: the defaults remain `interaction_policy="all"` (legacy
 forced eligible interactions) and an unconditioned encoder, preserving existing
 checkpoint behavior. New training checkpoints record the structural settings and
 use distinct filenames for the enabled options. Encoder conditioning adds weights
-and requires training; its calibration benefit has not been established. See the
-[implementation and checks](experiments/diagnostics/PARAMETER_STRUCTURE_IMPLEMENTATION.md).
+and requires training. Its calibration benefit remains to be established. See the
+[parameter-specific structure tests](tests/test_parameter_specific_structure.py).
 
 # Alternative design generator
 
@@ -151,7 +165,8 @@ Saved validation datasets are reused as stored; training-time benchmark validati
 continues to use its original generator. Adding this option does not change existing
 checkpoints or results.
 
-To prepare an additional study with its own datasets and checkpoints:
+With the saved study artifacts restored, prepare an additional study with its own
+datasets and checkpoints:
 
 ```bash
 bash experiments/setup_study.sh /path/to/new-study gaussian_softmax
@@ -175,7 +190,8 @@ The prepared replay uses the original checkpoint, exact 1,000-design plan, and
 sampling settings. It generates fresh datasets, since the old run discarded draws
 and did not reset the separate Numba RNG. The new run seeds NumPy, PyTorch, and
 Numba per configuration and records new and original input hashes.
-Launch or resume its frozen source with:
+With the original continuation files restored under `outputs/continuation/`,
+launch or resume its frozen source with:
 
 ```bash
 .venv/bin/python outputs/continuation/ensemble_metrics_1000_bayesflow_20261105/launch.py

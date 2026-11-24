@@ -73,8 +73,12 @@ LBA_FT_EPOCHS=1000
 SIM_BACKEND=gpu
 
 # ── Design generator (study identity) ──────────────────────────────────────────
-# Resolve study identity independently of the process working directory.
-if [[ -f "$STUDY_ROOT/study.env" ]]; then source "$STUDY_ROOT/study.env"; fi
+# The default study can start from a source-only checkout.
+STUDY_CONFIG="$STUDY_ROOT/study.env"
+if [[ ! -f "$STUDY_CONFIG" && "$STUDY_ROOT" == "$PROJECT_ROOT/outputs" ]]; then
+    STUDY_CONFIG="$PROJECT_ROOT/experiments/paper_study.env"
+fi
+if [[ -f "$STUDY_CONFIG" ]]; then source "$STUDY_CONFIG"; fi
 DESIGN_GENERATOR="${DESIGN_GENERATOR:-mixture}"
 GEN_SUFFIX=""; [[ "$DESIGN_GENERATOR" == mixture ]] || GEN_SUFFIX="_${DESIGN_GENERATOR}"
 
