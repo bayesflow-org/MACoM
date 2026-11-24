@@ -378,8 +378,8 @@ def write_tables():
 
 
 # ── main-text figure ─────────────────────────────────────────────────────────
-# Top: zero-shot and fine-tuned LBA recovery overlaid on one grid (overlay_recovery.py),
-# interaction design. Bottom: the LBA's per-coefficient metric deltas for the same design;
+# Top: zero-shot and fine-tuned LBA recovery (A) beside the per-coefficient metric
+# deltas (B), both for the interaction design. Bottom: empirical RT quantiles (C);
 # the trained families' largest deltas are stated in the caption, not plotted. The
 # interaction design is where fine-tuning shows most for the LBA, and also where the
 # trained families' posteriors move most (per-dataset C2ST), so the details state both:
@@ -392,22 +392,27 @@ DELTA_CSV = FINALS / "compare" / "delta_metrics.csv"
 FORGET_CSV = FINALS / "c2st" / "forgetting_c2st_summary.csv"
 MAIN_CASE = "interaction"
 MAIN_PATHS = (f"compare/lba/{MAIN_CASE}_overlay_recovery.pdf",
-              f"compare/delta_metrics_{MAIN_CASE}.pdf")
+              f"compare/delta_metrics_{MAIN_CASE}.pdf",
+              "ppc/free/rt_quantiles_row.pdf")
 
 MAIN = (
-    r"\textbf{{Transfer to a held-out model family.}} Top: parameter recovery for the LBA, "
+    r"\textbf{{Transfer to a held-out model family.}} \textbf{{A:}} parameter recovery for the LBA, "
     r"which was not among the training families, by the original CogFormer network without "
     r"any LBA training (zero-shot, grey) and by the same network after fine-tuning on all four "
-    r"families (orange), on the same {N} test datasets of the {CASE} design: posterior means "
+    r"families (red), on the same {N} test datasets of the {CASE} design: posterior means "
     r"against ground truth with 90\% credible intervals, one $r$ per network. Columns are the "
     r"parameters and rows the coefficients (intercept, slopes on $u_1$ and $u_2$, and on their "
-    r"product); N/A marks coefficients the design does not contain. Bottom: change in each of "
+    r"product); N/A marks coefficients the design does not contain. \textbf{{B:}} change in each of "
     r"the LBA's coefficients' NRMSE (top) and calibration error (bottom) with fine-tuning "
-    r"(fine-tuned minus zero-shot), cells laid out as in the top panel. Negative values (blue) "
+    r"(fine-tuned minus zero-shot), cells laid out as in A. Negative values (blue) "
     r"are improvements, positive values (red) deteriorations; each panel has its own colour "
     r"scale. The LBA's largest change in magnitude is {L_NRMSE} in NRMSE and {L_CAL} in "
     r"calibration error; for DDM, RDM and CDM (fine-tuned minus the original network, not "
-    r"shown) it is {O_NRMSE} and {O_CAL}. Details in Appendix~\ref{{{DETAILS}}}."
+    r"shown) it is {O_NRMSE} and {O_CAL}. \textbf{{C:}} posterior predictive RT quantiles "
+    r"for the empirical lexical-decision task after fine-tuning, grouped by speed/accuracy "
+    r"condition, word frequency and lexicality. Observed quantiles (squares, dashed) are "
+    r"compared with predictive medians (circles, solid) and central 95\% intervals (bands). "
+    r"The fit estimates both variability parameters. Details in Appendix~\ref{{{DETAILS}}}."
 )
 DETAILS = (
     r"The original network in Figure~\ref{{fig:exp3-main}} was trained on DDM, RDM and CDM "
@@ -418,8 +423,8 @@ DETAILS = (
     r"training for {EP} epochs on all four families, drawn with equal probability, with the LBA "
     r"under its own model embedding initialised from the RDM's. In the {CASE} design, {DESIGN} "
     r"Both networks are evaluated on the same {N} benchmark test datasets ({T} trials, two "
-    r"stimulus-coded alternatives) with {D} posterior draws per dataset, and each cell of the "
-    r"top panel draws both on one frame; $\pi$ is estimated but not shown. NRMSE and "
+    r"stimulus-coded alternatives) with {D} posterior draws per dataset, and each cell in "
+    r"panel A draws both on one frame; $\pi$ is estimated but not shown. NRMSE and "
     r"calibration error are defined as in the bottom panel of Figure~\ref{{{REF}}}. "
     r"With fine-tuning, the LBA's median NRMSE over coefficients falls from {NR0} to {NR1} "
     r"({NR_IMP} of {NC} coefficients improve) and its median calibration error from {CE0} to "
@@ -430,7 +435,17 @@ DETAILS = (
     r"(Table~\ref{{tab:app3-forgetting-c2st}}); on the intercept-only design the excess is "
     r"{I_LO} to {I_HI}, i.e.\ indistinguishable. The two arms' separate diagnostics for this "
     r"design are in Figures~\ref{{{ZS}}} and~\ref{{{FT}}}; the metric changes for the other "
-    r"designs in Figures~\ref{{{DM0}}}--\ref{{{DM1}}}."
+    r"designs in Figures~\ref{{{DM0}}}--\ref{{{DM1}}}. "
+    r"Panel C uses the fine-tuned network's empirical lexical-decision fit with $s_v$ and "
+    r"$s_\tau$ estimated (the free-variability variant), fitted per subject with an intercept "
+    r"and the speed/accuracy condition on $v$, $v_{{\mathrm{{diff}}}}$, $a$ and $\tau$. "
+    r"Each posterior predictive draw simulates the subjects' own trials with contamination "
+    r"included and pools simulated trials across subjects and correct/error responses. "
+    r"The 0.1, 0.3, 0.5, 0.7 and 0.9 quantiles are computed per draw, and the bands are "
+    r"their central 95\% intervals across draws. Word frequency is not part of the fitted "
+    r"design; lexicality enters through the favoured accumulator with a shared drift "
+    r"advantage for words and nonwords. The fitted model therefore does not represent "
+    r"frequency or lexicality effects beyond stimulus coding."
 )
 
 
@@ -478,14 +493,16 @@ def main_figure(require_figures=True):
     head = "% Generated by `python -m experiments.experiment_3.appendix_captions` -- do not edit by hand."
     if missing:
         head += f"\n% DRAFT: {', '.join(missing)} not yet in the snapshot. Do not commit."
+    else:
+        from .combined_figure import combine
+        combine(FINALS, FINALS / "main_figure.pdf")
     MAIN_OUT.write_text("\n".join([
         head,
         "% Main-text figure for Experiment 3. Needs \\usepackage{graphicx}; paths are relative to",
         "% outputs/finals/experiment-3/.",
         r"\begin{figure}[tbp]",
         r"  \centering",
-        rf"  \includegraphics[width=\textwidth]{{{MAIN_PATHS[0]}}}\par\vspace{{1ex}}",
-        rf"  \includegraphics[width=\textwidth]{{{MAIN_PATHS[1]}}}",
+        r"  \includegraphics[width=\textwidth]{main_figure.pdf}",
         rf"  \caption{{{MAIN.format(**vals)}}}",
         r"  \label{fig:exp3-main}",
         r"\end{figure}",
